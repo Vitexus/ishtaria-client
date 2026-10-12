@@ -742,6 +742,8 @@ func media_ready(url: String, resource: Resource) -> void:
 		model.scale *= CHARACTERS.GLTF_UNITS_PER_METRE
 		placement.add_child(model)
 		_attach_face(model)
+		# A rigged datadisk model breathes and looks around; one without clips stays as it is.
+		_animate(model, "Idle", String(_npc_entries[index].id))
 		var label := placement.get_node_or_null("Name") as Label3D
 		if label != null:
 			label.position = Vector3(0, CHARACTERS.head_height(model) * model.scale.y * 1.08, 0)
