@@ -129,6 +129,20 @@ func start(character: String, point: Vector3, coordinates: Dictionary = {}) -> v
 	sequence = -1
 	_last_position_ms = Time.get_ticks_msec()
 
+## The model of a datadisk arrived or was withdrawn: the avatar is made again, where it stands.
+func reload_avatar() -> void:
+	if not is_instance_valid(avatar) or _character.is_empty():
+		return
+	var fresh: Node3D = preload("res://scripts/character_catalog.gd").create_model(_character)
+	if fresh == null:
+		return
+	fresh.transform = avatar.transform
+	fresh.visible = avatar.visible
+	avatar.queue_free()
+	avatar = fresh
+	add_child(avatar)
+	_animation = avatar.get_node_or_null("CharacterAnimation")
+
 func stop() -> void:
 	active = false
 	moving = false

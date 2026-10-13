@@ -31,6 +31,13 @@ const GLTF_UNITS_PER_METRE := 2.09
 ## what a player holds is decided by the server's items, so they are not drawn.
 const QUATERNIUS_HELD_ITEMS := ["Pistol", "Sword"]
 const QUATERNIUS_CLIPS := {"idle": "Idle", "walk": "Run"}
+## A story datadisk may draw its own model for the character it gives every player (`player_model`):
+## the model once fetched, and the character it stands for. Until it arrives the pack look is drawn.
+static var disk_character := ""
+static var disk_model: PackedScene
+## The clips of such a model that stand in for the idle and walking actions (a glTF clip name may
+## carry a prefix before a `|`).
+const DISK_CLIPS := {"idle": "Idle", "walk": "Walk"}
 
 static func is_valid(character: String) -> bool:
 	var parts := character.split("/")
@@ -53,6 +60,10 @@ static func selectable(pack: String, keep := "") -> Array:
 static func create_model(character: String) -> Node3D:
 	if not is_valid(character):
 		return null
+	if is_disk_character(character):
+		var drawn := _create_disk_model()
+		if drawn != null:
+			return drawn
 	var parts := character.split("/")
 	if parts[0] == "quaternius":
 		return _create_gltf_model(parts[1])
@@ -75,6 +86,49 @@ static func create_model(character: String) -> Node3D:
 		player.name = "CharacterAnimation"
 		model.add_child(player)
 		player.add_animation_library("", library)
+		player.play("idle")
+	return model
+
+## Sets (or, with an empty id or no scene, clears) the model a datadisk draws for a character.
+static func set_disk_model(character: String, scene: PackedScene) -> void:
+	disk_character = character if scene != null and is_valid(character) else ""
+	disk_model = scene if not disk_character.is_empty() else null
+
+## Whether a datadisk's model is drawn for this character (it has arrived).
+static func is_disk_character(character: String) -> bool:
+	return disk_model != null and character == disk_character
+
+## A datadisk's model as a player: authored in metres, scaled to the client's units under a root the
+## callers may scale freely, with its idle and walking clips under the names the controls play.
+static func _create_disk_model() -> Node3D:
+	var inner := disk_model.instantiate() as Node3D
+	if inner == null:
+		return null
+	var model := Node3D.new()
+	inner.name = "Body"
+	inner.scale *= GLTF_UNITS_PER_METRE
+	model.add_child(inner)
+	var players := inner.find_children("*", "AnimationPlayer", true, false)
+	if players.is_empty():
+		return model
+	var player: AnimationPlayer = players[0]
+	var library := AnimationLibrary.new()
+	for action: String in DISK_CLIPS:
+		for candidate in player.get_animation_list():
+			if candidate == DISK_CLIPS[action] or candidate.ends_with("|" + DISK_CLIPS[action]):
+				var animation: Animation = player.get_animation(candidate).duplicate()
+				animation.loop_mode = Animation.LOOP_LINEAR
+				library.add_animation(action, animation)
+				break
+	for existing in player.get_animation_library_list():
+		player.remove_animation_library(existing)
+	player.add_animation_library("", library)
+	# The controls look for the player directly under the model; its tracks stay relative to the body.
+	player.get_parent().remove_child(player)
+	model.add_child(player)
+	player.root_node = NodePath("../Body")
+	player.name = "CharacterAnimation"
+	if library.has_animation("idle"):
 		player.play("idle")
 	return model
 

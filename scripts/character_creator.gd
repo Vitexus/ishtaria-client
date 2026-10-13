@@ -217,6 +217,11 @@ func set_selection(selected: String) -> void:
 			characters.select(index)
 	_show_model()
 
+## The model of a datadisk arrived or was withdrawn: the preview is drawn again.
+func refresh_model() -> void:
+	if not character.is_empty() and CATALOG.is_valid(character):
+		_show_model()
+
 func _fill_characters() -> void:
 	characters.clear()
 	_listed = CATALOG.selectable(CATALOG.PACKS[packs.selected], character)
@@ -242,7 +247,7 @@ func _show_model() -> void:
 	model = CATALOG.create_model(character)
 	_stage.add_child(model)
 	var height := 0.1
-	if character.begins_with("quaternius/"):
+	if character.begins_with("quaternius/") or CATALOG.is_disk_character(character):
 		# A skinned glTF mesh is drawn by its skeleton, so its mesh bounds say nothing about its size, and
 		# the head bone of a few models is off. All of them are scaled to a person of 1.8 metres.
 		height = 1.8 * CATALOG.GLTF_UNITS_PER_METRE

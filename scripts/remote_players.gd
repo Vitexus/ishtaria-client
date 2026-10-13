@@ -108,6 +108,11 @@ func apply(data: Variant) -> void:
 		if not seen.has(name):
 			_remove(name)
 
+## The model of a datadisk arrived or was withdrawn: the players are drawn again at the next poll.
+func refresh_models() -> void:
+	for name: String in _players.keys():
+		_remove(name)
+
 func _add(entry: Dictionary, target: Vector3) -> void:
 	var model := CHARACTERS.create_model(entry.character)
 	if model == null:

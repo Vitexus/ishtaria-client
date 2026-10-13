@@ -73,6 +73,47 @@ func _test_datadisk_character() -> void:
 	client._creator.lock_character("nowhere/nobody")
 	_check(client._creator.packs.visible, "An unknown character is ignored")
 	client.free()
+	_test_disk_model()
+
+## A datadisk's own model replaces the pack look of the character it was given for.
+func _test_disk_model() -> void:
+	const MODEL := preload("res://scripts/disk_player_model.gd")
+	var announced := MODEL.announced([{"id": "plain"}, {"id": "hero", "player_character": "protagonists/criminalMaleA", "player_model": "/story/media/hero/media/models/hero.glb"}])
+	_check(announced == ["protagonists/criminalMaleA", "/story/media/hero/media/models/hero.glb"], "The model of the first disk that names a character is announced")
+	_check(MODEL.announced([{"id": "hero", "player_character": "retro/humanMaleA", "player_model": "../../etc/passwd"}]) == ["retro/humanMaleA", ""], "A model outside the story media is refused")
+	_check(MODEL.announced([{"id": "plain"}]) == ["", ""], "Without a character there is no model")
+	var root_node := Node3D.new()
+	var body := Node3D.new()
+	body.name = "Body"
+	root_node.add_child(body)
+	body.owner = root_node
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	root_node.add_child(player)
+	player.owner = root_node
+	var library := AnimationLibrary.new()
+	for clip in ["Idle", "Walk"]:
+		var animation := Animation.new()
+		animation.length = 1.0
+		library.add_animation(clip, animation)
+	player.add_animation_library("", library)
+	var scene := PackedScene.new()
+	scene.pack(root_node)
+	root_node.free()
+	CATALOG.set_disk_model("nowhere/nobody", scene)
+	_check(not CATALOG.is_disk_character("nowhere/nobody"), "A character the catalog does not know gets no model")
+	CATALOG.set_disk_model("protagonists/criminalMaleA", scene)
+	_check(CATALOG.is_disk_character("protagonists/criminalMaleA") and not CATALOG.is_disk_character("retro/humanMaleA"), "The model belongs to its character only")
+	var model := CATALOG.create_model("protagonists/criminalMaleA")
+	var clips: AnimationPlayer = model.get_node_or_null("CharacterAnimation")
+	_check(clips != null and clips.has_animation("idle") and clips.has_animation("walk") and clips.is_playing(), "The model of a disk plays its Idle and Walk clips under the names of the controls")
+	_check(clips != null and clips.get_animation("walk").loop_mode == Animation.LOOP_LINEAR, "The walking clip loops")
+	model.free()
+	CATALOG.set_disk_model("", null)
+	_check(not CATALOG.is_disk_character("protagonists/criminalMaleA"), "The model can be withdrawn")
+	var plain := CATALOG.create_model("protagonists/criminalMaleA")
+	_check(plain.get_node_or_null("Body") == null, "Without a model the pack look is drawn")
+	plain.free()
 
 func _world_ready(client: Node) -> void:
 	client._connection_enabled = true

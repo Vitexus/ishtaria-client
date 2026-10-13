@@ -4,6 +4,7 @@ extends Node3D
 
 const PLANET_RADIUS := 6371.0 # scene units = km in this preview
 const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
+const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
 const MIN_SERVER_VERSION := "0.1.0"
 const APPROACH_SECONDS := 4.0
 const SURFACE_ALTITUDE_M := 120.0
@@ -59,6 +60,8 @@ var _system_messages: CanvasLayer
 var _disk_cover: CanvasLayer
 var _session: Node
 var _creator: CanvasLayer
+## The model a story datadisk draws for its players, fetched when the world announces it.
+var _player_model: Node
 var _player_button: Button
 var _sign_out_button: Button
 var _player_profile: Dictionary = {}
@@ -373,6 +376,9 @@ func _ready() -> void:
 	_creator.dismissed.connect(_disconnect_server)
 	_session.busy_changed.connect(_creator.set_busy)
 	add_child(_creator)
+	_player_model = DISK_PLAYER_MODEL.new()
+	_player_model.changed.connect(_on_player_model_changed)
+	add_child(_player_model)
 	_build_connection_controls()
 	var configured_url := OS.get_environment("ISHTARIA_SERVER_URL")
 	if not configured_url.is_empty():
@@ -964,6 +970,8 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	_load_terrain(world)
 	if _terrain_loaded:
 		_load_environment()
+	var given: Array = DISK_PLAYER_MODEL.announced(world.get("datadisks", []))
+	_player_model.use(_server_url, given[0], given[1])
 	_creator.lock_character(_disk_player_character(world))
 	_player_button.disabled = false
 	_reconnect.start()
@@ -980,6 +988,12 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 func _load_terrain(world: Dictionary) -> void:
 	var size: Variant = world.get("face_size")
 	if _terrain_loaded or is_instance_valid(_terrain_request) or not (size is int or size is float):
+## The model of the players arrived (or was withdrawn): everything that draws one is drawn again.
+func _on_player_model_changed() -> void:
+	_creator.refresh_model()
+	_controls.reload_avatar()
+	_remote_players.refresh_models()
+
 ## The character a datadisk of the world gives every new player; the first disk that says so wins,
 ## as on the server. Empty when players choose their own look.
 func _disk_player_character(world: Dictionary) -> String:
