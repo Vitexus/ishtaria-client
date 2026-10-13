@@ -27,6 +27,8 @@ var _camera: Camera3D
 var _form: MarginContainer
 var _band: ColorRect
 var _appearance: VBoxContainer
+## The character a story datadisk gives every new player ("" when players choose a look).
+var _locked := ""
 var _heading: Label
 var _feedback_key := ""
 var _rotating := false
@@ -178,10 +180,22 @@ func _label(parent: Node, text: String) -> void:
 	label.text = text
 	parent.add_child(label)
 
+## A datadisk may decide the character of its players (`player_character` of the disk the server
+## announces): the choice of a look is hidden and the preview shows that character. An empty or
+## unknown id gives the choice back.
+func lock_character(fixed: String) -> void:
+	_locked = fixed if CATALOG.is_valid(fixed) else ""
+	packs.visible = _locked.is_empty()
+	characters.visible = _locked.is_empty()
+	if not _locked.is_empty():
+		set_selection(_locked)
+
 func show_setup(nickname: String, selected: String, create := true) -> void:
 	nickname_input.text = nickname
 	password_input.clear()
 	mode.current_tab = 0 if create else 1
+	if not _locked.is_empty():
+		selected = _locked
 	set_selection(selected if CATALOG.is_valid(selected) else CATALOG.NEW_CHARACTER_DEFAULT)
 	set_feedback("")
 	show()

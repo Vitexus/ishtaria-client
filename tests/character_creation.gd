@@ -47,10 +47,32 @@ func _run() -> void:
 				_check(changed, character + " animation moves bones")
 			model.free()
 	await _test_creation()
+	await _test_datadisk_character()
 	await process_frame
 	await process_frame
 	print("Character creation: %s checks, %s failures" % [_checks, _failures])
 	quit(0 if _failures == 0 else 1)
+
+## A story datadisk may give every new player one character: the look choice disappears.
+func _test_datadisk_character() -> void:
+	var client := MAIN_SCENE.instantiate()
+	client._settings_path = "user://character-test-%s.cfg" % Time.get_ticks_usec()
+	root.add_child(client)
+	client._audio.set_enabled(false)
+	await process_frame
+	var plain := {"datadisks": [{"id": "plain"}]}
+	var fixed := {"datadisks": [{"id": "plain"}, {"id": "hero", "player_character": "protagonists/criminalMaleA"}, {"id": "late", "player_character": "retro/humanMaleA"}]}
+	_check(client._disk_player_character(plain) == "", "A disk without player_character leaves the choice to the player")
+	_check(client._disk_player_character(fixed) == "protagonists/criminalMaleA", "The first disk that names the character wins")
+	client._creator.lock_character(client._disk_player_character(fixed))
+	_check(not client._creator.packs.visible and not client._creator.characters.visible, "A given character hides the look choice")
+	client._creator.show_setup("Gilgamesh", "retro/humanFemaleA", true)
+	_check(client._creator.character == "protagonists/criminalMaleA", "A saved or default look cannot replace the given character")
+	client._creator.lock_character("")
+	_check(client._creator.packs.visible and client._creator.characters.visible, "Without a given character the choice returns")
+	client._creator.lock_character("nowhere/nobody")
+	_check(client._creator.packs.visible, "An unknown character is ignored")
+	client.free()
 
 func _world_ready(client: Node) -> void:
 	client._connection_enabled = true

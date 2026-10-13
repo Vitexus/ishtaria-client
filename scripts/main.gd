@@ -964,6 +964,7 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	_load_terrain(world)
 	if _terrain_loaded:
 		_load_environment()
+	_creator.lock_character(_disk_player_character(world))
 	_player_button.disabled = false
 	_reconnect.start()
 	if _connected_world != world.server_name:
@@ -979,6 +980,14 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 func _load_terrain(world: Dictionary) -> void:
 	var size: Variant = world.get("face_size")
 	if _terrain_loaded or is_instance_valid(_terrain_request) or not (size is int or size is float):
+## The character a datadisk of the world gives every new player; the first disk that says so wins,
+## as on the server. Empty when players choose their own look.
+func _disk_player_character(world: Dictionary) -> String:
+	for disk: Variant in world.get("datadisks", []):
+		if disk is Dictionary and disk.get("player_character") is String:
+			return disk.player_character
+	return ""
+
 		return
 	if size < 1 or size > 1024 or float(size) != floorf(float(size)):
 		return
