@@ -78,10 +78,10 @@ func _test_datadisk_character() -> void:
 ## A datadisk's own model replaces the pack look of the character it was given for.
 func _test_disk_model() -> void:
 	const MODEL := preload("res://scripts/disk_player_model.gd")
-	var announced := MODEL.announced([{"id": "plain"}, {"id": "hero", "player_character": "protagonists/criminalMaleA", "player_model": "/story/media/hero/media/models/hero.glb"}])
-	_check(announced == ["protagonists/criminalMaleA", "/story/media/hero/media/models/hero.glb"], "The model of the first disk that names a character is announced")
-	_check(MODEL.announced([{"id": "hero", "player_character": "retro/humanMaleA", "player_model": "../../etc/passwd"}]) == ["retro/humanMaleA", ""], "A model outside the story media is refused")
-	_check(MODEL.announced([{"id": "plain"}]) == ["", ""], "Without a character there is no model")
+	var announced := MODEL.announced([{"id": "plain"}, {"id": "hero", "player_character": "protagonists/criminalMaleA", "player_model": "/story/media/hero/media/models/hero.glb", "player_body": {"height_m": 3.0, "toughness": 1.5}}])
+	_check(announced == ["protagonists/criminalMaleA", "/story/media/hero/media/models/hero.glb", 3.0], "The model and height of the first disk that names a character are announced")
+	_check(MODEL.announced([{"id": "hero", "player_character": "retro/humanMaleA", "player_model": "../../etc/passwd", "player_body": {"height_m": 80.0}}]) == ["retro/humanMaleA", "", 0.0], "A model outside the story media and an absurd height are refused")
+	_check(MODEL.announced([{"id": "plain"}]) == ["", "", 0.0], "Without a character there is no model")
 	var root_node := Node3D.new()
 	var body := Node3D.new()
 	body.name = "Body"
@@ -102,7 +102,8 @@ func _test_disk_model() -> void:
 	root_node.free()
 	CATALOG.set_disk_model("nowhere/nobody", scene)
 	_check(not CATALOG.is_disk_character("nowhere/nobody"), "A character the catalog does not know gets no model")
-	CATALOG.set_disk_model("protagonists/criminalMaleA", scene)
+	CATALOG.set_disk_model("protagonists/criminalMaleA", scene, 3.0)
+	_check(absf(CATALOG.body_scale("protagonists/criminalMaleA") - 3.0 / 1.8) < 0.001 and CATALOG.body_scale("retro/humanMaleA") == 1.0, "A giant of a disk is drawn bigger than a man, a man is not")
 	_check(CATALOG.is_disk_character("protagonists/criminalMaleA") and not CATALOG.is_disk_character("retro/humanMaleA"), "The model belongs to its character only")
 	var model := CATALOG.create_model("protagonists/criminalMaleA")
 	var clips: AnimationPlayer = model.get_node_or_null("CharacterAnimation")

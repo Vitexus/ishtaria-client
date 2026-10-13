@@ -971,7 +971,7 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	if _terrain_loaded:
 		_load_environment()
 	var given: Array = DISK_PLAYER_MODEL.announced(world.get("datadisks", []))
-	_player_model.use(_server_url, given[0], given[1])
+	_player_model.use(_server_url, given[0], given[1], given[2])
 	_creator.lock_character(_disk_player_character(world))
 	_player_button.disabled = false
 	_reconnect.start()

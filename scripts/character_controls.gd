@@ -333,9 +333,11 @@ func update_camera(surface: Node, hud: Control = null) -> void:
 	if is_instance_valid(hud) and hud.is_visible_in_tree():
 		visible_fraction = clampf(hud.global_position.y / get_viewport().get_visible_rect().size.y, 0.25, 1.0)
 	var forward := heading()
-	var target := avatar.position + direction * 0.0015
+	# A giant of a datadisk is followed from higher up and further away.
+	var giant := preload("res://scripts/character_catalog.gd").body_scale(_character)
+	var target := avatar.position + direction * 0.0015 * giant
 	var view := forward * cos(pitch) + direction * sin(pitch)
-	camera.position = target - view * (distance_m / (1000.0 * visible_fraction))
+	camera.position = target - view * (distance_m * giant / (1000.0 * visible_fraction))
 	var coordinates: Array = _anchor_metres if origin != Vector3.ZERO else [0.0, 0.0, 0.0]
 	var absolute: Array[float] = []
 	for axis in 3:

@@ -35,6 +35,8 @@ const QUATERNIUS_CLIPS := {"idle": "Idle", "walk": "Run"}
 ## the model once fetched, and the character it stands for. Until it arrives the pack look is drawn.
 static var disk_character := ""
 static var disk_model: PackedScene
+## How tall the disk says that character stands, in metres (0: as the model was authored).
+static var disk_height_m := 0.0
 ## The clips of such a model that stand in for the idle and walking actions (a glTF clip name may
 ## carry a prefix before a `|`).
 const DISK_CLIPS := {"idle": "Idle", "walk": "Walk"}
@@ -90,9 +92,15 @@ static func create_model(character: String) -> Node3D:
 	return model
 
 ## Sets (or, with an empty id or no scene, clears) the model a datadisk draws for a character.
-static func set_disk_model(character: String, scene: PackedScene) -> void:
+static func set_disk_model(character: String, scene: PackedScene, height_m := 0.0) -> void:
 	disk_character = character if scene != null and is_valid(character) else ""
 	disk_model = scene if not disk_character.is_empty() else null
+	disk_height_m = height_m if disk_model != null and height_m > 0.0 else 0.0
+
+## How many times taller than a person of the creator (1.8 m) the character is drawn: a giant of a disk
+## is, a person is not.
+static func body_scale(character: String) -> float:
+	return disk_height_m / 1.8 if is_disk_character(character) and disk_height_m > 0.0 else 1.0
 
 ## Whether a datadisk's model is drawn for this character (it has arrived).
 static func is_disk_character(character: String) -> bool:
@@ -109,6 +117,11 @@ static func _create_disk_model() -> Node3D:
 	inner.scale *= GLTF_UNITS_PER_METRE
 	model.add_child(inner)
 	var players := inner.find_children("*", "AnimationPlayer", true, false)
+	if disk_height_m > 0.0:
+		# The disk says how tall the character stands: the model is made that tall, whatever it was authored at.
+		var authored := head_height(model)
+		if authored > 0.1:
+			inner.scale *= disk_height_m * GLTF_UNITS_PER_METRE / authored
 	if players.is_empty():
 		return model
 	var player: AnimationPlayer = players[0]
