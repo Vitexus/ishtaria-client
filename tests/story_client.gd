@@ -93,6 +93,30 @@ func _run() -> void:
 	environment._clear_objects()
 	_check(environment.npcs.get_child_count() == 0, "clearing the region removes the characters")
 
+	# A character of a datadisk that walks follows the route the server sent, plays its walking clip while it moves and
+	# its idle clip while it stands, and is found where it is.
+	var now_ms := Time.get_unix_time_from_system() * 1000.0
+	var walker := {"id": "x:walker", "name_key": "k.hello", "character": "retro/humanMaleA", "position": [6371000.0, 0.0, 0.0], "yaw": 0.0, "scale_m": 1.8,
+		"wander": [[now_ms - 10000.0, 6371000.0, 0.0, 0.0], [now_ms + 10000.0, 6371000.0, 20.0, 0.0], [now_ms + 60000.0, 6371000.0, 20.0, 0.0]]}
+	environment.apply_npcs([walker])
+	_check(environment._npc_walkers.size() == 1, "a character with a route walks")
+	environment._walk_npcs(0.1)
+	var walked: Array = environment._npc_entries[0].position
+	_check(walked[1] > 8.0 and walked[1] < 12.0, "it is half way along its first walk: %s" % str(walked))
+	_check(environment._npc_walkers[0].walking and environment._npc_walkers[0].player.current_animation == "walk", "it walks")
+	_check(environment.nearest_npc(Vector3(6371000.0, 10.0, 0.0), 4.5).get("id", "") == "x:walker", "it is found where it is, not where it was put")
+	var stood := walker.duplicate(true)
+	stood.wander = [[now_ms - 60000.0, 6371000.0, 20.0, 0.0], [now_ms + 60000.0, 6371000.0, 20.0, 0.0]]
+	environment.apply_npcs([stood])
+	environment._walk_npcs(0.1)
+	_check(not environment._npc_walkers[0].walking, "a character that stands does not walk")
+	var back := walker.duplicate(true)
+	back.wander = [[now_ms, 6371000.0, 0.0, 0.0], [now_ms - 1000.0, 6371000.0, 20.0, 0.0]]
+	environment.apply_npcs([back])
+	_check(environment._npc_walkers.is_empty(), "a route in which time runs back is refused")
+	environment._clear_objects()
+	_check(environment._npc_walkers.is_empty(), "clearing the region stops them")
+
 	# Props of generated places: known kit models are built, anything odd is skipped.
 	var prop := {"id": "world:town_00#1", "model": "town.wall", "position": [6371000.0, 5.0, 0.0], "yaw": 0.5, "scale_m": 2.5}
 	var bad_props := [

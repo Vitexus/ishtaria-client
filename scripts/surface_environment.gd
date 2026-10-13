@@ -63,11 +63,18 @@ var _night := 0.0
 var _lit_materials := {}
 var _lamp_time := 0.0
 var _prop_scenes: Dictionary = {}
+## Buildings that datadisks bring (`disk:<disk>:<path>`): the models fetched so far, and the
+## placements waiting for a model that is still being downloaded.
+var _structure_models: Dictionary = {}
+var _structure_waiting: Dictionary = {}
 ## Turns a translation key into text (set by the game once the story is loaded).
 var npc_text := Callable()
 ## Asks the story client for a media file (a character model); answered through `media_ready`.
 var fetch_media := Callable()
 var _npc_entries: Array = []
+## Characters of the story that walk along the waypoints the server sent: {"id", "index" (of _npc_entries and the
+## children of `npcs`), "route", "walking", "player" (the animation player of its model, or null)}.
+var _npc_walkers: Array[Dictionary] = []
 var portals: Node3D
 var target := Vector3.ZERO
 var server_url := ""
@@ -75,6 +82,11 @@ var objects_loaded := false
 var _origin_metres: Array = []
 var _models: Dictionary = {}
 var _objects_request: HTTPRequest
+## Landscape patches of datadisk places (ADR 0013): their metadata arrives with the region,
+## their 16-bit height and water grids are downloaded directly (Godot would load them as half
+## floats and lose the decimetre step) and replace the base terrain inside their rectangle.
+var _terrain_patches: Array = []
+var _terrain_requests: Dictionary = {}
 var _region_generation := 0
 var _scenes: Dictionary = {}
 var _detail_vertices := PackedVector3Array()
@@ -114,6 +126,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_swim()
 	_wander(delta)
+	_walk_npcs(delta)
 	_animals_elapsed += delta
 	if _animals_elapsed >= ANIMAL_REFRESH_S:
 		_animals_elapsed = 0.0
@@ -279,7 +292,8 @@ func elevation64(direction: Array) -> float:
 	var upper := lerpf(roundf(heightmap.get_pixel(offset + column, row).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), row).r * 255.0), horizontal - column)
 	var lower := lerpf(roundf(heightmap.get_pixel(offset + column, mini(row + 1, size - 1)).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), mini(row + 1, size - 1)).r * 255.0), horizontal - column)
 	var base := lerpf(upper, lower, vertical - row) * 16000.0 / 255.0 - 8000.0
-	return (base + (relief64(direction, base, environment.seed) if environment.get("version") == 2 else 0.0)) / 1000.0
+	var metres := base + (relief64(direction, base, environment.seed) if environment.get("version") == 2 else 0.0)
+	return (metres + _terrain_offset_m(direction, metres)) / 1000.0
 
 func environment_index(direction: Vector3) -> int:
 	var mapped := coordinates(direction)
@@ -417,7 +431,8 @@ func _build_detail() -> void:
 				direction[axis] /= length64
 			var point := Vector3(direction[0], direction[1], direction[2])
 			var height := elevation64(direction)
-			var water := float(environment.water_m[environment_index(point)]) / 1000.0 + 0.001
+			var patch_water := _terrain_water_m(direction)
+			var water := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(point)])) / 1000.0 + 0.001
 			tool.set_normal(point)
 			tool.set_uv2(Vector2(height, 0))
 			tool.add_vertex(_render_position([direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0]))
@@ -539,6 +554,8 @@ func apply_objects(data: Variant) -> bool:
 	apply_npcs(data.get("npcs", []))
 	apply_props(data.get("props", []))
 	apply_areas(data.get("areas", []))
+	if not apply_terrains(data.get("terrains", [])):
+		return false
 	objects_loaded = true
 	return true
 
@@ -718,6 +735,10 @@ func apply_npcs(data: Variant) -> bool:
 		placement.add_child(label)
 		npcs.add_child(placement)
 		_npc_entries.append(entry.duplicate(true))
+		if entry.has("wander"):
+			var route := _parse_route(entry.wander)
+			if not route.is_empty():
+				_npc_walkers.append({"id": entry.id, "index": _npc_entries.size() - 1, "route": route, "walking": false, "player": _npc_player(model)})
 		if entry.get("model") != null and fetch_media.is_valid() and preload("res://scripts/story_client.gd").valid_media_url(entry.model) and entry.model.ends_with(".glb"):
 			fetch_media.call(entry.model)
 	return true
@@ -726,6 +747,9 @@ func apply_npcs(data: Variant) -> bool:
 ## Only the NPCs of the current region are looked at, so a late answer cannot change anything else.
 func media_ready(url: String, resource: Resource) -> void:
 	if not resource is PackedScene or not url.ends_with(".glb"):
+		return
+	if _structure_waiting.has(url):
+		_structure_ready(url, resource)
 		return
 	for index in _npc_entries.size():
 		if _npc_entries[index].get("model") != url:
@@ -743,10 +767,279 @@ func media_ready(url: String, resource: Resource) -> void:
 		placement.add_child(model)
 		_attach_face(model)
 		# A rigged datadisk model breathes and looks around; one without clips stays as it is.
-		_animate(model, "Idle", String(_npc_entries[index].id))
+		var clips := _animate(model, "Idle", String(_npc_entries[index].id))
+		for walker in _npc_walkers:
+			if walker.index == index:
+				walker.player = clips
+				walker.walking = false
 		var label := placement.get_node_or_null("Name") as Label3D
 		if label != null:
 			label.position = Vector3(0, CHARACTERS.head_height(model) * model.scale.y * 1.08, 0)
+
+## Landscape patches the server announces for the region (ADR 0013). Their grids are the
+## disk's own 16-bit PNGs, fetched apart from `fetch_media` (which would hand over Godot's
+## half-float image and lose the decimetre step), and kept while the region keeps naming them.
+func apply_terrains(data: Variant) -> bool:
+	if not data is Array or data.size() > 8:
+		return false
+	var patches := []
+	for entry: Variant in data:
+		if not entry is Dictionary or not entry.get("place") is String or entry.place.is_empty() \
+				or not entry.get("position") is Array or entry.position.size() != 3:
+			return false
+		for value: Variant in entry.position:
+			if not (value is float or value is int) or not is_finite(float(value)) or absf(float(value)) > 7000000.0:
+				return false
+		if not entry.get("height_m") is float or not is_finite(entry.height_m):
+			return false
+		if not entry.get("extent_m") is Array or entry.extent_m.size() != 2 or not entry.get("offset_m") is Array or entry.offset_m.size() != 2:
+			return false
+		for key in ["extent_m", "offset_m"]:
+			for value: Variant in entry[key]:
+				if not (value is float or value is int) or not is_finite(float(value)):
+					return false
+		if entry.extent_m[0] < 100.0 or entry.extent_m[0] > 10000.0 or entry.extent_m[1] < 100.0 or entry.extent_m[1] > 10000.0:
+			return false
+		if absf(float(entry.offset_m[0])) > 5000.0 or absf(float(entry.offset_m[1])) > 5000.0:
+			return false
+		if not entry.get("feather_m") is float or not is_finite(entry.feather_m) or entry.feather_m < 10.0 or entry.feather_m > 500.0:
+			return false
+		if not entry.get("visible_m") is float or not is_finite(entry.visible_m) or entry.visible_m < 100.0 or entry.visible_m > 5000.0:
+			return false
+		if not entry.get("heightmap") is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.heightmap) or not entry.heightmap.ends_with(".png"):
+			return false
+		if entry.get("water") != null and (not entry.water is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.water) or not entry.water.ends_with(".png")):
+			return false
+		var anchor := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
+		patches.append({
+			"place": entry.place,
+			"anchor": [anchor.x, anchor.y, anchor.z],
+			"anchor_height_m": float(entry.height_m),
+			"extent": [float(entry.extent_m[0]), float(entry.extent_m[1])],
+			"offset": [float(entry.offset_m[0]), float(entry.offset_m[1])],
+			"feather": float(entry.feather_m),
+			# The axes turn a unit direction: the anchor is a position, not yet one.
+			"axes": _terrain_axes([anchor.normalized().x, anchor.normalized().y, anchor.normalized().z]),
+			"heightmap_url": entry.heightmap,
+			"water_url": entry.get("water", ""),
+			"grid": null,
+			"water_grid": null,
+			"width": 0,
+			"height": 0
+		})
+	for patch: Dictionary in patches:
+		var old: Dictionary = {}
+		for previous: Dictionary in _terrain_patches:
+			if previous.place == patch.place:
+				old = previous
+		if not old.is_empty() and old.heightmap_url == patch.heightmap_url and old.water_url == patch.water_url:
+			patch.grid = old.grid
+			patch.water_grid = old.water_grid
+			patch.width = old.width
+			patch.height = old.height
+	_terrain_patches = patches
+	var rebuild := false
+	for patch: Dictionary in patches:
+		if patch.grid == null:
+			_terrain_fetch(patch.heightmap_url)
+		else:
+			rebuild = true
+		if patch.water_url != "" and patch.water_grid == null:
+			_terrain_fetch(patch.water_url)
+	if rebuild:
+		_build_detail()
+	return true
+
+## Downloads one terrain grid; the answer is decoded into the patch that asked for it.
+func _terrain_fetch(url: String) -> void:
+	if server_url.is_empty() or _terrain_requests.has(url) or url.is_empty():
+		return
+	var request := HTTPRequest.new()
+	request.timeout = 15.0
+	request.max_redirects = 0
+	request.body_size_limit = 4 << 20
+	_terrain_requests[url] = request
+	add_child(request)
+	request.request_completed.connect(_terrain_received.bind(url))
+	if request.request(server_url + url) != OK:
+		request.queue_free()
+		_terrain_requests.erase(url)
+
+func _terrain_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, url: String) -> void:
+	if _terrain_requests.get(url) is HTTPRequest:
+		(_terrain_requests[url] as HTTPRequest).queue_free()
+		_terrain_requests.erase(url)
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	var grid := _terrain_decode_png16(body)
+	if grid.is_empty():
+		return
+	for patch: Dictionary in _terrain_patches:
+		var water: bool = url == String(patch.water_url)
+		if not water and url != String(patch.heightmap_url):
+			continue
+		if patch.width > 0 and (patch.width != grid[0] or patch.height != grid[1]):
+			continue
+		patch.width = grid[0]
+		patch.height = grid[1]
+		if water:
+			patch.water_grid = grid[2]
+		else:
+			patch.grid = grid[2]
+	_build_detail()
+
+## A minimal 16-bit greyscale PNG decoder (no interlace): Godot's own loader keeps only a half
+## float per pixel and would flatten the decimetre step the patch is built of. One row is the
+## PNG filter byte followed by big-endian 16-bit samples; values come back shifted by -32768.
+func _terrain_decode_png16(body: PackedByteArray) -> Array:
+	if body.size() < 64 or body.slice(0, 8) != PackedByteArray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]):
+		return []
+	var offset := 8
+	var width := 0
+	var height := 0
+	var depth := 0
+	var color := 0
+	var interlace := 0
+	var compressed := PackedByteArray()
+	while offset + 8 <= body.size():
+		var length := int(body[offset]) << 24 | int(body[offset + 1]) << 16 | int(body[offset + 2]) << 8 | int(body[offset + 3])
+		var kind := body.slice(offset + 4, offset + 8).get_string_from_ascii()
+		offset += 8
+		if kind == "IHDR":
+			var header := body.slice(offset, offset + length)
+			width = int(header[0]) << 24 | int(header[1]) << 16 | int(header[2]) << 8 | int(header[3])
+			height = int(header[4]) << 24 | int(header[5]) << 16 | int(header[6]) << 8 | int(header[7])
+			depth = header[8]
+			color = header[9]
+			interlace = header[12]
+		elif kind == "IDAT":
+			compressed.append_array(body.slice(offset, offset + length))
+		offset += length + 4
+	if depth != 16 or color != 0 or interlace != 0 or width < 16 or height < 16 or width * height > 4 << 20:
+		return []
+	var stride := width * 2
+	# Compression mode 1 is DEFLATE (zlib), matching the PNG IDAT stream.
+	var raw := compressed.decompress((stride + 1) * height, 1)
+	if raw.size() != (stride + 1) * height:
+		return []
+	var rows := PackedByteArray()
+	rows.resize(stride * height)
+	for row in height:
+		var filter := raw[row * (stride + 1)]
+		var source := row * (stride + 1) + 1
+		var target := row * stride
+		for column in stride:
+			var value := int(raw[source + column])
+			# PNG unfiltering works on reconstructed bytes: two back is the same channel (bpp = 2).
+			var left := int(rows[target + column - 2]) if column >= 2 else 0
+			var above := int(rows[target - stride + column]) if row > 0 else 0
+			var above_left := int(rows[target - stride + column - 2]) if row > 0 and column >= 2 else 0
+			match filter:
+				0:
+					pass
+				1:
+					value = (value + left) & 0xFF
+				2:
+					value = (value + above) & 0xFF
+				3:
+					value = (value + ((left + above) >> 1)) & 0xFF
+				4:
+					var distance := left + above - above_left
+					var left_miss := absi(distance - left)
+					var above_miss := absi(distance - above)
+					var corner_miss := absi(distance - above_left)
+					var near := left
+					if above_miss < left_miss or corner_miss < left_miss:
+						near = above if above_miss <= corner_miss else above_left
+					value = (value + near) & 0xFF
+				_:
+					return []
+			rows[target + column] = value
+	var grid := PackedFloat32Array()
+	grid.resize(width * height)
+	for pixel in width * height:
+		grid[pixel] = float((int(rows[pixel * 2]) << 8 | int(rows[pixel * 2 + 1])) - 32768)
+	return [width, height, grid]
+
+## The client's local +X and +Z axes of a patch anchor, mirroring the server's `client_axes`
+## (a Rodrigues turn of the world axes about the axis from +Y to the anchor).
+func _terrain_axes(up: Array) -> Array:
+	var cos_v := clampf(float(up[1]), -1.0, 1.0)
+	var axis := [float(up[2]), 0.0, -float(up[0])]
+	var norm := sqrt(axis[0] * axis[0] + axis[2] * axis[2])
+	if norm < 1.0e-12:
+		return [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] if cos_v > 0.0 else [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0]]
+	var k := [axis[0] / norm, 0.0, axis[2] / norm]
+	var sin_v := sqrt(1.0 - cos_v * cos_v)
+	var rotate := func(vector: Array) -> Array:
+		var cross := [k[1] * vector[2] - k[2] * vector[1], k[2] * vector[0] - k[0] * vector[2], k[0] * vector[1] - k[1] * vector[0]]
+		var dot: float = k[0] * float(vector[0]) + k[1] * float(vector[1]) + k[2] * float(vector[2])
+		var turned := []
+		for axis_index in 3:
+			turned.append(vector[axis_index] * cos_v + cross[axis_index] * sin_v + k[axis_index] * dot * (1.0 - cos_v))
+		return turned
+	return [rotate.call([1.0, 0.0, 0.0]), rotate.call([0.0, 0.0, 1.0])]
+
+## Local metres of a direction from a patch's centre and its blend weight (1.0 in the feathered
+## core, easing to 0.0 at the edge), or an empty array outside the patch.
+func _terrain_local(patch: Dictionary, direction: Array) -> Array:
+	var axes: Array = patch.axes
+	var x := 6371000.0 * (float(direction[0]) * float(axes[0][0]) + float(direction[1]) * float(axes[0][1]) + float(direction[2]) * float(axes[0][2])) - float(patch.offset[0])
+	var z := 6371000.0 * (float(direction[0]) * float(axes[1][0]) + float(direction[1]) * float(axes[1][1]) + float(direction[2]) * float(axes[1][2])) - float(patch.offset[1])
+	var half_x := float(patch.extent[0]) * 0.5
+	var half_z := float(patch.extent[1]) * 0.5
+	if absf(x) > half_x or absf(z) > half_z:
+		return []
+	var ease := func(distance: float, edge: float) -> float:
+		var weight := clampf((edge - distance) / float(patch.feather), 0.0, 1.0)
+		return weight * weight * (3.0 - 2.0 * weight)
+	return [x, z, ease.call(absf(x), half_x) * ease.call(absf(z), half_z)]
+
+## How many metres the landscape patches shift the ground in a direction (0.0 without a patch),
+## blending the patch over the base terrain across the feather margin.
+func _terrain_offset_m(direction: Array, metres: float) -> float:
+	for patch: Dictionary in _terrain_patches:
+		if patch.grid == null:
+			continue
+		var local: Array = _terrain_local(patch, direction)
+		if local.is_empty() or local[2] == 0.0:
+			continue
+		var grid: PackedFloat32Array = patch.grid
+		var width := int(patch.width)
+		var height := int(patch.height)
+		var horizontal := clampf((float(local[0]) + float(patch.extent[0]) * 0.5) / float(patch.extent[0]) * width - 0.5, 0.0, width - 1)
+		var vertical := clampf((float(local[1]) + float(patch.extent[1]) * 0.5) / float(patch.extent[1]) * height - 0.5, 0.0, height - 1)
+		var column := int(horizontal)
+		var row := int(vertical)
+		var corner := func(at_column: int, at_row: int) -> float:
+			return float(grid[at_row * width + mini(at_column, width - 1)])
+		var west: float = corner.call(column, row)
+		var east: float = corner.call(column + 1, row)
+		var north: float = corner.call(column, row + 1)
+		var south: float = corner.call(column + 1, row + 1)
+		var upper: float = west + (east - west) * (horizontal - column)
+		var lower: float = north + (south - north) * (horizontal - column)
+		var sample: float = upper + (lower - upper) * (vertical - row)
+		var patched: float = float(patch.anchor_height_m) + sample * 0.1
+		return (patched - metres) * float(local[2])
+	return 0.0
+
+## The water surface of a patch in a direction, in metres, or `NAN` where no patch says water.
+func _terrain_water_m(direction: Array) -> float:
+	for patch: Dictionary in _terrain_patches:
+		if patch.water_grid == null:
+			continue
+		var local: Array = _terrain_local(patch, direction)
+		if local.is_empty():
+			continue
+		var width := int(patch.width)
+		var height := int(patch.height)
+		var column := int(clampf((float(local[0]) + float(patch.extent[0]) * 0.5) / float(patch.extent[0]) * width, 0.0, width - 1))
+		var row := int(clampf((float(local[1]) + float(patch.extent[1]) * 0.5) / float(patch.extent[1]) * height, 0.0, height - 1))
+		var level: float = (patch.water_grid as PackedFloat32Array)[row * width + column]
+		if level > -32768.0:
+			return float(patch.anchor_height_m) + level * 0.1
+	return NAN
 
 ## A model with blend shapes for the eyes and the mouth blinks and talks.
 func _attach_face(model: Node3D) -> void:
@@ -780,6 +1073,16 @@ static func prop_path(model: Variant) -> String:
 		if not ResourceLoader.exists(path):
 			path = "res://assets/quaternius/buildings/Models/%s.glb" % parts[1]
 	return path if ResourceLoader.exists(path) else ""
+
+## The media URL of a datadisk building (`disk:<disk>:<path>`), or an empty string.
+static func structure_url(model: Variant) -> String:
+	if not model is String or model.length() > 160 or not model.begins_with("disk:"):
+		return ""
+	var parts: PackedStringArray = model.split(":")
+	if parts.size() != 3 or parts[1].is_empty() or not parts[2].begins_with("media/models/") or not parts[2].ends_with(".glb"):
+		return ""
+	var url := "/story/media/%s/%s" % [parts[1], parts[2]]
+	return url if preload("res://scripts/story_client.gd").valid_media_url(url) else ""
 
 ## Buildings and props of the places nearby. A malformed or unknown entry is skipped.
 ## Places with background music near the player: id, centre (metres), radius and track.
@@ -822,7 +1125,8 @@ func apply_props(data: Variant) -> bool:
 		if not entry is Dictionary or not entry.get("id") is String or not entry.get("position") is Array or entry.position.size() != 3:
 			continue
 		var path := prop_path(entry.get("model"))
-		var finite := not path.is_empty()
+		var url := structure_url(entry.get("model"))
+		var finite := not path.is_empty() or not url.is_empty()
 		for value: Variant in entry.get("position", []):
 			finite = finite and (value is float or value is int) and is_finite(float(value)) and absf(value) <= 7000000.0
 		for key in ["yaw", "scale_m"]:
@@ -832,16 +1136,22 @@ func apply_props(data: Variant) -> bool:
 		var point := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
 		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
 			continue
+		var placement := Node3D.new()
+		placement.position = _render_position(entry.position)
+		placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
+		placement.scale = Vector3.ONE * float(entry.scale_m) / 1000.0
+		if not url.is_empty():
+			props.add_child(placement)
+			_prop_entries.append(entry.duplicate(true))
+			_place_structure(placement, url)
+			continue
 		if not _prop_scenes.has(path):
 			_prop_scenes[path] = load(path)
 		var model: Node = (_prop_scenes[path] as PackedScene).instantiate()
 		if not model is Node3D:
 			model.free()
+			placement.free()
 			continue
-		var placement := Node3D.new()
-		placement.position = _render_position(entry.position)
-		placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
-		placement.scale = Vector3.ONE * float(entry.scale_m) / 1000.0
 		_light_materials(model)
 		placement.add_child(model)
 		props.add_child(placement)
@@ -849,6 +1159,33 @@ func apply_props(data: Variant) -> bool:
 		if LAMP_MODELS.has(entry.model):
 			_add_lamp(entry)
 	return true
+
+## A datadisk building is drawn when its model is here; until then the placement stays empty.
+func _place_structure(placement: Node3D, url: String) -> void:
+	if _structure_models.has(url):
+		_fill_structure(placement, _structure_models[url])
+		return
+	var first := not _structure_waiting.has(url)
+	if first:
+		_structure_waiting[url] = []
+	# Placements of an earlier region may be gone by now.
+	_structure_waiting[url] = _structure_waiting[url].filter(func(node: Variant) -> bool: return is_instance_valid(node))
+	_structure_waiting[url].append(placement)
+	if first and fetch_media.is_valid():
+		fetch_media.call(url)
+
+func _fill_structure(placement: Node3D, scene: PackedScene) -> void:
+	var model := scene.instantiate() as Node3D
+	if model != null:
+		placement.add_child(model)
+
+## A building model arrived: it fills the placements that waited for it.
+func _structure_ready(url: String, scene: PackedScene) -> void:
+	_structure_models[url] = scene
+	for placement: Variant in _structure_waiting.get(url, []):
+		if is_instance_valid(placement):
+			_fill_structure(placement, scene)
+	_structure_waiting.erase(url)
 
 ## Some kit models (Retro Fantasy barrels, crates, shrubs and trees) are authored unshaded, so they would
 ## keep their daylight colour at night. Their materials are replaced by lit copies, one per original.
@@ -996,6 +1333,7 @@ func refresh_npc_names() -> void:
 
 func _clear_npcs() -> void:
 	_npc_entries.clear()
+	_npc_walkers.clear()
 	for child in npcs.get_children():
 		npcs.remove_child(child)
 		child.queue_free()
@@ -1133,9 +1471,58 @@ func _wander(delta: float) -> void:
 				if walking:
 					walker.player.speed_scale = 1.0
 
+## The animation player of a character's model: the pack characters name it, a datadisk's model has its own.
+func _npc_player(model: Node) -> AnimationPlayer:
+	var named := model.get_node_or_null("CharacterAnimation") as AnimationPlayer
+	if named != null:
+		return named
+	var players := model.find_children("*", "AnimationPlayer", true, false)
+	return players[0] if not players.is_empty() else null
+
+## Plays the walking or the idle clip of a character, whatever case and armature prefix its model gives them.
+func _play_npc(player: AnimationPlayer, walking: bool) -> void:
+	if player == null:
+		return
+	var wanted := "walk" if walking else "idle"
+	for candidate in player.get_animation_list():
+		var lower := String(candidate).to_lower()
+		if lower == wanted or lower.ends_with("|" + wanted):
+			player.get_animation(candidate).loop_mode = Animation.LOOP_LINEAR
+			player.speed_scale = 1.0
+			player.play(candidate, 0.2)
+			return
+
+## Walks the characters that walk along their routes: they turn towards where they go and play the walking
+## clip while they move and the idle one while they stand. Their entry follows them, so that talking to them,
+## the minimap and the next render origin all find them where they are.
+func _walk_npcs(delta: float) -> void:
+	if _npc_walkers.is_empty():
+		return
+	var now := Time.get_unix_time_from_system() * 1000.0 + _clock_offset_ms
+	for walker in _npc_walkers:
+		var index: int = walker.index
+		if index >= npcs.get_child_count() or index >= _npc_entries.size():
+			continue
+		var node := npcs.get_child(index) as Node3D
+		var sample := _route_sample(walker.route, now)
+		var metres: Vector3 = sample[0]
+		var velocity: Vector3 = sample[1]
+		node.position = _render_position([metres.x, metres.y, metres.z])
+		_npc_entries[index].position = [metres.x, metres.y, metres.z]
+		var walking := velocity.length() > 0.05
+		if walking:
+			var up := metres.normalized()
+			var forward := (velocity - up * velocity.dot(up)).normalized()
+			# Models face +Z, and a basis that looks at a point has -Z pointing there.
+			var facing := Basis.looking_at(-forward, up).get_rotation_quaternion()
+			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 5.0))
+		if walking != walker.walking:
+			walker.walking = walking
+			_play_npc(walker.player, walking)
+
 ## Asks the server for the routes of the animals again, without rebuilding the region.
 func _request_animals() -> void:
-	if server_url.is_empty() or target == Vector3.ZERO or not objects_loaded or _walkers.is_empty() or is_instance_valid(_animals_request):
+	if server_url.is_empty() or target == Vector3.ZERO or not objects_loaded or (_walkers.is_empty() and _npc_walkers.is_empty()) or is_instance_valid(_animals_request):
 		return
 	_animals_request = HTTPRequest.new()
 	_animals_request.timeout = 8.0
@@ -1167,6 +1554,16 @@ func _on_animals_received(result: int, code: int, _headers: PackedStringArray, b
 	for walker in _walkers:
 		if routes.has(walker.id):
 			walker.route = routes[walker.id]
+	if data.get("npcs") is Array:
+		var walks := {}
+		for entry: Variant in data.npcs:
+			if entry is Dictionary and entry.get("id") is String and entry.has("wander"):
+				var route := _parse_route(entry.wander)
+				if not route.is_empty():
+					walks[entry.id] = route
+		for walker in _npc_walkers:
+			if walks.has(walker.id):
+				walker.route = walks[walker.id]
 
 ## The nearest walking animal within reach of a server position in metres.
 func nearest_animal(player_metres: Vector3, reach_m: float) -> Dictionary:
