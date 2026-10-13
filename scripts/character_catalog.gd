@@ -125,6 +125,7 @@ static func _create_disk_model() -> Node3D:
 	player.add_animation_library("", library)
 	# The controls look for the player directly under the model; its tracks stay relative to the body.
 	player.get_parent().remove_child(player)
+	player.owner = null
 	model.add_child(player)
 	player.root_node = NodePath("../Body")
 	player.name = "CharacterAnimation"
