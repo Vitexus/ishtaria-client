@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Vítězslav Dvořák <cybervitexus@gmail.com>
 Build-Depends: debhelper-compat (= 13), godot4 (>= 4.5), godot4-export-templates (>= 4.5)
 Standards-Version: 4.7.0
-Homepage: https://github.com/VitexSoftware/ishtaria-client
+Homepage: https://git.vitexsoftware.com/Ishtaria/ishtaria-client
 Rules-Requires-Root: no
 
 Package: ishtaria-client

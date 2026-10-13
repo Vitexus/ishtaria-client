@@ -13,7 +13,7 @@
   <provides>
     <binary>ishtaria-client</binary>
   </provides>
-  <url type="homepage">https://github.com/VitexSoftware/ishtaria-client</url>
+  <url type="homepage">https://git.vitexsoftware.com/Ishtaria/ishtaria-client</url>
   <developer id="com.vitexsoftware">
     <name>VitexSoftware</name>
   </developer>

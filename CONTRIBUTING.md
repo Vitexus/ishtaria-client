@@ -2,7 +2,7 @@
 
 Thank you. ishtaria-client is the Godot 4.5 game client: rendering, input, windows, local preferences.
 
-1. Read the [developer guide](https://github.com/VitexSoftware/ishtaria-docs/tree/main/source/development): `invariants` (short, binding), `local-setup`, `cookbook`.
+1. Read the [developer guide](https://git.vitexsoftware.com/Ishtaria/ishtaria-docs/src/branch/main/source/development): `invariants` (short, binding), `local-setup`, `cookbook`.
 2. Open an issue for anything larger than a fix; architectural changes are written as a decision record first.
 3. Make a small change with a test that fails without it (also for the refusal paths) and run the checks:
 
