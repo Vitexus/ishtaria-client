@@ -6,7 +6,11 @@ const PLANET_RADIUS := 6371.0 # scene units = km in this preview
 const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
 const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
 const MIN_SERVER_VERSION := "0.1.0"
-const APPROACH_SECONDS := 4.0
+const APPROACH_SECONDS := 14.0
+## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
+## looking straight down, so that the plan of a city (streets, walls) can be seen before the landing.
+const APPROACH_FALL_SHARE := 0.4
+const APPROACH_OVERVIEW_KM := 4.0
 const SURFACE_ALTITUDE_M := 120.0
 ## Slightly below the server reach, so a request made at the edge is not refused.
 const HARVEST_REACH_M := 3.6
@@ -79,9 +83,12 @@ var _merchant_name := ""
 var _trade_panel: CanvasLayer
 var _story: Node
 var _dialogue: CanvasLayer
+## The character the player is talking to (it is held still, see `hold_npc` of the environment).
+var _dialogue_npc := ""
 var _quest_log: CanvasLayer
 var _quest_compass: CanvasLayer
 var _minimap: CanvasLayer
+var _story_markers: Array = []
 var _quest_stages: Dictionary = {}
 var _quests_baseline := false
 ## A tool the player chose to use from the inventory that is still being put in hand.
@@ -102,6 +109,11 @@ var _survival: CanvasLayer
 var _startup_pending := true
 var _surface_direction := Vector3.ZERO
 var _approach_elapsed := 0.0
+## The last part of the landing: the camera flies from the overview above the player to the view behind them (`_settle_into_view`);
+## negative when it is not on.
+const SETTLE_SECONDS := 3.5
+var _settle_elapsed := -1.0
+var _settle_from := Transform3D.IDENTITY
 var _approach_start := Vector3.ZERO
 var _approach_up := Vector3.UP
 var _approach_rotation := Quaternion.IDENTITY
@@ -362,9 +374,13 @@ func _ready() -> void:
 	_quest_compass.story = _story
 	add_child(_quest_compass)
 	_story.markers_changed.connect(_quest_compass.set_markers)
-	_story.markers_changed.connect(_update_minimap_entities)
+	_story.markers_changed.connect(_on_story_markers_changed)
+	_environment.npcs_changed.connect(_refresh_minimap_entities)
+	_story.strings_changed.connect(_refresh_minimap_entities)
 	_minimap = preload("res://scripts/minimap.gd").new()
 	_minimap.set_environment(_environment)
+	_environment.props_changed.connect(_refresh_minimap_props)
+	_environment.water_changed.connect(_refresh_minimap_water)
 	add_child(_minimap)
 	_hud.inventory_requested.connect(_survival.open)
 	_hud.connection_requested.connect(_toggle_connection_panel)
@@ -383,6 +399,12 @@ func _ready() -> void:
 	var configured_url := OS.get_environment("ISHTARIA_SERVER_URL")
 	if not configured_url.is_empty():
 		_server_url = configured_url
+	# In the browser the page says where the server is: `play/?server=https://world.example` or `?server=/server` (a path on the
+	# page's own origin, which a reverse proxy forwards to the server, so that no CORS is needed).
+	if OS.has_feature("web") and ClassDB.class_exists("JavaScriptBridge"):
+		var page_server := web_server_address(str(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('server') || ''")), str(JavaScriptBridge.eval("window.location.origin")))
+		if not page_server.is_empty() and not _normalize_server_url(page_server).is_empty():
+			_server_url = page_server
 	_server_input.text = _server_url
 	_reconnect = Timer.new()
 	_reconnect.wait_time = 5.0
@@ -620,6 +642,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_surface_direction = Vector3.ZERO
 		_environment.show_region(Vector3.ZERO)
 		_approach_elapsed = 0.0
+		_settle_elapsed = -1.0
 		_sky.set_altitude(PLANET_RADIUS * 2000.0)
 		var signed_out := not _player_profile.is_empty()
 		_player_profile = {}
@@ -684,6 +707,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 	if not _start_approach(profile.get("position")):
 		_surface_direction = Vector3.ZERO
 		_approach_elapsed = 0.0
+		_settle_elapsed = -1.0
 		_sky.set_altitude(PLANET_RADIUS * 2000.0)
 		_connection_panel.show()
 		_set_feedback("Player position unavailable")
@@ -758,6 +782,18 @@ func _set_feedback(message: String) -> void:
 		_audio.play("error")
 	_feedback_key = message
 	_update_translations()
+
+## The server address the page of the web client asks for (`?server=`): an absolute address as it is, a path (`/server`) on the origin
+## of the page, anything else (empty, a scheme other than http or https, a protocol-relative `//host`) nothing.
+static func web_server_address(parameter: String, origin: String) -> String:
+	var value := parameter.strip_edges()
+	if value.is_empty() or value.length() > 200:
+		return ""
+	if value.begins_with("/") and not value.begins_with("//") and origin.begins_with("http"):
+		return origin.trim_suffix("/") + value
+	if value.begins_with("http://") or value.begins_with("https://"):
+		return value
+	return ""
 
 func _normalize_server_url(address: String) -> String:
 	var url := address.strip_edges().trim_suffix("/")
@@ -967,12 +1003,12 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	_system_messages.apply(world.get("messages", []))
 	_set_status("%s | %s | seed %s", [world.server_name, world.ruleset, world.get("seed", "-")])
 	_world_metadata = world.duplicate(true)
-	_load_terrain(world)
-	if _terrain_loaded:
-		_load_environment()
 	var given: Array = DISK_PLAYER_MODEL.announced(world.get("datadisks", []))
 	_player_model.use(_server_url, given[0], given[1], given[2])
 	_creator.lock_character(_disk_player_character(world))
+	_load_terrain(world)
+	if _terrain_loaded:
+		_load_environment()
 	_player_button.disabled = false
 	_reconnect.start()
 	if _connected_world != world.server_name:
@@ -985,9 +1021,6 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	if _startup_pending and _player_profile.is_empty():
 		_open_player()
 
-func _load_terrain(world: Dictionary) -> void:
-	var size: Variant = world.get("face_size")
-	if _terrain_loaded or is_instance_valid(_terrain_request) or not (size is int or size is float):
 ## The model of the players arrived (or was withdrawn): everything that draws one is drawn again.
 func _on_player_model_changed() -> void:
 	_creator.refresh_model()
@@ -1002,6 +1035,9 @@ func _disk_player_character(world: Dictionary) -> String:
 			return disk.player_character
 	return ""
 
+func _load_terrain(world: Dictionary) -> void:
+	var size: Variant = world.get("face_size")
+	if _terrain_loaded or is_instance_valid(_terrain_request) or not (size is int or size is float):
 		return
 	if size < 1 or size > 1024 or float(size) != floorf(float(size)):
 		return
@@ -1090,6 +1126,7 @@ func _start_approach(position: Variant) -> bool:
 	_approach_up = _camera.basis.y
 	_approach_rotation = Quaternion(_approach_start.normalized(), _surface_direction)
 	_approach_elapsed = 0.0
+	_settle_elapsed = -1.0
 	_environment.show_region(_surface_direction)
 	if not _player_profile.is_empty():
 		_controls.start(_player_profile.character, Vector3(position.x / 1000.0, position.y / 1000.0, position.z / 1000.0), position)
@@ -1193,6 +1230,10 @@ func _interact() -> void:
 
 func _on_dialogue_changed(reply: Dictionary) -> void:
 	_dialogue.show_reply(reply)
+	# The character talks to the player: it stands still and turns to them, and goes on afterwards.
+	if reply.open:
+		_dialogue_npc = reply.npc_id
+	_environment.hold_npc(reply.npc_id, reply.open)
 	# Choices can pay or reward gold and items: refresh the HUD and the inventory.
 	_session.refresh()
 	if reply.open:
@@ -1210,11 +1251,29 @@ func _on_quests_changed(quests: Array) -> void:
 		_quest_stages[quest.quest] = quest.stage
 
 func _on_dialogue_closed() -> void:
+	if not _dialogue_npc.is_empty():
+		_environment.hold_npc(_dialogue_npc, false)
+		_dialogue_npc = ""
 	_story.leave()
 	_session.refresh()
 
 func _on_story_failed(message: String) -> void:
 	_toast.show_toast(tr(message))
+
+func _on_story_markers_changed(markers: Array) -> void:
+	_story_markers = markers
+	_refresh_minimap_entities()
+
+func _refresh_minimap_entities() -> void:
+	_update_minimap_entities(_story_markers)
+
+func _refresh_minimap_props() -> void:
+	if _minimap != null:
+		_minimap.set_props(_environment.map_props())
+
+func _refresh_minimap_water() -> void:
+	if _minimap != null:
+		_minimap.set_water_map(_environment.water_map)
 
 func _update_minimap_entities(markers: Array) -> void:
 	# Collect entities from NPCs and markers
@@ -1245,7 +1304,8 @@ func _update_minimap_entities(markers: Array) -> void:
 				var marker_name: String = _story.text(marker.get("name_key", "")) if _story != null else marker.get("name_key", "")
 				var marker_id: String = marker.get("id", "marker_" + str(entities.size()))
 				var marker_kind: String = marker.get("kind", "quest")
-				var is_quest_marker: bool = marker.get("next", false)
+				# Every place a quest points to is a goal of the minimap.
+				var is_quest_marker := true
 				entities.append({
 					"id": marker_id,
 					"name": marker_name,
@@ -1495,6 +1555,24 @@ func _on_player_position(position: Dictionary, moving: bool) -> void:
 		if _environment.target.distance_to(_surface_direction) * PLANET_RADIUS > 0.10:
 			_environment.show_region(_surface_direction)
 
+## The last second of the landing: the camera flies from the overview straight above the player (where the descent ended) to the
+## view behind them, eased at both ends, and the controls start when it arrives. The pose it flies to is the one the controls give
+## the camera, so there is no jump when they take over.
+func _settle_into_view(delta: float) -> void:
+	_settle_elapsed = minf(_settle_elapsed + delta, SETTLE_SECONDS)
+	_controls.update_camera(_environment, _hud.panel, true)
+	var goal := _camera.transform
+	var share := _settle_elapsed / SETTLE_SECONDS
+	var eased := share * share * share * (share * (share * 6.0 - 15.0) + 10.0)
+	var turn := _settle_from.basis.get_rotation_quaternion().slerp(goal.basis.get_rotation_quaternion(), eased)
+	_camera.transform = Transform3D(Basis(turn), _settle_from.origin.lerp(goal.origin, eased))
+	_sky.set_altitude(((_camera.position + _controls.origin).length() - PLANET_RADIUS) * 1000.0, true)
+	_sky.set_observer(_controls.direction)
+	if _settle_elapsed >= SETTLE_SECONDS:
+		_settle_elapsed = -1.0
+		_controls.active = true
+		_controls.capture_mouse()
+
 func _set_render_origin(origin: Vector3) -> void:
 	var adjustment: Vector3 = _controls.origin - origin
 	_camera.position += adjustment
@@ -1655,7 +1733,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.keycode == KEY_M:
 			_minimap.toggle_visibility()
 			get_viewport().set_input_as_handled()
-		elif _minimap and _minimap.visible:
+		elif _minimap and _minimap.is_big_mode():
 			if event.keycode == KEY_PLUS or event.keycode == KEY_EQUAL:
 				_minimap.zoom_in()
 				get_viewport().set_input_as_handled()
@@ -1675,13 +1753,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_secondary_action_started()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			if _minimap and _minimap.visible:
+			if _minimap and _minimap.is_big_mode():
 				_minimap.zoom_in()
 				get_viewport().set_input_as_handled()
 			else:
 				_controls.zoom(-event.factor)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			if _minimap and _minimap.visible:
+			if _minimap and _minimap.is_big_mode():
 				_minimap.zoom_out()
 				get_viewport().set_input_as_handled()
 			else:
@@ -1733,14 +1811,23 @@ func _process(delta: float) -> void:
 		_sky.set_altitude(PLANET_RADIUS * 2000.0)
 		_sky.set_observer(_camera.position.normalized())
 		return
+	if _settle_elapsed >= 0.0:
+		_settle_into_view(delta)
+		return
 	_approach_elapsed = minf(_approach_elapsed + delta, APPROACH_SECONDS)
-	var progress := smoothstep(0.0, APPROACH_SECONDS, _approach_elapsed)
-	var rotation := Quaternion.IDENTITY.slerp(_approach_rotation, progress)
+	var time_share := _approach_elapsed / APPROACH_SECONDS
+	var fall := smoothstep(0.0, 1.0, minf(time_share / APPROACH_FALL_SHARE, 1.0))
+	var descent := smoothstep(0.0, 1.0, clampf((time_share - APPROACH_FALL_SHARE) / (1.0 - APPROACH_FALL_SHARE), 0.0, 1.0))
+	var rotation := Quaternion.IDENTITY.slerp(_approach_rotation, fall)
 	var surface_height := maxf(_environment.elevation(_surface_direction), 0.0)
 	if not _environment.environment.is_empty():
 		var index: int = _environment.environment_index(_surface_direction)
 		surface_height = maxf(surface_height, _environment.environment.water_m[index] / 1000.0)
-	var distance := lerpf(_approach_start.length(), PLANET_RADIUS + surface_height + SURFACE_ALTITUDE_M / 1000.0, progress)
+	var start_altitude := maxf(_approach_start.length() - PLANET_RADIUS - surface_height, APPROACH_OVERVIEW_KM)
+	var altitude := lerpf(start_altitude, APPROACH_OVERVIEW_KM, fall)
+	if time_share > APPROACH_FALL_SHARE:
+		altitude = lerpf(APPROACH_OVERVIEW_KM, SURFACE_ALTITUDE_M / 1000.0, descent)
+	var distance := PLANET_RADIUS + surface_height + altitude
 	var direction := _surface_direction if _approach_elapsed == APPROACH_SECONDS else rotation * _approach_start.normalized()
 	_camera.position = direction * distance
 	_camera.near = maxf(0.001, (distance - PLANET_RADIUS - surface_height) * 0.01)
@@ -1749,6 +1836,7 @@ func _process(delta: float) -> void:
 	_sky.set_altitude((distance - PLANET_RADIUS) * 1000.0)
 	_sky.set_observer(direction)
 	if _approach_elapsed == APPROACH_SECONDS and _terrain_loaded and not _environment.environment.is_empty() and _environment.objects_loaded and is_instance_valid(_controls.avatar):
+		# The view behind the character is not switched to: the camera flies there (`_settle_into_view`) and only then do the controls start.
 		_set_render_origin(_controls.avatar.position)
-		_controls.active = true
-		_controls.capture_mouse()
+		_settle_from = _camera.transform
+		_settle_elapsed = 0.0

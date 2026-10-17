@@ -6,6 +6,10 @@ const LABELS := ["Forward", "Backward", "Left", "Right", "Jump"]
 const JUMP := 4
 const RESERVED_KEYS := [KEY_ESCAPE, KEY_SHIFT, KEY_I, KEY_E, KEY_P, KEY_G, KEY_ENTER, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9]
 const RADIUS := 6371.0
+## The camera looks over the shoulder of its character at the closest zoom and from the middle from this distance (metres, before the
+## size of the character is applied) on.
+const OVER_SHOULDER_NEAR_M := 2.5
+const OVER_SHOULDER_FAR_M := 11.0
 
 var camera: Camera3D
 var settings_path := "user://client.cfg"
@@ -324,8 +328,10 @@ func _play_animation(walking: bool) -> void:
 	if _animation.current_animation != action:
 		_animation.play(action, 0.15)
 
-func update_camera(surface: Node, hud: Control = null) -> void:
-	if not active or not is_instance_valid(avatar):
+## Puts the camera behind the character. `force` does it before the controls are active too (the landing flies the camera to this
+## pose before the player gets the controls).
+func update_camera(surface: Node, hud: Control = null, force := false) -> void:
+	if not (active or force) or not is_instance_valid(avatar):
 		return
 	_ground_surface = surface
 	_ground_avatar(surface)
@@ -335,7 +341,13 @@ func update_camera(surface: Node, hud: Control = null) -> void:
 	var forward := heading()
 	# A giant of a datadisk is followed from higher up and further away.
 	var giant := preload("res://scripts/character_catalog.gd").body_scale(_character)
-	var target := avatar.position + direction * 0.0015 * giant
+	# Close behind a character its own back fills the middle of the picture and nothing ahead can be seen (a giant of a datadisk is
+	# worse): the camera then looks over the shoulder, at a point above the head and to the right of it, and this goes back to the
+	# centre as the camera moves away (no offset from OVER_SHOULDER_FAR_M on).
+	var close := clampf(1.0 - (distance_m - OVER_SHOULDER_NEAR_M) / (OVER_SHOULDER_FAR_M - OVER_SHOULDER_NEAR_M), 0.0, 1.0)
+	close = close * close * (3.0 - 2.0 * close)
+	var right := forward.cross(direction).normalized()
+	var target := avatar.position + direction * (0.0015 + 0.0005 * close) * giant + right * (0.0007 * close * giant)
 	var view := forward * cos(pitch) + direction * sin(pitch)
 	camera.position = target - view * (distance_m * giant / (1000.0 * visible_fraction))
 	var coordinates: Array = _anchor_metres if origin != Vector3.ZERO else [0.0, 0.0, 0.0]

@@ -129,6 +129,11 @@ func _run() -> void:
 	_check(client.parse_version("0.1.0") == [0, 1, 0], "Semver parses to array")
 	_check(client.parse_version("0.1.0.10~local1") == [0, 1, 0, 10], "Extended package version parses")
 	_check(client.parse_version("invalid").is_empty(), "Malformed version returns empty array")
+	# The web client takes the server from the page (?server=).
+	_check(client.web_server_address("https://world.example:7400", "https://play.example") == "https://world.example:7400", "an absolute server address is taken as it is")
+	_check(client.web_server_address("/server", "https://play.example/") == "https://play.example/server", "a path is a path on the origin of the page")
+	_check(client.web_server_address("//evil.example", "https://play.example") == "" and client.web_server_address("javascript:alert(1)", "https://play.example") == "" and client.web_server_address("ftp://x", "https://play.example") == "", "protocol-relative addresses and other schemes are refused")
+	_check(client.web_server_address("", "https://play.example") == "" and client.web_server_address("/server", "") == "", "no address or no origin gives nothing")
 	_check(client.compare_versions("0.1.0", "0.1.0") == 0, "Identical versions compare equal")
 	_check(client.compare_versions("0.1.1", "0.1.0") > 0, "Higher patch is greater")
 	_check(client.compare_versions("0.0.9", "0.1.0") < 0, "Lower minor is lesser")

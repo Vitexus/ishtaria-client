@@ -4,21 +4,39 @@ extends CanvasLayer
 
 const RPG := "res://assets/kenney/ui-rpg/PNG/"
 
-# Minimap size in pixels
-const MINIMAP_SIZE := 256
+# Minimap sizes: small mode (always visible corner) and big mode (full screen)
+const MINIMAP_SIZE_SMALL := 128
+
+# Margin from edge for small mode
+const MARGIN := 16
+
+# Scale indicator
+const SCALE_INDICATOR_SIZE := 14
+const SCALE_INDICATOR_COLOR := Color(0.8, 0.8, 0.8)
 const MIN_ZOOM := 0.5
 const MAX_ZOOM := 2.0
 const ZOOM_STEP := 0.25
 
 # Colors with good contrast
-const PLAYER_COLOR := Color(1.0, 0.3, 0.3)
-const NORTH_COLOR := Color(1.0, 1.0, 1.0)
-const BACKGROUND_COLOR := Color(0.12, 0.12, 0.12)
+const PLAYER_COLOR := Color(1.0, 1.0, 1.0)
+const NORTH_COLOR := Color(1.0, 0.35, 0.3)
+const BACKGROUND_COLOR := Color(0.08, 0.1, 0.12, 0.85)
+const ROAD_COLOR := Color(0.62, 0.55, 0.42, 0.95)
+const BUILDING_COLOR := Color(0.55, 0.62, 0.60, 0.95)
+const WATER_COLOR := Color(0.18, 0.45, 0.65, 0.92)
+const LEGEND_SWATCH := 12
 const NPC_COLOR := Color(1.0, 0.65, 0.0)
 const PLACE_COLOR := Color(0.2, 0.8, 1.0)
 const OBJECT_COLOR := Color(0.4, 1.0, 0.4)
 const QUEST_COLOR := Color(1.0, 0.4, 0.8)
 const LABEL_COLOR := Color(1.0, 1.0, 1.0)
+const GOAL_COLOR := Color(1.0, 0.85, 0.3)
+const GOAL_CLOSER_COLOR := Color(0.45, 1.0, 0.5)
+const GOAL_FARTHER_COLOR := Color(1.0, 0.5, 0.35)
+## The distance to a goal is compared with the one this many seconds ago to tell closer from farther.
+const TREND_SECONDS := 1.5
+## Change in metres that counts as moving towards or away from a goal.
+const TREND_MIN_M := 1.0
 
 # View radius in meters
 const VIEW_RADIUS_M := 200.0
@@ -32,16 +50,32 @@ var player_position: Vector3 = Vector3.ZERO
 var player_direction: Vector3 = Vector3.FORWARD
 var player_heading: Vector3 = Vector3.RIGHT
 var _zoom_level: float = 1.0
+var _big_mode: bool = false
 
 # Entity data: Array of {id: String, name: String, kind: String, position: Vector3, is_quest: bool}
 var _entities: Array[Dictionary] = []
 
-var _minimap_panel: PanelContainer
+# Roads and buildings of the generated places: {kind: String, position: Vector3 (metres),
+# yaw: float, size: Vector2 (metres)}.
+var _props: Array[Dictionary] = []
+
+# The environment's baked water picture: {texture, centre, tangent, forward, metres_per_pixel}.
+var _water_map: Dictionary = {}
+
+var _minimap_panel: Control
+var _minimap_container: SubViewportContainer
 var _minimap_viewport: SubViewport
 var _render_node: Node2D
 var _background: Sprite2D
+var _water_sprite: Sprite2D
+var _prop_overlay: PropOverlay
+var _legend: Control
 var _player_marker: Sprite2D
 var _north_marker: Sprite2D
+var _border: ColorRect
+var _scale_bar: ColorRect
+var _scale_label: Label
+var _goal_overlay: GoalOverlay
 
 # Entity markers: Dictionary of entity_id -> {marker: Sprite2D, label: Sprite2D, position: Vector3, kind: String, name: String}
 var _entity_markers: Dictionary = {}
@@ -50,34 +84,74 @@ var _entity_markers: Dictionary = {}
 var _icon_texture_cache: Dictionary = {}
 var _letter_texture_cache: Dictionary = {}
 
+func _get_size() -> Vector2:
+	if _big_mode:
+		return get_viewport().get_visible_rect().size
+	return Vector2(MINIMAP_SIZE_SMALL, MINIMAP_SIZE_SMALL)
+
+
+## Screen pixels for one metre: the view radius fits the shorter side of the map.
+func _pixels_per_metre() -> float:
+	var size := _get_size()
+	return minf(size.x, size.y) / 2.0 / VIEW_RADIUS_M * _zoom_level
+
+
+func _apply_size() -> void:
+	var size := _get_size()
+	if _big_mode:
+		_minimap_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	else:
+		_minimap_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		_minimap_panel.offset_right = -MARGIN
+		_minimap_panel.offset_left = -MARGIN - size.x
+		_minimap_panel.offset_top = MARGIN
+		_minimap_panel.offset_bottom = MARGIN + size.y
+	_minimap_container.position = Vector2.ZERO
+	_minimap_container.size = size
+	_background.texture = _create_solid_color_texture(BACKGROUND_COLOR, int(size.x), int(size.y))
+	_background.position = size / 2.0
+	_player_marker.position = size / 2.0
+	_north_marker.position = Vector2(size.x / 2.0, minf(size.y * 0.1, 24.0))
+	_border.position = Vector2(-2, -2)
+	_border.size = size + Vector2(4, 4)
+	_legend.visible = _big_mode
+	_legend.position = Vector2(12.0, 12.0)
+	_update_scale_bar()
+
+
+func _update_scale_bar() -> void:
+	var size := _get_size()
+	var length := 50.0 * _pixels_per_metre()
+	_scale_bar.size = Vector2(length, 3)
+	_scale_bar.position = Vector2(8, size.y - 10)
+	_scale_label.text = "50 m"
+	_scale_label.position = Vector2(8, size.y - 28)
+
+
 func _ready() -> void:
 	layer = 3
 	
 	# Create minimap panel
-	_minimap_panel = PanelContainer.new()
+	_minimap_panel = Control.new()
 	_minimap_panel.name = "MinimapPanel"
 	_minimap_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_minimap_panel.anchor_right = 1.0
-	_minimap_panel.anchor_bottom = 1.0
-	_minimap_panel.offset_right = -16.0
-	_minimap_panel.offset_bottom = -16.0
-	_minimap_panel.custom_minimum_size = Vector2(MINIMAP_SIZE, MINIMAP_SIZE)
-	
-	# Style the panel
-	var style: StyleBoxTexture = StyleBoxTexture.new()
-	style.texture = load(RPG + "panelInset_blue.png")
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_texture_margin(side, 8.0)
-	style.modulate_color = Color(0.45, 0.5, 0.65, 0.9)
-	_minimap_panel.add_theme_stylebox_override("panel", style)
 	
 	add_child(_minimap_panel)
 	
-	# Create SubViewport for rendering
+	# Create SubViewportContainer for displaying the viewport texture
+	_minimap_container = SubViewportContainer.new()
+	_minimap_container.name = "MinimapContainer"
+	_minimap_container.stretch = true
+	_minimap_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_minimap_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_minimap_panel.add_child(_minimap_container)
+	
+	# Create SubViewport for rendering with fixed size
 	_minimap_viewport = SubViewport.new()
 	_minimap_viewport.name = "MinimapViewport"
-	_minimap_viewport.size = Vector2(MINIMAP_SIZE, MINIMAP_SIZE)
-	_minimap_panel.add_child(_minimap_viewport)
+	_minimap_viewport.transparent_bg = true
+	_minimap_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_minimap_container.add_child(_minimap_viewport)
 	
 	# Create 2D scene for minimap
 	_render_node = Node2D.new()
@@ -87,16 +161,35 @@ func _ready() -> void:
 	# Background
 	_background = Sprite2D.new()
 	_background.name = "Background"
-	_background.texture = _create_solid_color_texture(BACKGROUND_COLOR, MINIMAP_SIZE, MINIMAP_SIZE)
-	_background.position = Vector2(MINIMAP_SIZE / 2, MINIMAP_SIZE / 2)
+	_background.texture = _create_solid_color_texture(BACKGROUND_COLOR, MINIMAP_SIZE_SMALL, MINIMAP_SIZE_SMALL)
+	_background.position = Vector2(MINIMAP_SIZE_SMALL / 2, MINIMAP_SIZE_SMALL / 2)
 	_background.z_index = -10
 	_render_node.add_child(_background)
-	
+
+	# The baked water picture (streams, lakes and the sea) of the region, placed and turned
+	# every frame to the player's view.
+	_water_sprite = Sprite2D.new()
+	_water_sprite.name = "Water"
+	_water_sprite.z_index = -8
+	_water_sprite.visible = false
+	_render_node.add_child(_water_sprite)
+
+	# Roads and buildings of the generated places.
+	_prop_overlay = PropOverlay.new()
+	_prop_overlay.name = "Props"
+	_prop_overlay.z_index = -5
+	_render_node.add_child(_prop_overlay)
+
+	_goal_overlay = GoalOverlay.new()
+	_goal_overlay.name = "Goals"
+	_goal_overlay.z_index = 8
+	_render_node.add_child(_goal_overlay)
+
 	# Player marker (arrow with better visibility)
 	_player_marker = Sprite2D.new()
 	_player_marker.name = "PlayerMarker"
 	_player_marker.texture = _create_player_arrow()
-	_player_marker.position = Vector2(MINIMAP_SIZE / 2, MINIMAP_SIZE / 2)
+	_player_marker.position = Vector2(MINIMAP_SIZE_SMALL / 2, MINIMAP_SIZE_SMALL / 2)
 	_player_marker.z_index = 10
 	_render_node.add_child(_player_marker)
 	
@@ -104,37 +197,75 @@ func _ready() -> void:
 	_north_marker = Sprite2D.new()
 	_north_marker.name = "NorthMarker"
 	_north_marker.texture = _create_letter_texture("N", NORTH_COLOR)
-	_north_marker.position = Vector2(MINIMAP_SIZE / 2, 16)
+	_north_marker.position = Vector2(MINIMAP_SIZE_SMALL / 2, MINIMAP_SIZE_SMALL * 0.1)
 	_north_marker.z_index = 5
 	_render_node.add_child(_north_marker)
 	
-	# Create texture for display
-	var texture_rect: TextureRect = TextureRect.new()
-	texture_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	texture_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	texture_rect.texture = _minimap_viewport.get_texture()
-	_minimap_panel.add_child(texture_rect)
+	# Add scale bar (visual scale indicator)
+	_scale_bar = ColorRect.new()
+	_scale_bar.name = "ScaleBar"
+	_scale_bar.color = SCALE_INDICATOR_COLOR
+	_scale_bar.z_index = 5
+	_minimap_panel.add_child(_scale_bar)
+	
+	# Add scale label
+	_scale_label = Label.new()
+	_scale_label.name = "ScaleLabel"
+	_scale_label.text = "100m"
+	_scale_label.self_modulate = SCALE_INDICATOR_COLOR
+	_scale_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scale_label.position = Vector2(0, 2)
+	_minimap_panel.add_child(_scale_label)
 	
 	# Add border
-	var border: ColorRect = ColorRect.new()
-	border.name = "Border"
-	border.color = Color(0.2, 0.2, 0.2, 0.8)
-	border.custom_minimum_size = Vector2(MINIMAP_SIZE + 4, MINIMAP_SIZE + 4)
-	border.position = Vector2(-2, -2)
-	border.z_index = -1
-	_minimap_panel.add_child(border)
+	_border = ColorRect.new()
+	_border.name = "Border"
+	_border.color = Color(0.2, 0.2, 0.2, 0.8)
+	_border.position = Vector2(-2, -2)
+	_border.show_behind_parent = true
+	_minimap_panel.add_child(_border)
+
+	# Legend of the big map: what the water, road and building colours mean.
+	_legend = HBoxContainer.new()
+	_legend.name = "Legend"
+	_legend.add_theme_constant_override("separation", 8)
+	_legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for entry in [["water", "Water"], ["road", "Road"], ["building", "Building"]]:
+		var swatch := ColorRect.new()
+		swatch.custom_minimum_size = Vector2(LEGEND_SWATCH, LEGEND_SWATCH)
+		swatch.color = WATER_COLOR if entry[0] == "water" else (ROAD_COLOR if entry[0] == "road" else BUILDING_COLOR)
+		_legend.add_child(swatch)
+		var label := Label.new()
+		label.text = entry[1]
+		label.add_theme_font_size_override("font_size", 11)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_legend.add_child(label)
+	_minimap_panel.add_child(_legend)
+
+	# Initially visible in small mode
+	_minimap_panel.show()
+	_minimap_container.show()
 	
-	# Initially hidden
-	_minimap_panel.hide()
+	# Apply initial size
+	_apply_size()
 
 
 func _process(delta: float) -> void:
-	if _minimap_panel.visible:
-		_update_minimap()
+	_update_minimap()
 
 
 func set_environment(env: Node3D) -> void:
 	environment = env
+
+## Roads and buildings to draw, from the environment's generated places.
+func set_props(props: Array[Dictionary]) -> void:
+	_props = props
+
+## The environment's baked water picture of the region (see `surface_environment.water_map`).
+func set_water_map(map: Dictionary) -> void:
+	_water_map = map
+	_water_sprite.texture = map.get("texture") if not map.is_empty() else null
+	_water_sprite.visible = not map.is_empty()
 
 
 func set_player_position(pos: Vector3) -> void:
@@ -162,19 +293,15 @@ func set_entities(entities: Array[Dictionary]) -> void:
 		_update_entity_markers()
 
 
-func show_minimap() -> void:
-	_minimap_panel.show()
-
-
-func hide_minimap() -> void:
-	_minimap_panel.hide()
-
+func is_big_mode() -> bool:
+	return _big_mode
 
 func toggle_visibility() -> void:
-	if _minimap_panel.visible:
-		hide_minimap()
-	else:
-		show_minimap()
+	_big_mode = not _big_mode
+	# Reset zoom when switching modes
+	_zoom_level = 1.0
+	_update_zoom()
+	_apply_size()
 
 
 func zoom_in() -> void:
@@ -188,8 +315,7 @@ func zoom_out() -> void:
 
 
 func _update_zoom() -> void:
-	if _render_node != null:
-		_render_node.scale = Vector2(_zoom_level, _zoom_level)
+	_update_scale_bar()
 
 
 func _update_entity_markers() -> void:
@@ -198,7 +324,7 @@ func _update_entity_markers() -> void:
 	for entity: Dictionary in _entities:
 		current_ids.append(entity.get("id", ""))
 	
-	for entity_id: String in _entity_markers:
+	for entity_id: String in _entity_markers.keys():
 		if not current_ids.has(entity_id):
 			var entry: Dictionary = _entity_markers[entity_id]
 			if entry.has("marker") and entry["marker"] != null:
@@ -213,11 +339,13 @@ func _update_entity_markers() -> void:
 		var name: String = entity.get("name", "")
 		var kind: String = entity.get("kind", "object")
 		var position: Vector3 = entity.get("position", Vector3.ZERO)
+		var is_quest: bool = entity.get("is_quest", false)
 		
 		# If marker already exists, just update its data
 		if _entity_markers.has(entity_id):
 			var entry: Dictionary = _entity_markers[entity_id]
 			entry["position"] = position
+			entry["is_quest"] = is_quest
 			# Update icon if kind changed
 			if entry.get("kind") != kind:
 				entry["kind"] = kind
@@ -246,53 +374,83 @@ func _update_entity_markers() -> void:
 			"marker": marker,
 			"label": label,
 			"position": position,
+			"is_quest": is_quest,
 			"kind": kind,
 			"name": name
 		}
 
 
+## Tangent plane at the player: `up` is away from the planet's centre, `forward` the way the
+## player faces, `right` to their right. The map shows forward at the top, like the quest compass.
+func _tangent_basis() -> Dictionary:
+	var up: Vector3 = player_direction.normalized() if player_direction.length() > 0.1 else Vector3.UP
+	var forward: Vector3 = player_heading - up * up.dot(player_heading)
+	if forward.length() < 0.001:
+		forward = up.cross(Vector3.RIGHT) if absf(up.dot(Vector3.RIGHT)) < 0.9 else up.cross(Vector3.FORWARD)
+	forward = forward.normalized()
+	return {"up": up, "forward": forward, "right": forward.cross(up)}
+
+
+## Metres on the map (x right, y down) of an offset from the player.
+static func _to_map(offset: Vector3, basis: Dictionary) -> Vector2:
+	return Vector2(offset.dot(basis.right), -offset.dot(basis.forward))
+
+
 func _update_minimap() -> void:
-	# Update player marker rotation based on heading
-	if player_direction.length() > 0.1 and _player_marker != null:
-		var angle: float = atan2(player_direction.x, -player_direction.z)
-		_player_marker.rotation = angle
-	
-	# Update north marker rotation based on player heading
-	if player_heading.length() > 0.1 and _north_marker != null:
-		_north_marker.rotation = -player_heading.signed_angle_to(Vector3.RIGHT, Vector3.UP)
-	
-	# Update entity marker positions
+	var size := _get_size()
+	var centre := size / 2.0
+	var scale_px := _pixels_per_metre()
+	var basis := _tangent_basis()
+	# The player always points up: the map turns with the player.
+	_player_marker.rotation = 0.0
+	# The N sits on the rim in the direction of geographic north.
+	var up: Vector3 = basis.up
+	var north: Vector3 = Vector3.UP - up * up.dot(Vector3.UP)
+	if north.length() > 0.001:
+		var dir := _to_map(north.normalized(), basis)
+		_north_marker.position = centre + dir * (minf(size.x, size.y) / 2.0 - 10.0)
+		_north_marker.visible = true
+	else:
+		_north_marker.visible = false
+
+	var goals: Array[Dictionary] = []
+	_update_water(size, centre, scale_px, basis)
+	_prop_overlay.update_props(_props, size, scale_px, player_position, basis)
 	if player_position.length() > 0:
 		for entity_id: String in _entity_markers:
 			var entry: Dictionary = _entity_markers[entity_id]
 			var marker: Sprite2D = entry["marker"]
 			var label: Sprite2D = entry["label"]
-			var entity_pos: Vector3 = entry["position"]
-			
-			# Calculate relative position from player (in meters)
-			var relative_pos: Vector3 = entity_pos - player_position
-			
+			var relative_pos: Vector3 = entry["position"] - player_position
+			var distance := relative_pos.length()
+			if entry.get("is_quest", false):
+				goals.append({"id": entity_id, "offset": _to_map(relative_pos, basis), "distance": distance})
 			# Only show entities within the view radius
-			if relative_pos.length() > VIEW_RADIUS_M:
+			if distance > VIEW_RADIUS_M:
 				marker.visible = false
 				label.visible = false
 				continue
-			
 			marker.visible = true
-			# Show labels only when zoomed in enough
 			label.visible = _zoom_level >= 0.75
-			
-			# Convert world coordinates to minimap coordinates
-			# X axis on minimap: right = east (positive X in world)
-			# Y axis on minimap: down = north (positive Z in world)
-			var map_x: float = relative_pos.x / VIEW_RADIUS_M * (MINIMAP_SIZE / 2) * _zoom_level
-			var map_y: float = -relative_pos.z / VIEW_RADIUS_M * (MINIMAP_SIZE / 2) * _zoom_level
-			
-			# Center on player
-			marker.position = Vector2(MINIMAP_SIZE / 2 + map_x, MINIMAP_SIZE / 2 + map_y)
-			
-			# Position label below the icon
-			label.position = Vector2(MINIMAP_SIZE / 2 + map_x, MINIMAP_SIZE / 2 + map_y + 10)
+			var point := centre + _to_map(relative_pos, basis) * scale_px
+			marker.position = point
+			label.position = point + Vector2(0, 10)
+	_goal_overlay.update_goals(goals, size, scale_px, _now())
+
+
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+## Places and turns the baked water picture so it lines up with the entity markers: the bake
+## frame's tangent axis decides the rotation, its centre the position, and one baked metre
+## is `scale_px` screen pixels.
+func _update_water(size: Vector2, centre: Vector2, scale_px: float, basis: Dictionary) -> void:
+	if _water_map.is_empty() or not is_instance_valid(_water_sprite.texture):
+		return
+	var world_centre: Vector3 = _water_map.centre
+	_water_sprite.position = centre + _to_map(world_centre - player_position, basis) * scale_px
+	_water_sprite.rotation = _to_map(_water_map.tangent, basis).angle()
+	_water_sprite.scale = Vector2.ONE * scale_px * float(_water_map.metres_per_pixel)
 
 
 # Texture getter functions with caching
@@ -713,3 +871,109 @@ func _create_entity_icon(kind: String, color: Color) -> Texture2D:
 						image.set_pixel(x, y, outline_color)
 	
 	return ImageTexture.create_from_image(image)
+
+
+## Draws the goals of the quests above the map: a line from the player, a pulsing ring, the
+## distance, and an arrow on the rim for goals outside the view. Green means the player is getting
+## closer, red farther, yellow neither.
+class GoalOverlay extends Node2D:
+	var _goals: Array[Dictionary] = []
+	var _size := Vector2(128, 128)
+	var _scale_px := 1.0
+	var _time := 0.0
+	## goal id -> {distance: float, since: float, trend: int}
+	var _history: Dictionary = {}
+
+	func update_goals(goals: Array[Dictionary], size: Vector2, scale_px: float, now: float) -> void:
+		_goals = goals
+		_size = size
+		_scale_px = scale_px
+		_time = now
+		var seen := {}
+		for goal in goals:
+			var id: String = goal.id
+			seen[id] = true
+			var entry: Dictionary = _history.get(id, {"distance": goal.distance, "since": now, "trend": 0})
+			if now - entry.since >= TREND_SECONDS:
+				var change: float = goal.distance - entry.distance
+				entry.trend = 0 if absf(change) < TREND_MIN_M else (-1 if change < 0.0 else 1)
+				entry.distance = goal.distance
+				entry.since = now
+			_history[id] = entry
+		for id: String in _history.keys():
+			if not seen.has(id):
+				_history.erase(id)
+		queue_redraw()
+
+	func _color_of(id: String) -> Color:
+		match int(_history.get(id, {}).get("trend", 0)):
+			-1:
+				return GOAL_CLOSER_COLOR
+			1:
+				return GOAL_FARTHER_COLOR
+		return GOAL_COLOR
+
+	func _draw() -> void:
+		var centre := _size / 2.0
+		var rim := minf(_size.x, _size.y) / 2.0 - 8.0
+		var font := ThemeDB.fallback_font
+		var pulse := 0.5 + 0.5 * sin(_time * 4.0)
+		for goal in _goals:
+			var color := _color_of(goal.id)
+			var offset: Vector2 = goal.offset * _scale_px
+			var inside := offset.length() <= rim
+			var point := offset if inside else offset.normalized() * rim
+			point += centre
+			draw_dashed_line(centre, point, Color(color, 0.55), 1.5, 5.0)
+			if inside:
+				draw_arc(point, 9.0 + 3.0 * pulse, 0.0, TAU, 24, color, 2.0)
+			else:
+				var direction := offset.normalized()
+				var side := Vector2(-direction.y, direction.x)
+				var tip := point + direction * 6.0
+				draw_colored_polygon(PackedVector2Array([tip, point - direction * 5.0 + side * 6.0, point - direction * 5.0 - side * 6.0]), color)
+			var text := "%d m" % roundi(goal.distance)
+			var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			var at := point + Vector2(-width / 2.0, 22.0 if point.y < _size.y - 24.0 else -14.0)
+			at.x = clampf(at.x, 2.0, _size.x - width - 2.0)
+			draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 4, Color(0, 0, 0, 0.9))
+			draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, color)
+
+
+## Draws the roads and buildings of the generated places: each prop a rectangle of its real
+## footprint, turned by its yaw around the planet's radius at its place, projected on the
+## player's tangent plane exactly like the entity markers. The geometry is recomputed when
+## the view changes; the draw only puts the collected rectangles on screen.
+class PropOverlay extends Node2D:
+	var _quads: Array[Dictionary] = []
+	## How many props the last view update kept (for tests).
+	var _drawn := 0
+
+	func update_props(props: Array[Dictionary], size: Vector2, scale_px: float, position: Vector3, basis: Dictionary) -> void:
+		_quads.clear()
+		_drawn = 0
+		var centre := size / 2.0
+		var right: Vector3 = basis.right
+		var forward: Vector3 = basis.forward
+		for prop: Dictionary in props:
+			if not (prop.get("position") is Vector3 and prop.get("size") is Vector2):
+				continue
+			var prop_position: Vector3 = prop.position
+			var relative := prop_position - position
+			var prop_size: Vector2 = prop.size
+			if relative.length() > VIEW_RADIUS_M + prop_size.length() * 0.5:
+				continue
+			var up := prop_position.normalized()
+			var rotation := Quaternion(Vector3.UP, up) * Quaternion(Vector3.UP, float(prop.get("yaw", 0.0)))
+			var half := prop_size * 0.5
+			var points := PackedVector2Array()
+			for corner in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+				var world := relative + rotation * Vector3(corner.x * half.x, 0.0, corner.y * half.y)
+				points.append(centre + Vector2(world.dot(right), -world.dot(forward)) * scale_px)
+			_quads.append({"points": points, "color": ROAD_COLOR if prop.get("kind", "") == "road" else BUILDING_COLOR})
+			_drawn += 1
+		queue_redraw()
+
+	func _draw() -> void:
+		for quad: Dictionary in _quads:
+			draw_colored_polygon(quad.points, quad.color)

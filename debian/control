@@ -13,3 +13,20 @@ Depends: ${shlibs:Depends}, ${misc:Depends}, libgl1, libvulkan1
 Description: client of the Ishtaria virtual planet
  Explore a persistent, federated, Earth-sized virtual planet with a fully
  customisable avatar. Built with the Godot engine.
+
+Package: ishtaria-client-web
+Architecture: all
+Depends: ${misc:Depends}
+Recommends: nginx | httpd
+Suggests: ishtaria-web
+Description: browser (HTML5 / WebAssembly) build of the Ishtaria client
+ The same client as in ishtaria-client, exported for the Godot web platform
+ (Compatibility renderer, WebGL 2, no threads, so no special HTTP headers are
+ needed). It is a set of static files under /usr/share/ishtaria-client-web/html
+ that any web server can serve; the ishtaria-web portal publishes it as /play/.
+ .
+ The page takes the server from its address: /play/?server=https://world.example
+ or a path on the same site such as /play/?server=/server (a reverse proxy
+ forwards it to the game server, so that no CORS is needed). A page served over
+ https can only reach servers over https.
+

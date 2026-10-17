@@ -1,6 +1,13 @@
 extends Node3D
 
 signal objects_failed(message: String)
+## The characters were replaced (loaded or cleared); the minimap lists them again.
+signal npcs_changed
+## The props of the region changed (loaded, cleared or a datadisk model arrived); the minimap
+## draws their roads and buildings again.
+signal props_changed
+## The baked water picture changed (a new region was shown or the world was cleared).
+signal water_changed
 
 const RADIUS := 6371.0
 const BIOMES := ["ocean", "lake", "river", "beach", "grassland", "forest", "mountain", "snow"]
@@ -29,6 +36,18 @@ const LAMP_RANGE_M := 7.0
 const LAMP_ENERGY := 3.0e-6
 const LAMP_FLICKER := 0.07
 const PROP_KITS := {"graveyard": "graveyard-kit", "town": "fantasy-town-kit", "castle": "castle-kit", "retro": "retro-fantasy-kit", "pirate": "pirate-kit", "survival": "survival-kit/Models/GLB format", "food": "food-kit/Models/GLB format", "quaternius": ""}
+## What the minimap draws of the generated places: the road modules of the towns and the
+## structural props (walls, roofs, stalls, fountains, towers, crypts, fences, quaternius
+## buildings). Trees, graves and other small scenery stay off the map. Mirrors the models
+## that `ishtaria-server/src/scenery.rs` generates.
+const ROAD_MODELS := ["town.road"]
+const BUILDING_KEYWORDS := ["wall", "roof", "chimney", "stall", "fountain", "tower", "crypt", "fence", "structure", "house", "barracks", "castle", "fortress", "temple"]
+## The baked water picture covers this many metres around the region's centre: the minimap's
+## biggest view (200 m at half zoom) plus a margin, one texture instead of per-frame polygons.
+const WATER_MAP_PIXELS := 256
+const WATER_MAP_EXTENT_M := 420.0
+## Water on the minimap: the same colour the map legend shows.
+const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 
 var heightmap: Image
 var environment: Dictionary = {}
@@ -63,10 +82,20 @@ var _night := 0.0
 var _lit_materials := {}
 var _lamp_time := 0.0
 var _prop_scenes: Dictionary = {}
+## Model footprints in model units, by scene path or datadisk media URL: the x and z extents of
+## the meshes, so the minimap can draw a rectangle of the real size.
+var _prop_footprints: Dictionary = {}
 ## Buildings that datadisks bring (`disk:<disk>:<path>`): the models fetched so far, and the
 ## placements waiting for a model that is still being downloaded.
 var _structure_models: Dictionary = {}
 var _structure_waiting: Dictionary = {}
+## Footprints (model units) of the fetched datadisk buildings, by their media URL.
+var _structure_footprints: Dictionary = {}
+## The minimap's baked water: the picture of streams, lakes and the sea around the region's
+## centre, with the tangent frame it was drawn in. Empty when the world has no region yet.
+## Keys: texture (ImageTexture), centre (Vector3, world metres), tangent, forward (Vector3),
+## metres_per_pixel (float).
+var water_map: Dictionary = {}
 ## Turns a translation key into text (set by the game once the story is loaded).
 var npc_text := Callable()
 ## Asks the story client for a media file (a character model); answered through `media_ready`.
@@ -75,6 +104,11 @@ var _npc_entries: Array = []
 ## Characters of the story that walk along the waypoints the server sent: {"id", "index" (of _npc_entries and the
 ## children of `npcs`), "route", "walking", "player" (the animation player of its model, or null)}.
 var _npc_walkers: Array[Dictionary] = []
+## Characters the player talks to: id -> {"released_at": 0 while the conversation is on, otherwise when it ended (msec), "home": the
+## orientation before it}. They stand still and face the player; afterwards they go on to where they were going (see `hold_npc`).
+var _held_npcs: Dictionary = {}
+## A released character waits for the server's next route (it goes on from where it stood), but no longer than this.
+const HOLD_RELEASE_MS := 4000
 var portals: Node3D
 var target := Vector3.ZERO
 var server_url := ""
@@ -127,6 +161,7 @@ func _process(delta: float) -> void:
 	_swim()
 	_wander(delta)
 	_walk_npcs(delta)
+	_face_held(delta)
 	_animals_elapsed += delta
 	if _animals_elapsed >= ANIMAL_REFRESH_S:
 		_animals_elapsed = 0.0
@@ -293,7 +328,12 @@ func elevation64(direction: Array) -> float:
 	var lower := lerpf(roundf(heightmap.get_pixel(offset + column, mini(row + 1, size - 1)).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), mini(row + 1, size - 1)).r * 255.0), horizontal - column)
 	var base := lerpf(upper, lower, vertical - row) * 16000.0 / 255.0 - 8000.0
 	var metres := base + (relief64(direction, base, environment.seed) if environment.get("version") == 2 else 0.0)
-	return (metres + _terrain_offset_m(direction, metres)) / 1000.0
+	# The landscape patches look the ground up by a unit direction. A point in metres (the camera's) must be reduced to one, or the
+	# patch is missed and the ground comes out as the coarse base map: the camera is then lifted by the difference (17 m in Uruk) and
+	# cannot look level until it is moved far away.
+	var length := sqrt(float(direction[0]) * direction[0] + float(direction[1]) * direction[1] + float(direction[2]) * direction[2])
+	var unit: Array = [float(direction[0]) / length, float(direction[1]) / length, float(direction[2]) / length]
+	return (metres + _terrain_offset_m(unit, metres)) / 1000.0
 
 func environment_index(direction: Vector3) -> int:
 	var mapped := coordinates(direction)
@@ -395,6 +435,8 @@ func _clear_region(clear_objects: bool = true) -> void:
 		child.queue_free()
 	land_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_material.set_shader_parameter("detail_direction", Vector3.ZERO)
+	water_map = {}
+	water_changed.emit()
 
 func show_region(direction: Vector3) -> void:
 	target = direction
@@ -463,6 +505,7 @@ func _build_detail() -> void:
 	detail.add_child(local_water)
 	land_material.set_shader_parameter("detail_direction", unit)
 	water_material.set_shader_parameter("detail_direction", unit)
+	_bake_water_map(unit, tangent, forward)
 
 func ground_position64(coordinates_metres: Array) -> Vector3:
 	var radius := sqrt(float(coordinates_metres[0]) * coordinates_metres[0] + float(coordinates_metres[1]) * coordinates_metres[1] + float(coordinates_metres[2]) * coordinates_metres[2])
@@ -741,6 +784,7 @@ func apply_npcs(data: Variant) -> bool:
 				_npc_walkers.append({"id": entry.id, "index": _npc_entries.size() - 1, "route": route, "walking": false, "player": _npc_player(model)})
 		if entry.get("model") != null and fetch_media.is_valid() and preload("res://scripts/story_client.gd").valid_media_url(entry.model) and entry.model.ends_with(".glb"):
 			fetch_media.call(entry.model)
+	npcs_changed.emit()
 	return true
 
 ## A character model arrived: it replaces the pack character of the NPCs that name it.
@@ -1158,7 +1202,115 @@ func apply_props(data: Variant) -> bool:
 		_prop_entries.append(entry.duplicate(true))
 		if LAMP_MODELS.has(entry.model):
 			_add_lamp(entry)
+	props_changed.emit()
 	return true
+
+## Roads and buildings of the generated places for the minimap: the position in metres (from
+## the planet's centre), the yaw in radians, and the side lengths of the footprint in metres.
+## Props the map does not show (trees, graves, crates, ships) are left out.
+func map_props() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for entry: Dictionary in _prop_entries:
+		var kind := _map_prop_kind(entry.get("model"))
+		if kind.is_empty():
+			continue
+		var size := _prop_footprint_m(entry)
+		if size == Vector2.ZERO:
+			continue
+		result.append({
+			"kind": kind,
+			"position": Vector3(float(entry.position[0]), float(entry.position[1]), float(entry.position[2])),
+			"yaw": float(entry.yaw),
+			"size": size,
+		})
+	return result
+
+## "road", "building" or "": what the minimap draws of a prop's model.
+static func _map_prop_kind(model: Variant) -> String:
+	if not model is String:
+		return ""
+	if model in ROAD_MODELS:
+		return "road"
+	for keyword in BUILDING_KEYWORDS:
+		if keyword in model:
+			return "building"
+	return ""
+
+## The size of a prop's horizontal footprint in metres, or zero when the model is unknown yet.
+func _prop_footprint_m(entry: Dictionary) -> Vector2:
+	var units := Vector2.ZERO
+	var model: Variant = entry.get("model")
+	if model is String and model.begins_with("disk:"):
+		units = _structure_footprints.get(structure_url(model), Vector2.ZERO)
+	else:
+		var path := prop_path(model)
+		if not path.is_empty():
+			units = _kit_footprint(path)
+	if units == Vector2.ZERO:
+		return Vector2.ZERO
+	return units * float(entry.scale_m)
+
+## The x and z extents of a bundled kit model in model units, by scene path, measured from the
+## meshes and cached: the towns are built from a few hundred pieces of a handful of models.
+func _kit_footprint(path: String) -> Vector2:
+	if _prop_footprints.has(path):
+		return _prop_footprints[path]
+	var units := Vector2.ZERO
+	var scene: Variant = _prop_scenes.get(path)
+	if scene == null and ResourceLoader.exists(path, "PackedScene"):
+		scene = load(path)
+	if scene is PackedScene:
+		units = _scene_footprint(scene)
+	_prop_footprints[path] = units
+	return units
+
+## The x and z extents of all meshes of a scene, in the scene's own units.
+static func _scene_footprint(scene: PackedScene) -> Vector2:
+	var root := scene.instantiate()
+	var aabb := _combined_aabb(root, Transform3D.IDENTITY)
+	root.free()
+	if aabb == AABB():
+		return Vector2.ZERO
+	return Vector2(aabb.size.x, aabb.size.z)
+
+static func _combined_aabb(node: Node, parent: Transform3D) -> AABB:
+	var result := AABB()
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		result = parent * (node as MeshInstance3D).mesh.get_aabb()
+	for child in node.get_children():
+		if child is Node3D:
+			var child_aabb := _combined_aabb(child, parent * (child as Node3D).transform)
+			if child_aabb == AABB():
+				continue
+			result = child_aabb if result == AABB() else result.merge(child_aabb)
+	return result
+
+## The baked water picture of the region (see `water_map`): a pixel is water where the water
+## level the rendered water plane uses stands above the rendered ground, so streams, lakes
+## and the sea appear exactly where the player sees them.
+func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
+	var pixels := WATER_MAP_PIXELS
+	var step := WATER_MAP_EXTENT_M * 2.0 / float(pixels)
+	var image := Image.create(pixels, pixels, false, Image.FORMAT_RGBA8)
+	image.fill(Color.TRANSPARENT)
+	for row in pixels:
+		for column in pixels:
+			var horizontal := (float(column) + 0.5 - pixels * 0.5) * step
+			# Image row 0 is the top of the map: the `forward` direction of the bake frame.
+			var vertical := (pixels * 0.5 - (float(row) + 0.5)) * step
+			var direction: Vector3 = (unit * RADIUS + tangent * horizontal / 1000.0 + forward * vertical / 1000.0).normalized()
+			var patch_water := _terrain_water_m([direction.x, direction.y, direction.z])
+			var level := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(direction)])) / 1000.0 + 0.001
+			if level > elevation64([direction.x, direction.y, direction.z]):
+				image.set_pixel(column, row, WATER_MAP_COLOR)
+	water_map = {
+		"texture": ImageTexture.create_from_image(image),
+		"centre": unit * (RADIUS + elevation64([unit.x, unit.y, unit.z])) * 1000.0,
+		"tangent": tangent,
+		"forward": forward,
+		"metres_per_pixel": step,
+	}
+	water_changed.emit()
 
 ## A datadisk building is drawn when its model is here; until then the placement stays empty.
 func _place_structure(placement: Node3D, url: String) -> void:
@@ -1182,10 +1334,12 @@ func _fill_structure(placement: Node3D, scene: PackedScene) -> void:
 ## A building model arrived: it fills the placements that waited for it.
 func _structure_ready(url: String, scene: PackedScene) -> void:
 	_structure_models[url] = scene
+	_structure_footprints[url] = _scene_footprint(scene)
 	for placement: Variant in _structure_waiting.get(url, []):
 		if is_instance_valid(placement):
 			_fill_structure(placement, scene)
 	_structure_waiting.erase(url)
+	props_changed.emit()
 
 ## Some kit models (Retro Fantasy barrels, crates, shrubs and trees) are authored unshaded, so they would
 ## keep their daylight colour at night. Their materials are replaced by lit copies, one per original.
@@ -1334,6 +1488,7 @@ func refresh_npc_names() -> void:
 func _clear_npcs() -> void:
 	_npc_entries.clear()
 	_npc_walkers.clear()
+	npcs_changed.emit()
 	for child in npcs.get_children():
 		npcs.remove_child(child)
 		child.queue_free()
@@ -1503,6 +1658,8 @@ func _walk_npcs(delta: float) -> void:
 		var index: int = walker.index
 		if index >= npcs.get_child_count() or index >= _npc_entries.size():
 			continue
+		if _held_npcs.has(walker.id):
+			continue	# it talks to the player: it stands (`_face_held`)
 		var node := npcs.get_child(index) as Node3D
 		var sample := _route_sample(walker.route, now)
 		var metres: Vector3 = sample[0]
@@ -1519,6 +1676,67 @@ func _walk_npcs(delta: float) -> void:
 		if walking != walker.walking:
 			walker.walking = walking
 			_play_npc(walker.player, walking)
+
+## The player starts or ends a conversation with a character. While it lasts the character stands still and turns to the player (the server
+## stops the clock of its walk too, so it is where the client sees it); afterwards a walking character goes on to where it was going (the
+## routes are asked for again, they go on from where it stood) and one that only stood turns back.
+func hold_npc(npc_id: String, held: bool) -> void:
+	if held:
+		if _held_npcs.has(npc_id):
+			_held_npcs[npc_id].released_at = 0
+			return
+		var home := Quaternion.IDENTITY
+		for index in _npc_entries.size():
+			if _npc_entries[index].id == npc_id and index < npcs.get_child_count():
+				home = (npcs.get_child(index) as Node3D).quaternion
+		_held_npcs[npc_id] = {"released_at": 0, "home": home}
+	elif _held_npcs.has(npc_id) and _held_npcs[npc_id].released_at == 0:
+		_held_npcs[npc_id].released_at = Time.get_ticks_msec()
+		_request_animals()
+
+## Turns the characters in conversation to the player (and the released ones that only stood back to where they looked).
+func _face_held(delta: float) -> void:
+	if _held_npcs.is_empty():
+		return
+	for npc_id: String in _held_npcs.keys():
+		var hold: Dictionary = _held_npcs[npc_id]
+		var index := -1
+		for candidate in _npc_entries.size():
+			if _npc_entries[candidate].id == npc_id:
+				index = candidate
+		if index < 0 or index >= npcs.get_child_count():
+			_held_npcs.erase(npc_id)
+			continue
+		var node := npcs.get_child(index) as Node3D
+		var entry: Dictionary = _npc_entries[index]
+		var walker: Variant = _npc_walker(npc_id)
+		if walker != null and walker.walking:
+			walker.walking = false
+			_play_npc(walker.player, false)
+		var released: int = hold.released_at
+		if released == 0:
+			var metres := Vector3(entry.position[0], entry.position[1], entry.position[2])
+			if target != Vector3.ZERO and metres != Vector3.ZERO:
+				var up := metres.normalized()
+				var toward := target * metres.length() - metres
+				var forward := toward - up * toward.dot(up)
+				if forward.length() > 0.01:
+					# Models face +Z, and a basis that looks at a point has -Z pointing there.
+					var facing := Basis.looking_at(-forward.normalized(), up).get_rotation_quaternion()
+					node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 6.0))
+		elif walker == null:
+			# A character that only stood turns back and is let go.
+			node.quaternion = node.quaternion.slerp(hold.home, minf(1.0, delta * 6.0))
+			if node.quaternion.angle_to(hold.home) < 0.03:
+				_held_npcs.erase(npc_id)
+		elif Time.get_ticks_msec() - released > HOLD_RELEASE_MS:
+			_held_npcs.erase(npc_id)	# the server did not answer: it goes on by the route it has
+
+func _npc_walker(npc_id: String) -> Variant:
+	for walker in _npc_walkers:
+		if walker.id == npc_id:
+			return walker
+	return null
 
 ## Asks the server for the routes of the animals again, without rebuilding the region.
 func _request_animals() -> void:
@@ -1564,6 +1782,8 @@ func _on_animals_received(result: int, code: int, _headers: PackedStringArray, b
 		for walker in _npc_walkers:
 			if walks.has(walker.id):
 				walker.route = walks[walker.id]
+				if _held_npcs.has(walker.id) and _held_npcs[walker.id].released_at != 0:
+					_held_npcs.erase(walker.id)	# the new route goes on from where it stood
 
 ## The nearest walking animal within reach of a server position in metres.
 func nearest_animal(player_metres: Vector3, reach_m: float) -> Dictionary:

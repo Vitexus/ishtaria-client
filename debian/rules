@@ -4,14 +4,28 @@
 GODOT ?= /usr/bin/godot4
 export XDG_DATA_HOME = $(CURDIR)/build/xdg
 
+# The web build needs the Godot web export template (web_nothreads_release.zip), which the Debian godot4-export-templates package does
+# not ship. The package ishtaria-client-web is built when a template is found: in $(WEB_TEMPLATES) (default: next to the Linux ones),
+# or in debian/web-templates/ (copy it there for a local build). Without one it is left out and ishtaria-client is built as before.
+WEB_TEMPLATE_NAME = web_nothreads_release.zip
+WEB_TEMPLATE_DIRS = $(WEB_TEMPLATES) /usr/share/godot4/export_templates/4.5.stable $(CURDIR)/debian/web-templates
+WEB_TEMPLATE = $(firstword $(foreach d,$(WEB_TEMPLATE_DIRS),$(wildcard $(d)/$(WEB_TEMPLATE_NAME))))
+
 %:
-	dh $@
+	dh $@ $(if $(WEB_TEMPLATE),,-Nishtaria-client-web)
 
 override_dh_auto_build:
-	mkdir -p build $(XDG_DATA_HOME)/godot/export_templates
-	ln -sfn /usr/share/godot4/export_templates/4.5.stable $(XDG_DATA_HOME)/godot/export_templates/4.5.stable
+	mkdir -p build $(XDG_DATA_HOME)/godot/export_templates/4.5.stable
+	for f in /usr/share/godot4/export_templates/4.5.stable/*; do ln -sf $$f $(XDG_DATA_HOME)/godot/export_templates/4.5.stable/; done
 	$(GODOT) --headless --import
 	$(GODOT) --headless --export-release Linux build/ishtaria-client.x86_64
+ifneq ($(WEB_TEMPLATE),)
+	mkdir -p build/web
+	ln -sf $(WEB_TEMPLATE) $(XDG_DATA_HOME)/godot/export_templates/4.5.stable/$(WEB_TEMPLATE_NAME)
+	$(GODOT) --headless --export-release Web build/web/index.html
+else
+	@echo "No Godot web export template ($(WEB_TEMPLATE_NAME)) found: ishtaria-client-web is not built."
+endif
 
 override_dh_auto_install:
 	install -D -m 0755 build/ishtaria-client.x86_64 debian/ishtaria-client/usr/lib/ishtaria-client/ishtaria-client
@@ -21,6 +35,11 @@ override_dh_auto_install:
 	for s in 48 128 256; do \
 		install -D -m 0644 assets/branding/ishtaria-client-$$s.png debian/ishtaria-client/usr/share/icons/hicolor/$${s}x$${s}/apps/ishtaria-client.png; \
 	done
+ifneq ($(WEB_TEMPLATE),)
+	install -d debian/ishtaria-client-web/usr/share/ishtaria-client-web/html
+	cp -r build/web/. debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/
+	cd debian/ishtaria-client-web/usr/share/ishtaria-client-web/html && ls index.html index.js index.wasm index.pck
+endif
 
 # Godot binaries are already stripped and may not survive objcopy.
 override_dh_strip:

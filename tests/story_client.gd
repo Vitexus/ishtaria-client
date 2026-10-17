@@ -110,6 +110,26 @@ func _run() -> void:
 	environment.apply_npcs([stood])
 	environment._walk_npcs(0.1)
 	_check(not environment._npc_walkers[0].walking, "a character that stands does not walk")
+	# A conversation holds a walking character still and turns it to the player; afterwards the new route sets it going again.
+	var talker := walker.duplicate(true)
+	talker.id = "x:talker"
+	environment.apply_npcs([talker])
+	environment._walk_npcs(0.1)
+	var stopped: Array = environment._npc_entries[0].position.duplicate()
+	environment.target = Vector3(1.0, 0.0, 1.0e-5).normalized()
+	environment.hold_npc("x:talker", true)
+	for frame in 30:
+		environment._walk_npcs(0.1)
+		environment._face_held(0.1)
+	_check(environment._npc_entries[0].position == stopped, "a character in conversation stands where it was")
+	# the player stands towards +Z of the character (the target is a direction on the planet): it looks that way
+	var look: Vector3 = (environment.npcs.get_child(0) as Node3D).global_transform.basis.z.normalized()
+	_check(look.dot(Vector3(0, 0, 1)) > 0.9, "it turns to the player: %s" % str(look))
+	environment.hold_npc("x:talker", false)
+	_check(environment._held_npcs.has("x:talker"), "a released character waits for its new route")
+	environment._held_npcs["x:talker"].released_at = Time.get_ticks_msec() - environment.HOLD_RELEASE_MS - 10
+	environment._face_held(0.1)
+	_check(not environment._held_npcs.has("x:talker"), "and goes on by the old route when no new one comes")
 	var back := walker.duplicate(true)
 	back.wander = [[now_ms, 6371000.0, 0.0, 0.0], [now_ms - 1000.0, 6371000.0, 20.0, 0.0]]
 	environment.apply_npcs([back])
@@ -133,6 +153,32 @@ func _run() -> void:
 		_check(environment.prop_path(model) == "", "refused model %s" % str(model))
 	environment._clear_objects()
 	_check(environment.props.get_child_count() == 0, "clearing the region removes the props")
+
+	# A building of a datadisk is drawn when its model arrives, and fetched once.
+	var requested: Array = []
+	environment.fetch_media = func(url: String) -> void: requested.append(url)
+	var ziggurat := {"id": "g:ziggurat", "model": "disk:gilgamesh:media/models/architecture/ziggurat_anu.glb", "position": [6371000.0, 0.0, 0.0], "yaw": 0.0, "scale_m": 1.0, "visible_m": 1500.0}
+	var bad_structures: Array = []
+	for model in ["disk:gilgamesh:../../x.glb", "disk:gilgamesh:media/other/a.glb", "disk::media/models/a.glb", "disk:a:b:media/models/a.glb", "disk:gilgamesh:media/models/a.png", "disk:gilgamesh:media//models/a.glb"]:
+		bad_structures.append({"id": "bad", "model": model, "position": [6371000.0, 0.0, 0.0], "yaw": 0.0, "scale_m": 1.0})
+	_check(environment.apply_props([ziggurat] + bad_structures), "a list with a datadisk building is accepted")
+	_check(environment.props.get_child_count() == 1, "only the valid building is placed: %d" % environment.props.get_child_count())
+	var url := "/story/media/gilgamesh/media/models/architecture/ziggurat_anu.glb"
+	_check(requested == [url], "its model is requested once: %s" % str(requested))
+	_check(environment.props.get_child(0).get_child_count() == 0, "nothing is drawn before the model arrives")
+	environment.apply_props([ziggurat])
+	_check(requested.size() == 1, "a second region does not fetch the model again")
+	var scene := PackedScene.new()
+	var sample := Node3D.new()
+	scene.pack(sample)
+	sample.free()
+	environment.media_ready(url, scene)
+	_check(environment.props.get_child(0).get_child_count() == 1, "the model fills the waiting placement")
+	environment.apply_props([ziggurat])
+	_check(environment.props.get_child(0).get_child_count() == 1 and requested.size() == 1, "a known model is drawn at once")
+	_check(environment.structure_url("disk:gilgamesh:media/models/a.glb") == "/story/media/gilgamesh/media/models/a.glb" and environment.structure_url("town.wall") == "", "structure_url separates datadisk models from kit models")
+	environment.fetch_media = Callable()
+	environment._clear_objects()
 
 	# Lamp posts burn at night only.
 	var post := {"id": "g:lamp", "model": "graveyard.lightpost-single", "position": [6371000.0, 5.0, 0.0], "yaw": 0.0, "scale_m": 2.0}

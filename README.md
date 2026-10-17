@@ -71,6 +71,20 @@ make build-macos     # build/ishtaria-client.macos.zip (contains Ishtaria.app)
 make build-all       # Linux x86-64 + arm64, Windows, macOS
 ```
 
+### Browser build (HTML5 / WebAssembly)
+
+`make build-web` exports the client for the browser into `build/web/` (preset `Web`: Compatibility renderer, WebGL 2, **no
+threads**, so a web server needs no special headers). It needs the web export template, which the Debian templates package
+does not have: `PLATFORMS=web tools/fetch-godot.sh` fetches `web_nothreads_release.zip`. `make serve-web` serves it on
+`http://127.0.0.1:8060/`.
+
+The page takes the server from its address: `?server=https://world.example` or a path of the same site, `?server=/server`
+(a reverse proxy forwards that to the game server, so that no CORS is needed; the game server itself sends no CORS headers). A page
+served over https can only reach servers over https. The Debian package `ishtaria-client-web` carries the files
+(`/usr/share/ishtaria-client-web/html`, built when `debian/rules` finds the template), and the portal `ishtaria-web` publishes
+them as `/play/`. The look of the terrain differs a little from the desktop build (Compatibility instead of Forward+), and the
+data is large (about the size of the desktop client), so the first load takes a while.
+
 These builds are **not code-signed or notarized**, and they are not tested by the
 project: Windows SmartScreen and macOS Gatekeeper will warn (on macOS, right-click →
 Open, or `xattr -dr com.apple.quarantine Ishtaria.app`). The Windows executable has

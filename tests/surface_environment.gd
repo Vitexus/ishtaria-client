@@ -146,6 +146,21 @@ func _run() -> void:
 	_check(surface.apply_environment(lake, "fixture", "43"), "Lake levels are accepted")
 	surface.show_region(Vector3.FORWARD)
 	_check(surface.placements.is_empty(), "No objects spawn underwater")
+	_check(not surface.water_map.is_empty() and surface.water_map.has("texture"), "A flooded region bakes a water picture for the minimap")
+	_check(surface._map_prop_kind("town.road") == "road", "Road modules are roads on the map")
+	_check(surface._map_prop_kind("town.wall") == "building" and surface._map_prop_kind("quaternius.castle") == "building", "Walls and ready-made buildings are buildings on the map")
+	_check(surface._map_prop_kind("town.tree").is_empty() and surface._map_prop_kind("retro.barrels").is_empty(), "Trees and crates stay off the map")
+	var footprint: Vector2 = surface._kit_footprint(surface.prop_path("town.road"))
+	_check(absf(footprint.x - 1.0) < 0.01 and absf(footprint.y - 1.0) < 0.01, "The road tile's footprint is one model unit square")
+	var prop_region := {"version":1,"heightmap_sha256":surface.environment.heightmap_sha256,"seed":surface.environment.seed,"objects":[],"props":[
+		{"id":"p1","model":"town.road","position":[0.0,6371000.0,0.0],"yaw":0.0,"scale_m":2.5},
+		{"id":"p2","model":"town.wall","position":[1000.0,6371000.0,0.0],"yaw":0.0,"scale_m":2.5},
+	]}
+	_check(surface.apply_objects(prop_region), "A region with roads and buildings is accepted")
+	var mapped: Array[Dictionary] = surface.map_props()
+	_check(mapped.size() == 2 and mapped[0].kind == "road" and mapped[1].kind == "building", "Roads and buildings are mapped for the minimap")
+	_check(mapped[0].position == Vector3(0.0, 6371000.0, 0.0), "Prop positions are metres from the planet's centre")
+	_check(absf(mapped[0].size.x - 2.5) < 0.01, "The road tile's footprint is scaled to metres")
 	var test_url := OS.get_environment("ISHTARIA_ENVIRONMENT_TEST_URL")
 	if not test_url.is_empty():
 		await _test_http(surface, test_url)

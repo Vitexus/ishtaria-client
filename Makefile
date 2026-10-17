@@ -8,7 +8,7 @@ ifneq ($(strip $(SERVER_URL)),)
 export ISHTARIA_SERVER_URL := $(SERVER_URL)
 endif
 
-.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-social test-trading test-placed test-magic test-story test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-controls build build-arm64 build-windows build-macos build-all help
+.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-social test-trading test-placed test-magic test-minimap test-story test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-controls build build-arm64 build-windows build-macos build-web serve-web build-all help
 
 run:
 	"$(GODOT)" --path "$(CURDIR)" $(GODOT_ARGS)
@@ -48,6 +48,9 @@ test-social:
 
 test-magic:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/magic_client.gd
+
+test-minimap:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/minimap.gd
 
 test-placed:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/placed_client.gd
@@ -89,12 +92,23 @@ build-macos:
 	mkdir -p "$(CURDIR)/build"
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release macOS "$(CURDIR)/build/ishtaria-client.macos.zip"
 
-build-all: build build-arm64 build-windows build-macos
+## The browser build (HTML5 / WebAssembly, no threads) into build/web/. Needs the Godot web export template web_nothreads_release.zip in
+## ~/.local/share/godot/export_templates/4.5.stable/ (the Debian templates package has only the Linux ones).
+build-web:
+	mkdir -p "$(CURDIR)/build/web"
+	"$(GODOT)" --headless --path "$(CURDIR)" --export-release Web "$(CURDIR)/build/web/index.html"
+
+## Serves build/web on http://127.0.0.1:8060/ for a test (the game server's address goes in ?server=).
+serve-web: build-web
+	python3 -m http.server 8060 --bind 127.0.0.1 --directory "$(CURDIR)/build/web"
+
+build-all: build build-arm64 build-windows build-macos build-web
 
 help:
 	@printf '%s\n' \
 		'make [run]  Run the client from local sources' \
 		'make editor Open the project in Godot' \
+		'make build-web  Export the browser build to build/web (needs the web export template)' \
 		'make test-connection  Test controls against the local server' \
 		'make test-characters  Test character assets and first-run setup' \
 		'make test-environment  Test terrain mapping and scenery placement' \

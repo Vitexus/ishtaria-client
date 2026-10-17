@@ -251,6 +251,8 @@ func _show_model() -> void:
 		# A skinned glTF mesh is drawn by its skeleton, so its mesh bounds say nothing about its size, and
 		# the head bone of a few models is off. All of them are scaled to a person of 1.8 metres.
 		height = 1.8 * CATALOG.GLTF_UNITS_PER_METRE
+		# A giant of a datadisk (Gilgamesh, 3 m) is drawn taller than a person: the picture frames the whole body.
+		height *= CATALOG.body_scale(character)
 	else:
 		var bounds := AABB()
 		var first := true

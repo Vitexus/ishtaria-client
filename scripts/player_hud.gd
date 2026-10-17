@@ -40,13 +40,13 @@ func _ready() -> void:
 	panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	panel.offset_bottom = -8.0
-	panel.offset_top = -120.0
+	panel.offset_top = -96.0
 	panel.theme = Theme.new()
-	panel.theme.default_font_size = 12
+	panel.theme.default_font_size = 11
 	var style := _texture_style(RPG + "panelInset_blue.png", 10.0)
 	style.modulate_color = Color(0.24, 0.30, 0.31, 0.96)
 	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 10.0)
+		style.set_content_margin(side, 7.0)
 	panel.add_theme_stylebox_override("panel", style)
 	_frame = NinePatchRect.new()
 	_frame.texture = load(BORDER)
@@ -68,7 +68,7 @@ func _ready() -> void:
 	player_name.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	player_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	player_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	player_name.add_theme_font_size_override("font_size", 15)
+	player_name.add_theme_font_size_override("font_size", 13)
 	header.add_child(player_name)
 	level_label = Label.new()
 	level_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
@@ -94,8 +94,8 @@ func _ready() -> void:
 	header.add_child(sound_checkbox)
 	for button in [inventory_button, connection_button, sound_checkbox]:
 		button.expand_icon = true
-		button.add_theme_constant_override("icon_max_width", 16)
-		button.custom_minimum_size = Vector2(28, 28)
+		button.add_theme_constant_override("icon_max_width", 13)
+		button.custom_minimum_size = Vector2(22, 22)
 		for state in ["normal", "hover", "pressed", "hover_pressed"]:
 			var surface := _texture_style(RPG + ("buttonSquare_grey_pressed.png" if state in ["pressed", "hover_pressed"] else "buttonSquare_grey.png"), 8.0)
 			surface.modulate_color = Color(0.40, 0.45, 0.46) if state in ["hover", "hover_pressed"] else Color(0.28, 0.32, 0.33)
@@ -104,28 +104,29 @@ func _ready() -> void:
 			button.add_theme_stylebox_override(state, surface)
 	grid = GridContainer.new()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 5)
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 4)
 	column.add_child(grid)
 	for key in METERS:
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 2)
+		cell.add_theme_constant_override("separation", 1)
 		grid.add_child(cell)
 		var heading := HBoxContainer.new()
 		cell.add_child(heading)
 		var label := Label.new()
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		heading.add_child(label)
 		_labels[key] = label
 		var value := Label.new()
 		value.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-		value.custom_minimum_size.x = 44.0
+		value.custom_minimum_size.x = 40.0
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		heading.add_child(value)
 		_values[key] = value
 		var meter := ProgressBar.new()
-		meter.custom_minimum_size = Vector2(90.0, 10.0)
+		meter.custom_minimum_size = Vector2(70.0, 7.0)
 		meter.show_percentage = false
 		meter.add_theme_stylebox_override("background", _style("progress_transparent.png", 4.0))
 		var fill := _style("progress_%s.png" % METERS[key][1], 4.0)
@@ -137,52 +138,59 @@ func _ready() -> void:
 		cell.add_child(meter)
 		meters[key] = meter
 	var footer := HBoxContainer.new()
-	footer.add_theme_constant_override("separation", 12)
+	footer.add_theme_constant_override("separation", 10)
 	column.add_child(footer)
 	clock_label = Label.new()
 	clock_label.name = "SolarClock"
 	clock_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	clock_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	clock_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	clock_label.custom_minimum_size.y = 42.0
 	clock_label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.86))
 	footer.add_child(clock_label)
 	var progression := VBoxContainer.new()
 	progression.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	progression.add_theme_constant_override("separation", 0)
+	progression.add_theme_constant_override("separation", 1)
 	footer.add_child(progression)
-	age_label = Label.new()
-	age_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	age_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	progression.add_child(age_label)
+	var experience_row := HBoxContainer.new()
+	experience_row.add_theme_constant_override("separation", 8)
+	progression.add_child(experience_row)
 	experience_label = Label.new()
 	experience_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	experience_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	progression.add_child(experience_label)
-	for label in [age_label, experience_label]:
+	experience_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	experience_row.add_child(experience_label)
+	var stats_row := HBoxContainer.new()
+	stats_row.add_theme_constant_override("separation", 10)
+	progression.add_child(stats_row)
+	age_label = Label.new()
+	age_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	age_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	age_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_row.add_child(age_label)
+	score_label = Label.new()
+	score_label.name = "Score"
+	score_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	score_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	stats_row.add_child(score_label)
+	gold_label = Label.new()
+	gold_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	gold_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	stats_row.add_child(gold_label)
+	for label in [age_label, experience_label, score_label, gold_label]:
 		label.add_theme_font_size_override("font_size", 11)
+	for label in [age_label, experience_label]:
 		label.add_theme_color_override("font_color", Color(0.65, 0.73, 0.73))
+	score_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.62))
+	gold_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.35))
 	xp_bar = ProgressBar.new()
 	xp_bar.name = "ExperienceBar"
-	xp_bar.custom_minimum_size = Vector2(90.0, 6.0)
+	xp_bar.custom_minimum_size = Vector2(100.0, 5.0)
 	xp_bar.show_percentage = false
 	xp_bar.add_theme_stylebox_override("background", _style("progress_transparent.png", 4.0))
 	var xp_fill := _style("progress_white.png", 4.0)
 	xp_fill.modulate_color = Color(1.0, 0.83, 0.35)
 	xp_bar.add_theme_stylebox_override("fill", xp_fill)
-	progression.add_child(xp_bar)
-	score_label = Label.new()
-	score_label.name = "Score"
-	score_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	score_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	score_label.add_theme_font_size_override("font_size", 11)
-	score_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.62))
-	progression.add_child(score_label)
-	gold_label = Label.new()
-	gold_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	gold_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.35))
-	gold_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	progression.add_child(gold_label)
+	experience_row.add_child(xp_bar)
 	get_viewport().size_changed.connect(_resize)
 	_resize()
 	clear_player()
@@ -202,8 +210,8 @@ func _resize() -> void:
 	var margin := maxf(8.0, (width - 920.0) / 2.0)
 	panel.offset_left = margin
 	panel.offset_right = -margin
-	grid.columns = 4 if width >= 600.0 else 2
-	panel.offset_top = -maxf(120.0, panel.get_combined_minimum_size().y)
+	grid.columns = 5 if width >= 640.0 else 2
+	panel.offset_top = -maxf(96.0, panel.get_combined_minimum_size().y)
 	_sync_frame.call_deferred()
 
 func _sync_frame() -> void:
@@ -237,7 +245,7 @@ func _update_clock() -> void:
 		var minutes := int(ceil(state.remaining_seconds / 60.0))
 		var remaining := "%02d:%02d" % [minutes / 60, minutes % 60]
 		event = tr("Sunset in %s" if state.day else "Sunrise in %s") % remaining
-	clock_label.text = tr("Solar time %s") % time + "\n" + event
+	clock_label.text = tr("Solar time %s") % time + "  ·  " + event
 
 func _on_sound_toggled(value: bool) -> void:
 	sound_enabled = value

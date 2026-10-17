@@ -234,15 +234,15 @@ func _test_creation() -> void:
 	var elapsed: float = client._approach_elapsed
 	client._on_player_profile(profile)
 	_check(client._approach_elapsed == elapsed, "Profile refresh does not restart the approach")
-	client._process(10.0)
+	client._process(20.0)
 	_check(client._camera.position.is_equal_approx(Vector3.RIGHT * (client.PLANET_RADIUS + client.SURFACE_ALTITUDE_M / 1000.0)), "Approach stops above the stored position")
 	_check(client._sky.surface_blend > 0.8, "Approach transitions from the space sky to the server's surface sky")
 	var arrived: Vector3 = client._camera.position
-	client._process(10.0)
+	client._process(20.0)
 	_check(client._camera.position.is_equal_approx(arrived), "Arrived camera stays over the player instead of orbiting")
 	for height in [6371000.0, -6371000.0]:
 		_check(client._start_approach({"x": 0.0, "y": height, "z": 0.0}), "Polar location is accepted")
-		client._process(10.0)
+		client._process(20.0)
 		_check(client._camera.transform.is_finite() and (-client._camera.basis.z).dot(-client._surface_direction) > 0.99, "Polar and antipodal approaches retain a valid camera orientation")
 	_check(not client._start_approach({"x": 0, "y": 0, "z": 0}) and not client._start_approach({"x": "6371000", "y": 0, "z": 0}) and not client._start_approach({"x": NAN, "y": 0, "z": 0}), "Missing, zero and nonnumeric positions cannot produce a fabricated landing")
 	var unavailable_profile := profile.duplicate(true)

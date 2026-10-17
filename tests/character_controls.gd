@@ -111,6 +111,32 @@ func _run() -> void:
 		controls.avatar.position.x = step * 0.00001
 		controls.update_camera(flat)
 		check(absf(controls.camera.position.x - 0.00033) < 0.0000001, "Camera floor remains stable during centimetre steps at planet-scale coordinates")
+	# Close behind the character the camera looks over its shoulder, from OVER_SHOULDER_FAR_M on at its middle.
+	controls.pitch = -0.05
+	controls.yaw = 0.0
+	controls.avatar.position = Vector3(0.0, 0.0, 0.0)
+	# the sideways angle between where the camera looks and the character (its up is the x axis here)
+	var looked_at := {}
+	for distance in [2.0, 6.0, 11.0, 20.0]:
+		controls.distance_m = distance
+		controls.update_camera(flat)
+		var basis: Basis = controls.camera.global_transform.basis
+		var to_avatar: Vector3 = controls.avatar.position - controls.camera.position
+		looked_at[distance] = absf(atan2(to_avatar.dot(basis.x), -to_avatar.dot(basis.z)))
+	check(looked_at[2.0] > 0.05, "At the closest zoom the camera looks past the character's back (%.3f rad)" % looked_at[2.0])
+	check(looked_at[11.0] < 0.01 and looked_at[20.0] < 0.01, "From the far zoom the camera looks at the middle of the character (%.3f rad)" % looked_at[11.0])
+	check(looked_at[2.0] > looked_at[6.0] and looked_at[6.0] > looked_at[11.0], "The shift of the view fades smoothly with the distance")
+	controls.update_camera(flat, null, false)
+	controls.active = false
+	var parked: Vector3 = controls.camera.position
+	controls.update_camera(flat)
+	check(controls.camera.position == parked, "Without active controls the camera is left alone")
+	controls.distance_m = 8.0
+	controls.update_camera(flat, null, true)
+	check(controls.camera.position != parked, "A landing can put the camera behind the character before the controls start")
+	controls.active = true
+	controls.distance_m = 5.0
+	controls.pitch = 1.2
 	controls.reset_keys()
 	check(absf(controls.avatar.position.x + 0.00017) < 0.0000001, "Idle avatar is grounded even when its saved position is above terrain")
 	controls._ground_surface = null
