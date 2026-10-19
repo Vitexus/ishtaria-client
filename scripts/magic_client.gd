@@ -31,7 +31,7 @@ func is_running() -> bool:
 static func valid_spell(spell: Variant) -> bool:
 	if not spell is Dictionary or not spell.get("id") is String or spell.id.is_empty() or spell.id.length() > 40:
 		return false
-	if not spell.get("name") is String or spell.name.length() > 60 or not spell.get("effect") in ["heal", "refresh", "ward", "bolt"]:
+	if not spell.get("name") is String or spell.name.length() > 60 or not spell.get("effect") in ["heal", "refresh", "ward", "bolt", "day", "night"]:
 		return false
 	for key in ["mana", "cooldown_ms", "range_m", "ready_in_ms"]:
 		if not (spell.get(key) is float or spell.get(key) is int) or not is_finite(float(spell[key])) or spell[key] < 0:
@@ -50,7 +50,7 @@ static func valid_known(data: Variant) -> bool:
 	return true
 
 static func valid_cast(data: Variant) -> bool:
-	if not data is Dictionary or not data.get("spell") is String or not data.get("effect") in ["heal", "refresh", "ward", "bolt"] or not data.get("player") is Dictionary:
+	if not data is Dictionary or not data.get("spell") is String or not data.get("effect") in ["heal", "refresh", "ward", "bolt", "day", "night"] or not data.get("player") is Dictionary:
 		return false
 	var strike: Variant = data.get("strike")
 	if strike == null:

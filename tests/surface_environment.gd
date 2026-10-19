@@ -47,8 +47,8 @@ func _run() -> void:
 	surface.water_material.shader = SHADER
 	surface.water_material.set_shader_parameter("water_pass", true)
 	world.add_child(surface)
-	_check(surface.catalog.size() == 248, "All original Nature variants and the other three packs have validated entries")
-	_check(surface.catalog.filter(func(entry: Dictionary) -> bool: return entry.id.begins_with("nature.")).size() == 161, "All 161 natural Nature Kit variants are integrated")
+	_check(surface.catalog.size() == 259, "All original Nature variants, packs and ED waterfowl have validated entries")
+	_check(surface.catalog.filter(func(entry: Dictionary) -> bool: return entry.id.begins_with("nature.")).size() == 162, "161 Nature Kit variants plus the reed clump")
 	for entry in surface.catalog:
 		var scene := load(entry.scene) as PackedScene
 		_check(scene != null, entry.id + " loads as a PackedScene")
@@ -102,7 +102,9 @@ func _run() -> void:
 	surface.set_render_origin(precise)
 	_check(absf(surface.objects.get_child(0).position.x - 0.0004) < 0.0000001, "Obstacle positioning preserves forty centimetres at planet-scale coordinates")
 	var vertices: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	_check(vertices.size() == 129 * 129 and surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX].size() == 128 * 128 * 6, "Fine detail shares vertices without duplicate height calculations")
+	var indices: PackedInt32Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	# A disk inscribed in the old square: full vertex grid, fewer triangles (about π/4 of the square).
+	_check(vertices.size() == 129 * 129 and indices.size() < 128 * 128 * 6 and indices.size() > int(128 * 128 * 6 * 0.7), "Fine detail is a shared-vertex disk, not a floating square tile")
 	_check(surface.detail.top_level and surface.detail.get_child(0).material_override.get_shader_parameter("is_detail"), "Detail uses local coordinates without a second planet-scale transform")
 	_check(vertices[0].length() < 2.0, "Detail vertices are local, not planet-scale")
 	var shifted := precise.duplicate()
@@ -149,6 +151,7 @@ func _run() -> void:
 	_check(not surface.water_map.is_empty() and surface.water_map.has("texture"), "A flooded region bakes a water picture for the minimap")
 	_check(surface._map_prop_kind("town.road") == "road", "Road modules are roads on the map")
 	_check(surface._map_prop_kind("town.wall") == "building" and surface._map_prop_kind("quaternius.castle") == "building", "Walls and ready-made buildings are buildings on the map")
+	_check(surface._map_prop_kind("disk:gilgamesh:media/models/architecture/uruk_quarter_01.glb") == "building", "Datadisk structures are buildings on the map whatever their model is named")
 	_check(surface._map_prop_kind("town.tree").is_empty() and surface._map_prop_kind("retro.barrels").is_empty(), "Trees and crates stay off the map")
 	var footprint: Vector2 = surface._kit_footprint(surface.prop_path("town.road"))
 	_check(absf(footprint.x - 1.0) < 0.01 and absf(footprint.y - 1.0) < 0.01, "The road tile's footprint is one model unit square")

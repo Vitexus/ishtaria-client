@@ -23,6 +23,15 @@ func _init() -> void:
 
 	var heal := {"spell": "heal", "effect": "heal", "strike": null, "target": null, "player": {}}
 	_check(magic.valid_cast(heal), "a self spell reply")
+	var day_spell := {"id": "day", "name": "Daybreak", "mana": 40, "cooldown_ms": 60000, "effect": "day", "range_m": 0.0, "ready_in_ms": 0}
+	_check(magic.valid_spell(day_spell), "the day spell")
+	var night_spell := day_spell.duplicate(true)
+	night_spell.id = "night"
+	night_spell.name = "Nightfall"
+	night_spell.effect = "night"
+	_check(magic.valid_spell(night_spell), "the night spell")
+	var day := {"spell": "day", "effect": "day", "strike": null, "target": null, "player": {}, "solar": {"version": 1, "unix_seconds": 123.0, "direction": [0.5, 0.0, 0.866], "sidereal_day_seconds": 86164.0905, "angular_radius_degrees": 0.267}}
+	_check(magic.valid_cast(day), "a day spell reply that turns the world's clock")
 	var bolt := {"spell": "firebolt", "effect": "bolt", "target": "animal.deer", "player": {}, "strike": {"state": "hit", "hits": 1, "hits_required": 3, "items": [], "counter": null}}
 	_check(magic.valid_cast(bolt), "a bolt reply")
 	var killed := bolt.duplicate(true)
@@ -75,7 +84,7 @@ func _init() -> void:
 	_check(panel.inventory_list.find_child("Spell_firebolt", true, false) == null, "no spells, no list")
 
 	var icons := preload("res://scripts/item_icons.gd")
-	for id in ["scroll_refresh", "scroll_firebolt", "scroll_heal", "scroll_ward"]:
+	for id in ["scroll_refresh", "scroll_firebolt", "scroll_heal", "scroll_ward", "scroll_day", "scroll_night"]:
 		_check(icons.texture(id) != null, "icon of " + id)
 
 	print("Magic client checks %s" % ("failed" if failures > 0 else "passed"))

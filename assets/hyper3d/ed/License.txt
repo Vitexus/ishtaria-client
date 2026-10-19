@@ -1,0 +1,25 @@
+Gazelle, onager, goat, lizard, turtle, falcon, pigeon and tamarisk meshes generated for Ishtaria with Hyper3D Rodin (Gen-2.5).
+
+Generation pages:
+- gazelle: https://hyper3d.ai/workspace/rodin/4bda639b-00ba-47fc-9782-69612ce04f68
+- onager: https://hyper3d.ai/workspace/rodin/e23063bb-ccdf-495c-8a33-4f44b478b2b3
+- goat: https://hyper3d.ai/workspace/rodin/accd9a88-a8de-48a8-9c87-4db1011464ed
+- lizard: https://hyper3d.ai/workspace/rodin/f77509e4-f124-4a11-9f6f-b28987fdcff0
+  The generated mesh had two curled tails. They were replaced with one pointed tail in the shipped GLB.
+- turtle: https://hyper3d.ai/workspace/rodin/8b3f842a-1a0c-49ef-901f-d29027a758ec
+  The generated mesh had a head at both ends. The rear one was replaced with a short tail in the shipped GLB.
+- falcon: https://hyper3d.ai/workspace/rodin/076a5069-871b-474f-9817-35a74c31ead6
+- pigeon: https://hyper3d.ai/workspace/rodin/fe01827c-e7da-4075-96a6-3589c8e8fca6
+- tamarisk: https://hyper3d.ai/workspace/rodin/6d473649-5b97-4eb2-9171-9d110ebaa455
+  The generated mesh was a bare trunk and branches. The shipped GLB adds a crown of foliage tufts.
+
+Each Rodin GLB is grounded, scaled to a real height (gazelle 1.05 m, onager 1.35 m, goat 0.90 m, lizard 0.28 m, turtle 0.22 m, falcon 0.45 m, pigeon 0.25 m, tamarisk 1.40 m) and carries looping Idle and Walk clips (a small bob; the meshes are not skeletal). They are catalog scenery, not inventory items. Released with the client under the MIT license.
+
+Waterfowl added for the Early Dynastic marsh overlay (same folder for client catalog path simplicity):
+
+- duck.glb — "Bird" by Quaternius (https://poly.pizza/m/gYYC0gYMnw), CC0 1.0,
+  grounded and tinted for marsh use; Idle/Walk bob clips added for Ishtaria.
+- goose.glb — "goos" by polarvoid on Sketchfab
+  (https://sketchfab.com/3d-models/goos-82c7cbb4b6d4463c8fe9d87fee78bcdf),
+  CC BY 4.0. Reoriented, grounded to 0.55 m and given Idle/Walk bob clips for Ishtaria.
+  Credit: polarvoid.

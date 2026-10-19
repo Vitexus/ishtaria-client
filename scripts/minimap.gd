@@ -13,7 +13,9 @@ const MARGIN := 16
 # Scale indicator
 const SCALE_INDICATOR_SIZE := 14
 const SCALE_INDICATOR_COLOR := Color(0.8, 0.8, 0.8)
+## Half zoom still shows ~400 m; big-map mode allows a much wider view so a city disk fits.
 const MIN_ZOOM := 0.5
+const MIN_ZOOM_BIG := 0.08
 const MAX_ZOOM := 2.0
 const ZOOM_STEP := 0.25
 
@@ -310,7 +312,8 @@ func zoom_in() -> void:
 
 
 func zoom_out() -> void:
-	_zoom_level = max(_zoom_level - ZOOM_STEP, MIN_ZOOM)
+	var floor_zoom := MIN_ZOOM_BIG if _big_mode else MIN_ZOOM
+	_zoom_level = max(_zoom_level - ZOOM_STEP, floor_zoom)
 	_update_zoom()
 
 

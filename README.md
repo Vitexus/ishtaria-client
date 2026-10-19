@@ -468,7 +468,7 @@ Thanks to [Kenney](https://kenney.nl/) for making high-quality game assets
 freely available, and to the [Godot](https://godotengine.org/) contributors
 for the open-source engine powering this client.
 
-The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the four spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0).
+The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the six spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0).
 
 The client includes resources from:
 
@@ -478,6 +478,7 @@ The client includes resources from:
 - [Mini Forest](https://kenney.nl/assets/mini-forest): selected trees, plants and rocks under CC0.
 - [Platformer Kit](https://kenney.nl/assets/platformer-kit): selected pines, snow pines and rocks under CC0.
 - [Animated Animal Pack](https://poly.pizza/bundle/Animated-Animal-Pack-ILAPXeUYiS) by Quaternius: all 12 animals under CC0, standing in the world and as inventory items, in `assets/quaternius/animated-animal-pack/`.
+- Gazelle, onager, goat, lizard, turtle, falcon, pigeon and tamarisk in `assets/hyper3d/ed/`: generated for this project with Hyper3D Rodin (Gen-2.5), MIT, see `License.txt`. They are scenery for the Gilgamesh floodplain overlay, not inventory items. Idle and Walk are a short bob; the meshes are not skeletal. The same folder also holds `duck.glb` (Quaternius Bird, CC0) and `goose.glb` (“goos” by polarvoid on Sketchfab, CC BY — credit polarvoid) for marsh waterfowl.
 - [Chicken](https://poly.pizza/m/ineV9pU5VL), [Pig](https://poly.pizza/m/u35l6uP5vj) and [Sheep](https://poly.pizza/m/rgJXF570ZK) by Quaternius: farm animals under CC0 that graze beside generated settlements, in `assets/quaternius/farm-animals/`.
 - [Animated Fish Bundle](https://poly.pizza/bundle/Animated-Fish-Bundle-44zhHN1UbT) by Quaternius: its 35 fish (not the boat, docks, rods, lures or worm) under CC0, swimming in oceans, lakes and rivers, in `assets/quaternius/animated-fish-bundle/`.
 - [Trees](https://poly.pizza/m/etFGNvsiFv) by Quaternius: its five broadleaf trees (split into single models) under CC0, in `assets/quaternius/trees/`.

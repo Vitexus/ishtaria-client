@@ -107,6 +107,8 @@ static func valid_event(data: Variant) -> bool:
 			return data.get("body") is String and not data.body.is_empty() and data.body.length() <= 500
 		"trade":
 			return true
+		"solar":
+			return true
 	return false
 
 ## Speaks to the players nearby; the server tells how many heard (nobody is fine).

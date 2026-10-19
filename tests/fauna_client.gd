@@ -30,8 +30,9 @@ func _run() -> void:
 			else:
 				animals += 1
 				_check(not entry.has("swim_radius_m") and not "ocean" in entry.biomes, "%s stands on land" % entry.id)
-	_check(animals == 15 and fish == 35, "15 animals and 35 fish in the catalog, found %d and %d" % [animals, fish])
-	_check(environment.catalog.size() == 198 + 50, "the plant and rock catalog is unchanged")
+	_check(animals == 24 and fish == 35, "24 animals and 35 fish in the catalog, found %d and %d" % [animals, fish])
+	_check(environment.catalog.size() == 259, "the plant and rock catalog includes ED waterfowl")
+	_check(environment._models.has("animal.duck") and environment._models.has("animal.goose"), "duck and goose are loadable scenes")
 
 	# An animal stands and plays its idle animation; a fish also circles.
 	environment._place_object(_entry("cow-1", "animal.cow", [6371000.0, 0.0, 0.0]))

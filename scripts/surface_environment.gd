@@ -20,6 +20,9 @@ const PORTAL_STATES := ["building", "open", "closed"]
 ## Scale of the gate model: the model is half a metre tall, so the portal is four metres tall.
 const PORTAL_SCALE_M := 8.0
 const DETAIL_RADIUS := 0.7
+## Outer band (km) where the detail mesh eases toward the unpatched planet so its rim does not
+## stand as a floating plateau with a hard shadow over the coarse globe.
+const DETAIL_EDGE_FEATHER := 0.08
 const DETAIL_SEGMENTS := 128
 const MEMORIALS := preload("res://scripts/survival_panel.gd")
 const CHARACTERS := preload("res://scripts/character_catalog.gd")
@@ -42,12 +45,15 @@ const PROP_KITS := {"graveyard": "graveyard-kit", "town": "fantasy-town-kit", "c
 ## that `ishtaria-server/src/scenery.rs` generates.
 const ROAD_MODELS := ["town.road"]
 const BUILDING_KEYWORDS := ["wall", "roof", "chimney", "stall", "fountain", "tower", "crypt", "fence", "structure", "house", "barracks", "castle", "fortress", "temple"]
-## The baked water picture covers this many metres around the region's centre: the minimap's
-## biggest view (200 m at half zoom) plus a margin, one texture instead of per-frame polygons.
+## The baked region picture covers this many metres around the centre when no landscape patch
+## is loaded; with a patch (Uruk) it grows to the patch so the minimap can show the city and river.
 const WATER_MAP_PIXELS := 256
 const WATER_MAP_EXTENT_M := 420.0
+const WATER_MAP_EXTENT_MAX_M := 3500.0
 ## Water on the minimap: the same colour the map legend shows.
 const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
+## Built / tilled ground from a datadisk clear mask (streets, houses, fields).
+const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
 
 var heightmap: Image
 var environment: Dictionary = {}
@@ -203,7 +209,7 @@ func load_catalog(path: String) -> bool:
 			if not (metallic is float or metallic is int) or not is_finite(float(metallic)) or metallic < 0 or metallic > 1:
 				return false
 		validated.append(entry)
-	if validated.is_empty() or validated.size() > 256:
+	if validated.is_empty() or validated.size() > 320:
 		return false
 	catalog = validated
 	_models = identifiers
@@ -314,7 +320,8 @@ func relief64(direction: Array, base_metres: float, seed: String) -> float:
 	var fade := coast * coast * (3.0 - 2.0 * coast)
 	return fade * (9.0 * sin((point[0] * 0.73 + point[1] * 0.41 + point[2] * 0.55) / 93.0 + phase) * sin((point[0] * -0.38 + point[1] * 0.87 + point[2] * 0.31) / 127.0 - phase) + 3.0 * sin((point[0] * 0.21 + point[1] * -0.52 + point[2] * 0.83) / 37.0 + phase))
 
-func elevation64(direction: Array) -> float:
+## Base elevation in kilometres from the planet heightmap (and shared relief), without landscape patches.
+func elevation64_base(direction: Array) -> float:
 	if heightmap == null:
 		return 0.0
 	var mapped := _coordinates64(direction)
@@ -328,10 +335,16 @@ func elevation64(direction: Array) -> float:
 	var lower := lerpf(roundf(heightmap.get_pixel(offset + column, mini(row + 1, size - 1)).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), mini(row + 1, size - 1)).r * 255.0), horizontal - column)
 	var base := lerpf(upper, lower, vertical - row) * 16000.0 / 255.0 - 8000.0
 	var metres := base + (relief64(direction, base, environment.seed) if environment.get("version") == 2 else 0.0)
+	return metres / 1000.0
+
+func elevation64(direction: Array) -> float:
 	# The landscape patches look the ground up by a unit direction. A point in metres (the camera's) must be reduced to one, or the
 	# patch is missed and the ground comes out as the coarse base map: the camera is then lifted by the difference (17 m in Uruk) and
 	# cannot look level until it is moved far away.
+	var metres := elevation64_base(direction) * 1000.0
 	var length := sqrt(float(direction[0]) * direction[0] + float(direction[1]) * direction[1] + float(direction[2]) * direction[2])
+	if length <= 0.0:
+		return metres / 1000.0
 	var unit: Array = [float(direction[0]) / length, float(direction[1]) / length, float(direction[2]) / length]
 	return (metres + _terrain_offset_m(unit, metres)) / 1000.0
 
@@ -473,16 +486,31 @@ func _build_detail() -> void:
 				direction[axis] /= length64
 			var point := Vector3(direction[0], direction[1], direction[2])
 			var height := elevation64(direction)
+			# Ease the rim toward the unpatched globe so a landscape patch does not read as a floating card.
+			var radial := Vector2(horizontal, vertical).length()
+			var edge := 1.0
+			if DETAIL_EDGE_FEATHER > 0.0 and radial > DETAIL_RADIUS - DETAIL_EDGE_FEATHER:
+				edge = clampf((DETAIL_RADIUS - radial) / DETAIL_EDGE_FEATHER, 0.0, 1.0)
+				edge = edge * edge * (3.0 - 2.0 * edge)
+				height = lerpf(elevation64_base(direction), height, edge)
 			var patch_water := _terrain_water_m(direction)
 			var water := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(point)])) / 1000.0 + 0.001
+			if edge < 1.0:
+				var base_water := float(environment.water_m[environment_index(point)]) / 1000.0 + 0.001
+				water = lerpf(base_water, water, edge)
 			tool.set_normal(point)
 			tool.set_uv2(Vector2(height, 0))
 			tool.add_vertex(_render_position([direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0]))
 			water_tool.set_normal(point)
 			water_tool.set_uv2(Vector2(height, 0))
 			water_tool.add_vertex(_render_position([direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0]))
+	# A disk, not a square: the old axis-aligned patch looked like a huge floating tile from above.
 	for row in DETAIL_SEGMENTS:
 		for column in DETAIL_SEGMENTS:
+			var mid_h: float = ((float(column) + 0.5) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
+			var mid_v: float = ((float(row) + 0.5) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
+			if Vector2(mid_h, mid_v).length() > DETAIL_RADIUS:
+				continue
 			var first := row * (DETAIL_SEGMENTS + 1) + column
 			for index in [first, first + DETAIL_SEGMENTS + 1, first + 1, first + 1, first + DETAIL_SEGMENTS + 1, first + DETAIL_SEGMENTS + 2]:
 				tool.add_index(index)
@@ -503,8 +531,11 @@ func _build_detail() -> void:
 	water_detail.set_shader_parameter("wave_phase", Vector2(fposmod((anchor[0] + anchor[1] * 0.7 + anchor[2] * 0.3) * 0.65, TAU), fposmod((anchor[0] * 0.2 + anchor[1] * 0.5 + anchor[2]) * 0.7, TAU)))
 	local_water.material_override = water_detail
 	detail.add_child(local_water)
+	var discard_radius: float = DETAIL_RADIUS * 1.05 / RADIUS
 	land_material.set_shader_parameter("detail_direction", unit)
+	land_material.set_shader_parameter("detail_discard", discard_radius)
 	water_material.set_shader_parameter("detail_direction", unit)
+	water_material.set_shader_parameter("detail_discard", discard_radius)
 	_bake_water_map(unit, tangent, forward)
 
 func ground_position64(coordinates_metres: Array) -> Vector3:
@@ -583,8 +614,11 @@ func apply_objects(data: Variant) -> bool:
 				return false
 		if entry.scale_m <= 0 or entry.scale_m > 20 or entry.yaw < 0 or entry.yaw > TAU or entry.collision_radius_m < 0 or entry.collision_radius_m > 20 or entry.biome < 0 or entry.biome > 7 or entry.biome != floor(entry.biome):
 			return false
-		# Farm animals graze wherever their settlement is.
-		if not ":farm:" in entry.id and not BIOMES[int(entry.biome)] in _models[entry.model].biomes:
+		# Farm animals graze wherever their settlement is. An empty biomes list means the
+		# model is overlay-only (e.g. Early Dynastic wildlife): the server may place it
+		# in any biome, and the catalog does not spawn it from global biome weights.
+		var allowed: Array = _models[entry.model].biomes
+		if not ":farm:" in entry.id and not allowed.is_empty() and not BIOMES[int(entry.biome)] in allowed:
 			return false
 		if entry.has("wander") and _parse_route(entry.wander).is_empty():
 			return false
@@ -854,6 +888,8 @@ func apply_terrains(data: Variant) -> bool:
 			return false
 		if entry.get("water") != null and (not entry.water is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.water) or not entry.water.ends_with(".png")):
 			return false
+		if entry.get("clear") != null and (not entry.clear is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.clear) or not entry.clear.ends_with(".png")):
+			return false
 		var anchor := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
 		patches.append({
 			"place": entry.place,
@@ -866,8 +902,10 @@ func apply_terrains(data: Variant) -> bool:
 			"axes": _terrain_axes([anchor.normalized().x, anchor.normalized().y, anchor.normalized().z]),
 			"heightmap_url": entry.heightmap,
 			"water_url": entry.get("water", ""),
+			"clear_url": entry.get("clear", ""),
 			"grid": null,
 			"water_grid": null,
+			"clear_image": null,
 			"width": 0,
 			"height": 0
 		})
@@ -876,9 +914,10 @@ func apply_terrains(data: Variant) -> bool:
 		for previous: Dictionary in _terrain_patches:
 			if previous.place == patch.place:
 				old = previous
-		if not old.is_empty() and old.heightmap_url == patch.heightmap_url and old.water_url == patch.water_url:
+		if not old.is_empty() and old.heightmap_url == patch.heightmap_url and old.water_url == patch.water_url and old.get("clear_url", "") == patch.clear_url:
 			patch.grid = old.grid
 			patch.water_grid = old.water_grid
+			patch.clear_image = old.get("clear_image")
 			patch.width = old.width
 			patch.height = old.height
 	_terrain_patches = patches
@@ -890,6 +929,8 @@ func apply_terrains(data: Variant) -> bool:
 			rebuild = true
 		if patch.water_url != "" and patch.water_grid == null:
 			_terrain_fetch(patch.water_url)
+		if patch.clear_url != "" and patch.clear_image == null:
+			_terrain_fetch(patch.clear_url)
 	if rebuild:
 		_build_detail()
 	return true
@@ -914,6 +955,21 @@ func _terrain_received(result: int, code: int, _headers: PackedStringArray, body
 		(_terrain_requests[url] as HTTPRequest).queue_free()
 		_terrain_requests.erase(url)
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	var clear_only := false
+	for patch: Dictionary in _terrain_patches:
+		if url == String(patch.get("clear_url", "")):
+			var image := Image.new()
+			if image.load_png_from_buffer(body) != OK:
+				return
+			patch.clear_image = image
+			clear_only = true
+	if clear_only:
+		if target != Vector3.ZERO:
+			var unit := target.normalized()
+			var reference := Vector3.UP if absf(unit.y) < 0.9 else Vector3.RIGHT
+			var tangent := reference.cross(unit).normalized()
+			_bake_water_map(unit, tangent, unit.cross(tangent).normalized())
 		return
 	var grid := _terrain_decode_png16(body)
 	if grid.is_empty():
@@ -1231,6 +1287,10 @@ static func _map_prop_kind(model: Variant) -> String:
 		return ""
 	if model in ROAD_MODELS:
 		return "road"
+	# A datadisk structure is always a building: its model name (`disk:.../<name>.glb`)
+	# says nothing about walls, roofs or houses, so the keyword list would miss it.
+	if (model as String).begins_with("disk:"):
+		return "building"
 	for keyword in BUILDING_KEYWORDS:
 		if keyword in model:
 			return "building"
@@ -1285,12 +1345,35 @@ static func _combined_aabb(node: Node, parent: Transform3D) -> AABB:
 			result = child_aabb if result == AABB() else result.merge(child_aabb)
 	return result
 
-## The baked water picture of the region (see `water_map`): a pixel is water where the water
-## level the rendered water plane uses stands above the rendered ground, so streams, lakes
-## and the sea appear exactly where the player sees them.
+## Metres the minimap region texture covers from the centre: grows with landscape patches so a
+## city like Uruk and its river fit when the big map is zoomed out.
+func _map_extent_m() -> float:
+	var extent := WATER_MAP_EXTENT_M
+	for patch: Dictionary in _terrain_patches:
+		extent = maxf(extent, maxf(float(patch.extent[0]), float(patch.extent[1])) * 0.55)
+	return minf(extent, WATER_MAP_EXTENT_MAX_M)
+
+## Whether a landscape patch marks this direction as built or tilled ground (minimap city).
+func _terrain_cleared(direction: Array) -> bool:
+	for patch: Dictionary in _terrain_patches:
+		var image: Variant = patch.get("clear_image")
+		if not image is Image:
+			continue
+		var local: Array = _terrain_local(patch, direction)
+		if local.is_empty():
+			continue
+		var clear: Image = image
+		var column := int(clampf((float(local[0]) + float(patch.extent[0]) * 0.5) / float(patch.extent[0]) * clear.get_width(), 0.0, clear.get_width() - 1))
+		var row := int(clampf((float(local[1]) + float(patch.extent[1]) * 0.5) / float(patch.extent[1]) * clear.get_height(), 0.0, clear.get_height() - 1))
+		if clear.get_pixel(column, row).r > 0.5:
+			return true
+	return false
+
+## The baked region picture (see `water_map`): settlement clear-mask under water where the water
+## plane stands above the ground, so the minimap shows the city silhouette and its rivers.
 func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
 	var pixels := WATER_MAP_PIXELS
-	var step := WATER_MAP_EXTENT_M * 2.0 / float(pixels)
+	var step := _map_extent_m() * 2.0 / float(pixels)
 	var image := Image.create(pixels, pixels, false, Image.FORMAT_RGBA8)
 	image.fill(Color.TRANSPARENT)
 	for row in pixels:
@@ -1299,9 +1382,12 @@ func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
 			# Image row 0 is the top of the map: the `forward` direction of the bake frame.
 			var vertical := (pixels * 0.5 - (float(row) + 0.5)) * step
 			var direction: Vector3 = (unit * RADIUS + tangent * horizontal / 1000.0 + forward * vertical / 1000.0).normalized()
-			var patch_water := _terrain_water_m([direction.x, direction.y, direction.z])
+			var dir := [direction.x, direction.y, direction.z]
+			if _terrain_cleared(dir):
+				image.set_pixel(column, row, SETTLEMENT_MAP_COLOR)
+			var patch_water := _terrain_water_m(dir)
 			var level := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(direction)])) / 1000.0 + 0.001
-			if level > elevation64([direction.x, direction.y, direction.z]):
+			if level > elevation64(dir):
 				image.set_pixel(column, row, WATER_MAP_COLOR)
 	water_map = {
 		"texture": ImageTexture.create_from_image(image),
@@ -1634,18 +1720,35 @@ func _npc_player(model: Node) -> AnimationPlayer:
 	var players := model.find_children("*", "AnimationPlayer", true, false)
 	return players[0] if not players.is_empty() else null
 
-## Plays the walking or the idle clip of a character, whatever case and armature prefix its model gives them.
-func _play_npc(player: AnimationPlayer, walking: bool) -> void:
+## Plays Idle, Walk or Run for a character from ground speed (m/s). Walk is authored near 1 m/s;
+## Run near 2.2 m/s. Falls back to Walk when Run is missing (elderly models).
+func _play_npc(player: AnimationPlayer, speed_m_s: float) -> void:
 	if player == null:
 		return
-	var wanted := "walk" if walking else "idle"
+	var wanted := "idle"
+	if speed_m_s > 1.55:
+		wanted = "run"
+	elif speed_m_s > 0.05:
+		wanted = "walk"
+	var clip := _npc_clip(player, wanted)
+	if clip.is_empty() and wanted == "run":
+		wanted = "walk"
+		clip = _npc_clip(player, wanted)
+	if clip.is_empty():
+		return
+	var reference := 2.2 if wanted == "run" else 1.0
+	var scale := 1.0 if wanted == "idle" else clampf(speed_m_s / reference, 0.35, 1.85)
+	player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+	player.speed_scale = scale
+	if player.current_animation != clip:
+		player.play(clip, 0.2)
+
+func _npc_clip(player: AnimationPlayer, wanted: String) -> String:
 	for candidate in player.get_animation_list():
 		var lower := String(candidate).to_lower()
 		if lower == wanted or lower.ends_with("|" + wanted):
-			player.get_animation(candidate).loop_mode = Animation.LOOP_LINEAR
-			player.speed_scale = 1.0
-			player.play(candidate, 0.2)
-			return
+			return String(candidate)
+	return ""
 
 ## Walks the characters that walk along their routes: they turn towards where they go and play the walking
 ## clip while they move and the idle one while they stand. Their entry follows them, so that talking to them,
@@ -1666,16 +1769,17 @@ func _walk_npcs(delta: float) -> void:
 		var velocity: Vector3 = sample[1]
 		node.position = _render_position([metres.x, metres.y, metres.z])
 		_npc_entries[index].position = [metres.x, metres.y, metres.z]
-		var walking := velocity.length() > 0.05
+		var speed := velocity.length()
+		var walking := speed > 0.05
 		if walking:
 			var up := metres.normalized()
 			var forward := (velocity - up * velocity.dot(up)).normalized()
 			# Models face +Z, and a basis that looks at a point has -Z pointing there.
 			var facing := Basis.looking_at(-forward, up).get_rotation_quaternion()
 			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 5.0))
-		if walking != walker.walking:
+		if walking != walker.walking or walking:
 			walker.walking = walking
-			_play_npc(walker.player, walking)
+			_play_npc(walker.player, speed if walking else 0.0)
 
 ## The player starts or ends a conversation with a character. While it lasts the character stands still and turns to the player (the server
 ## stops the clock of its walk too, so it is where the client sees it); afterwards a walking character goes on to where it was going (the
@@ -1712,7 +1816,7 @@ func _face_held(delta: float) -> void:
 		var walker: Variant = _npc_walker(npc_id)
 		if walker != null and walker.walking:
 			walker.walking = false
-			_play_npc(walker.player, false)
+			_play_npc(walker.player, 0.0)
 		var released: int = hold.released_at
 		if released == 0:
 			var metres := Vector3(entry.position[0], entry.position[1], entry.position[2])

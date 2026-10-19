@@ -7,6 +7,7 @@ extends CanvasLayer
 signal finished
 
 const MAX_IMAGE_BYTES := 2097152
+const MAX_AUDIO_BYTES := 8 * 1024 * 1024
 const MAX_DISKS := 8
 const SHOW_SECONDS := 7.0
 
@@ -19,6 +20,7 @@ var _picture: TextureRect
 var _caption: Label
 var _hint: Label
 var _timer: Timer
+var _jingle: AudioStreamPlayer
 
 func _ready() -> void:
 	layer = 15
@@ -62,6 +64,10 @@ func _ready() -> void:
 	_timer.one_shot = true
 	_timer.timeout.connect(_next)
 	add_child(_timer)
+	_jingle = AudioStreamPlayer.new()
+	_jingle.name = "CoverJingle"
+	_jingle.volume_db = -8.0
+	add_child(_jingle)
 	_update_hint()
 
 func _notification(what: int) -> void:
@@ -87,7 +93,11 @@ static func covered_disks(disks: Variant) -> Array:
 		if result.size() >= MAX_DISKS:
 			break
 		if disk is Dictionary and disk.get("id") is String and disk.get("name") is String and valid_cover_url(disk.get("cover")):
-			result.append({"id": disk.id, "name": String(disk.name).left(80), "version": String(disk.get("version", "")).left(32), "cover": disk.cover})
+			var entry := {"id": disk.id, "name": String(disk.name).left(80), "version": String(disk.get("version", "")).left(32), "cover": disk.cover, "cover_music": ""}
+			var music: Variant = disk.get("cover_music")
+			if music is Dictionary and music.get("url") is String and String(music.url).begins_with("/story/media/"):
+				entry.cover_music = String(music.url)
+			result.append(entry)
 	return result
 
 ## Shows the covers of a freshly connected server. Does nothing when no disk has one.
@@ -103,6 +113,7 @@ func dismiss() -> void:
 	_queue = []
 	_shown = false
 	_timer.stop()
+	_stop_jingle()
 	for child in get_children():
 		if child is HTTPRequest:
 			child.queue_free()
@@ -111,8 +122,14 @@ func dismiss() -> void:
 func is_showing() -> bool:
 	return visible
 
+func _stop_jingle() -> void:
+	if is_instance_valid(_jingle):
+		_jingle.stop()
+		_jingle.stream = null
+
 func _next() -> void:
 	_timer.stop()
+	_stop_jingle()
 	visible = false
 	if _queue.is_empty():
 		if _shown:
@@ -156,6 +173,31 @@ func _show(disk: Dictionary, texture: Texture2D) -> void:
 	_shown = true
 	visible = true
 	_timer.start(SHOW_SECONDS)
+	_fetch_jingle(disk)
+
+func _fetch_jingle(disk: Dictionary) -> void:
+	var path: String = String(disk.get("cover_music", ""))
+	if path.is_empty() or server_url.is_empty():
+		return
+	var generation := _generation
+	var request := HTTPRequest.new()
+	request.timeout = 10.0
+	request.max_redirects = 0
+	request.body_size_limit = MAX_AUDIO_BYTES
+	add_child(request)
+	request.request_completed.connect(func(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+		request.queue_free()
+		if generation != _generation or result != HTTPRequest.RESULT_SUCCESS or code != 200:
+			return
+		var stream := AudioStreamOggVorbis.load_from_buffer(body)
+		if stream == null:
+			return
+		stream.loop = false
+		_jingle.stream = stream
+		_jingle.play()
+	)
+	if request.request(server_url + path) != OK:
+		request.queue_free()
 
 func _on_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:

@@ -9,6 +9,7 @@ uniform bool has_environment = false;
 uniform bool water_pass = false;
 uniform bool is_detail = false;
 uniform vec3 detail_direction = vec3(0.0);
+uniform float detail_discard = 0.00012;
 uniform vec2 wave_phase = vec2(0.0);
 varying vec3 surface_point;
 varying float detail_elevation;
@@ -64,7 +65,7 @@ void fragment() {
 	ROUGHNESS = 1.0;
 	if (has_heightmap) {
 		vec3 direction = normalize(surface_point);
-		if (!is_detail && length(detail_direction) > 0.5 && length(direction - detail_direction) < 0.00010) {
+		if (!is_detail && length(detail_direction) > 0.5 && length(direction - detail_direction) < detail_discard) {
 			discard;
 		}
 		float height = sample_height(direction);

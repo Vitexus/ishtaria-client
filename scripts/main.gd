@@ -1015,6 +1015,7 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 		_audio.play("confirmation")
 		_connected_world = world.server_name
 		_disk_cover.present(_server_url, world.get("datadisks", []))
+		_area_music.set_ambient(world.get("datadisks", []))
 		if _history.record_connection(_server_url, world) != OK:
 			_set_feedback("Could not save server history")
 		print("Connected to Ishtaria server %s (version %s): world %s, ruleset %s, seed %s" % [_server_url, server_version, world.server_name, world.ruleset, world.get("seed", "-")])
@@ -1440,6 +1441,8 @@ func _on_cast_done(reply: Dictionary) -> void:
 	_toast.show_toast(text, 1.8)
 	_spell_effect(str(reply.effect))
 	_audio.play("confirmation")
+	if reply.get("solar") is Dictionary and _sky.apply_solar(reply.solar):
+		_toast.show_toast(tr("Dawn breaks" if reply.effect == "day" else "Night falls"), 2.4)
 	_session.refresh()
 	_environment.refresh_objects()
 
@@ -1624,6 +1627,9 @@ func _on_friend_event(event: Dictionary) -> void:
 	elif event.kind == "whisper":
 		_chat.add_line(tr("%s whispers: %s") % [event.subject, event.body], Color(0.8, 0.7, 1.0), 20.0)
 		_audio.play("confirmation")
+	elif event.kind == "solar":
+		# Somebody turned the world's clock to dawn or dusk: ask for the sky again.
+		_refresh_world()
 
 ## A line written in the chat box: `/w name text` whispers, anything else is said aloud.
 func _on_chat_submitted(text: String) -> void:

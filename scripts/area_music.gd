@@ -18,6 +18,8 @@ var _channels: Dictionary = {}
 var _wanted_url := ""
 var _wanted_gain := 0.0
 var _loop := true
+## Default travel track from the datadisk manifest (`ambient_music`), used when no place music applies.
+var _ambient: Dictionary = {}
 
 ## URL of the track that is wanted and already audible, "" otherwise.
 var current_url: String:
@@ -29,9 +31,24 @@ var gain: float:
 	get:
 		return _channels[_wanted_url].gain if _channels.has(_wanted_url) else 0.0
 
+## Remember the first disk ambient track announced with the world (cleared on disconnect).
+func set_ambient(disks: Variant) -> void:
+	_ambient = {}
+	if not disks is Array:
+		return
+	for disk in disks:
+		if disk is Dictionary and disk.get("ambient_music") is Dictionary:
+			var music: Dictionary = disk.ambient_music
+			if music.get("url") is String and String(music.url).begins_with("/story/media/"):
+				_ambient = {"music": {"url": String(music.url), "loop": bool(music.get("loop", true))}}
+				return
+
 ## `area` is what the server announced for the place the player stands in (empty for none) with
 ## the fade `level` 0..1 for the player's distance.
 func set_target(area: Dictionary, level: float) -> void:
+	if area.is_empty() and not _ambient.is_empty():
+		area = _ambient
+		level = 0.55
 	if area.is_empty():
 		_wanted_url = ""
 		_wanted_gain = 0.0

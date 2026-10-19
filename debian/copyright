@@ -71,6 +71,12 @@ License: CC-BY-3.0
  author and link to the license. The full text is available at
  https://creativecommons.org/licenses/by/3.0/legalcode.
 
+License: CC-BY-4.0
+ Licensed under the Creative Commons Attribution 4.0 International license. You
+ may copy, redistribute and adapt the work, also commercially, if you credit
+ the author and link to the license. The full text is available at
+ https://creativecommons.org/licenses/by/4.0/legalcode.
+
 License: MIT
  MIT License
  .
@@ -93,6 +99,21 @@ License: MIT
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE.
+
+Files: assets/hyper3d/ed/*
+Copyright: 2026 VitexSoftware
+License: MIT
+Comment: Gazelle, onager, goat, lizard, turtle, falcon, pigeon and tamarisk generated for the project with Hyper3D Rodin Gen-2.5. Excludes duck.glb and goose.glb (separate entries below).
+
+Files: assets/hyper3d/ed/duck.glb
+Copyright: Quaternius
+License: CC0-1.0
+Comment: "Bird" from Poly Pizza (https://poly.pizza/m/gYYC0gYMnw), grounded and given Idle/Walk bob clips for Ishtaria.
+
+Files: assets/hyper3d/ed/goose.glb
+Copyright: polarvoid
+License: CC-BY-4.0
+Comment: "goos" from Sketchfab (https://sketchfab.com/3d-models/goos-82c7cbb4b6d4463c8fe9d87fee78bcdf); credit polarvoid. Reoriented and given Idle/Walk bob clips for Ishtaria.
 
 Files: assets/branding/*
 Copyright: 2026 VitexSoftware

@@ -2243,6 +2243,96 @@
       "animation": "Idle"
     },
     {
+      "id": "animal.gazelle",
+      "scene": "res://assets/hyper3d/ed/gazelle.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.onager",
+      "scene": "res://assets/hyper3d/ed/onager.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.lizard",
+      "scene": "res://assets/hyper3d/ed/lizard.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.45,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.turtle",
+      "scene": "res://assets/hyper3d/ed/turtle.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.falcon",
+      "scene": "res://assets/hyper3d/ed/falcon.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.pigeon",
+      "scene": "res://assets/hyper3d/ed/pigeon.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.goat",
+      "scene": "res://assets/hyper3d/ed/goat.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.duck",
+      "scene": "res://assets/hyper3d/ed/duck.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "animal.goose",
+      "scene": "res://assets/hyper3d/ed/goose.glb",
+      "biomes": [],
+      "weight": 1,
+      "scale_m": 1.0,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
       "id": "animal.deer",
       "scene": "res://assets/quaternius/animated-animal-pack/Models/deer.glb",
       "biomes": [
@@ -3123,6 +3213,28 @@
         "grassland",
         "forest"
       ]
+    },
+    {
+      "id": "hyper3d.tamarisk",
+      "weight": 1.0,
+      "scale_m": 1.0,
+      "max_slope": 0.45,
+      "scene": "res://assets/hyper3d/ed/tamarisk.glb",
+      "biomes": [],
+      "metallic": 0
+    },
+    {
+      "id": "nature.reed_clump",
+      "weight": 2.0,
+      "scale_m": 1.0,
+      "max_slope": 0.45,
+      "scene": "res://assets/kenney/nature-kit/Models/GLTF format/reed_clump.glb",
+      "biomes": [
+        "river",
+        "beach",
+        "grassland"
+      ],
+      "metallic": 0
     }
   ]
 }
