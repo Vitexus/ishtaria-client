@@ -86,6 +86,7 @@ var _dialogue: CanvasLayer
 ## The character the player is talking to (it is held still, see `hold_npc` of the environment).
 var _dialogue_npc := ""
 var _quest_log: CanvasLayer
+var _quest_indicator: CanvasLayer
 var _quest_compass: CanvasLayer
 var _minimap: CanvasLayer
 var _story_markers: Array = []
@@ -371,6 +372,10 @@ func _ready() -> void:
 	_quest_log = preload("res://scripts/quest_panel.gd").new()
 	_quest_log.story = _story
 	add_child(_quest_log)
+	_quest_indicator = preload("res://scripts/quest_indicator.gd").new()
+	_quest_indicator.story = _story
+	_quest_indicator.controls = _controls
+	add_child(_quest_indicator)
 	_story.quests_changed.connect(_on_quests_changed)
 	_quest_compass = preload("res://scripts/quest_compass.gd").new()
 	_quest_compass.story = _story
@@ -661,6 +666,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_story.stop()
 		_dialogue.close()
 		_quest_log.hide()
+		_quest_indicator.set_quests([])
 		_quest_stages = {}
 		_quests_baseline = false
 		_chat.clear()
@@ -1245,6 +1251,7 @@ func _on_dialogue_changed(reply: Dictionary) -> void:
 ## A new quest or a new stage: a short note on screen; the log shows the details.
 func _on_quests_changed(quests: Array) -> void:
 	_quest_log.set_quests(quests)
+	_quest_indicator.set_quests(quests)
 	var first_report := not _quests_baseline
 	_quests_baseline = true
 	for quest: Dictionary in quests:
