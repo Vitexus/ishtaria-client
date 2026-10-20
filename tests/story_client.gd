@@ -265,6 +265,47 @@ func _run() -> void:
 	compass.set_markers([marker])
 	_check(compass._strip.visible and compass._items.size() == 1, "a marker shows the strip")
 
+	# "Tell me about yourself": a knowledge card is checked before it is shown, the article follows the language.
+	var card := {"title_key": "world:knowledge.shepherd.title", "text_key": "world:knowledge.shepherd.text", "credit_key": "world:knowledge.shepherd.credit",
+		"image": "/story/media/world/media/knowledge/shepherd.jpg", "wikipedia": {"en": "Shepherd", "cs": "Pastýř"}}
+	_check(STORY.valid_about(card), "a good knowledge card is accepted")
+	for flaw: Dictionary in [{"image": "/etc/passwd"}, {"text_key": 5}, {"wikipedia": {"cs": "Pastýř"}}, {"wikipedia": {"en": "Two words"}}, {"wikipedia": {"en": "a?b=c"}}, {"wikipedia": {"english": "Shepherd", "en": "Shepherd"}}, {"wikipedia": {"en": "Shepherd", "cs": "../x"}}]:
+		var changed := card.duplicate(true)
+		changed.merge(flaw, true)
+		_check(not STORY.valid_about(changed), "a broken card is refused: %s" % str(flaw))
+	_check(STORY.wikipedia_url(card, "cs") == "https://cs.wikipedia.org/wiki/Past%C3%BD%C5%99", "the Czech article for the Czech client: %s" % STORY.wikipedia_url(card, "cs"))
+	_check(STORY.wikipedia_url(card, "de") == "https://en.wikipedia.org/wiki/Shepherd", "English when the card has no article in the language")
+	var talk := _reply()
+	talk["about"] = true
+	_check(STORY.valid_reply(talk), "a reply that offers a card is accepted")
+	talk["about"] = "yes"
+	_check(not STORY.valid_reply(talk), "the offer is a boolean")
+	var dialogue := preload("res://scripts/dialogue_panel.gd").new()
+	root.add_child(dialogue)
+	var asked: Array = []
+	dialogue.about_requested.connect(func(npc_id: String) -> void: asked.append(npc_id))
+	var plain := _reply()
+	dialogue.show_reply(plain)
+	_check(not dialogue.choices_box.has_node("About"), "a character without a card offers none")
+	var offered := _reply()
+	offered["about"] = true
+	dialogue.show_reply(offered)
+	_check(dialogue.choices_box.has_node("About"), "a character with a card offers to tell about itself")
+	dialogue.choices_box.get_node("About").pressed.emit()
+	dialogue.choices_box.get_node("About").pressed.emit()
+	_check(asked == ["endland:kragg"], "the card is asked for once while the answer is on its way")
+	dialogue.show_about("endland:somebody", card)
+	_check(not dialogue._card_mode, "a card of another character is not shown")
+	dialogue.show_about("endland:kragg", card)
+	_check(dialogue._card_mode and dialogue.choices_box.find_child("Back", true, false) != null and dialogue.choices_box.find_child("Wikipedia", true, false) != null, "the card has its way back and its link")
+	_check(dialogue.choices_box.find_child("Credit", true, false) != null, "the card names the author of the picture")
+	dialogue.choices_box.find_child("Back", true, false).pressed.emit()
+	_check(not dialogue._card_mode and dialogue.choices_box.has_node("About"), "back from the card the conversation is as it was")
+	dialogue.show_about("endland:kragg", card)
+	dialogue.close()
+	_check(not dialogue._card_mode and not dialogue.visible, "closing the conversation leaves the card")
+	dialogue.queue_free()
+
 	if _failures > 0:
 		push_error("%d story client checks failed" % _failures)
 	else:

@@ -15,6 +15,8 @@ signal quests_changed(quests: Array)
 signal markers_changed(markers: Array)
 ## A portrait (Texture2D) or a track (AudioStream) finished loading.
 signal media_ready(url: String, resource: Resource)
+## What a character tells about itself (a knowledge card).
+signal about_ready(npc_id: String, card: Dictionary)
 
 const MAX_STRINGS_BYTES := 4194304
 const MAX_IMAGE_BYTES := 2097152
@@ -117,6 +119,8 @@ static func valid_reply(data: Variant) -> bool:
 		return false
 	if data.get("portrait") != null and not valid_media_url(data.portrait):
 		return false
+	if data.get("about") != null and not data.about is bool:
+		return false
 	if data.get("music") != null:
 		if not data.music is Dictionary or not valid_media_url(data.music.get("url")) or not data.music.get("title_key") is String or not data.music.get("loop") is bool:
 			return false
@@ -131,6 +135,51 @@ static func valid_reply(data: Variant) -> bool:
 		if not choice is Dictionary or not (choice.get("index") is float or choice.get("index") is int) or not choice.get("text_key") is String:
 			return false
 	return true
+
+## A knowledge card the server sent: text keys, one picture and the titles of the Wikipedia articles by language.
+static func valid_about(data: Variant) -> bool:
+	if not data is Dictionary:
+		return false
+	for key: String in ["title_key", "text_key", "credit_key"]:
+		if not data.get(key) is String or data[key].is_empty() or data[key].length() > 160:
+			return false
+	if not valid_media_url(data.get("image")):
+		return false
+	var titles: Variant = data.get("wikipedia")
+	if not titles is Dictionary or not titles.get("en") is String or titles.size() > 32:
+		return false
+	for language: Variant in titles:
+		if not language is String or language.length() != 2 or not (language >= "aa" and language <= "zz") or not valid_wiki_title(titles[language]):
+			return false
+	return true
+
+## An article title that goes into a Wikipedia address as it is: no spaces, no characters with a meaning in a URL.
+static func valid_wiki_title(title: Variant) -> bool:
+	if not title is String or title.is_empty() or title.length() > 100 or title.begins_with("_"):
+		return false
+	for character in title:
+		if character in " \t\n\r#?<>[]{}|\\/%\"&=+" or character.unicode_at(0) < 32:
+			return false
+	return true
+
+## The address of the article of a card in the language of the interface, or in English when the card has none.
+static func wikipedia_url(card: Dictionary, language: String) -> String:
+	var titles: Dictionary = card.wikipedia
+	var chosen := language if titles.has(language) else "en"
+	return "https://%s.wikipedia.org/wiki/%s" % [chosen, String(titles[chosen]).uri_encode()]
+
+## Asks what a character tells about itself; the answer arrives as `about_ready`.
+func fetch_about(npc_id: String) -> void:
+	_send("/story/npcs/%s/about" % npc_id.uri_encode(), HTTPClient.METHOD_GET, "", func(result: int, code: int, body: PackedByteArray) -> void:
+		if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+			failed.emit("Conversation unavailable")
+			return
+		var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+		if not valid_about(data):
+			failed.emit("Conversation unavailable")
+			return
+		about_ready.emit(npc_id, data)
+	)
 
 func load_strings() -> void:
 	_send("/story/strings", HTTPClient.METHOD_GET, "", _on_strings, MAX_STRINGS_BYTES)

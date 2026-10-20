@@ -357,6 +357,8 @@ func _ready() -> void:
 	_control_settings.bind_dialogue(_dialogue)
 	add_child(_dialogue)
 	_dialogue.choice_made.connect(_story.choose)
+	_dialogue.about_requested.connect(_story.fetch_about)
+	_story.about_ready.connect(_dialogue.show_about)
 	_dialogue.closed.connect(_on_dialogue_closed)
 	_dialogue.speaking_changed.connect(_environment.set_npc_talking)
 	_story.dialogue_changed.connect(_on_dialogue_changed)
@@ -1259,6 +1261,7 @@ func _on_dialogue_closed() -> void:
 	_session.refresh()
 
 func _on_story_failed(message: String) -> void:
+	_dialogue.about_failed()
 	_toast.show_toast(tr(message))
 
 func _on_story_markers_changed(markers: Array) -> void:
