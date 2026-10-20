@@ -5,9 +5,12 @@ signal failed(message: String)
 signal busy_changed(busy: bool)
 signal obituary_received(obituary: Dictionary)
 signal grave_changed(grave: Dictionary)
-signal position_changed(position: Dictionary, moving: bool)
+signal position_changed(position: Dictionary, moving: bool, sitting: bool)
+## The server says whether the character is in water (swimming, and drowning until a dry shore).
+signal swimming_changed(swimming: bool)
 signal stats_changed(stats: Dictionary)
 signal harvested(reply: Dictionary)
+signal npc_struck(reply: Dictionary)
 signal milked(reply: Dictionary)
 signal crafted
 signal blocked(reply: Dictionary)
@@ -114,10 +117,24 @@ func harvest(object_id: String) -> void:
 	if not busy and not _token.is_empty() and not object_id.is_empty() and object_id.length() <= 100:
 		_send("/players/me/harvest", HTTPClient.METHOD_POST, JSON.stringify({"object_id": object_id}))
 
+## Sit on a generated rock (empty hands / no pickaxe). Stand with the same E, or by walking.
+func sit(object_id: String) -> void:
+	if not busy and not _token.is_empty() and not object_id.is_empty() and object_id.length() <= 100:
+		_send("/players/me/sit", HTTPClient.METHOD_POST, JSON.stringify({"object_id": object_id}))
+
+func stand() -> void:
+	if not busy and not _token.is_empty():
+		_send("/players/me/stand", HTTPClient.METHOD_POST)
+
 ## Swings the weapon in hand at an animal; the server decides whether it is hit and butchered.
 func butcher(object_id: String) -> void:
 	if not busy and not _token.is_empty() and not object_id.is_empty() and object_id.length() <= 100:
 		_send("/players/me/butcher", HTTPClient.METHOD_POST, JSON.stringify({"object_id": object_id}))
+
+## Strikes a story NPC; the server marks lasting hostility and may have the NPC strike back.
+func strike_npc(npc_id: String) -> void:
+	if not busy and not _token.is_empty() and not npc_id.is_empty() and npc_id.length() <= 80:
+		_send("/story/npc/strike", HTTPClient.METHOD_POST, JSON.stringify({"npc_id": npc_id}))
 
 ## Drinks milk from a cow.
 func milk(object_id: String) -> void:
@@ -306,10 +323,16 @@ static func action_error(code: int, text: String) -> String:
 			return "This item cannot be equipped"
 		"no shield in hand":
 			return "No shield in hand"
-		"already harvested", "object not found", "object cannot be harvested", "already butchered", "animal not found", "animal cannot be butchered", "animal gives no milk":
+		"already harvested", "object not found", "object cannot be harvested", "already butchered", "animal not found", "animal cannot be butchered", "animal gives no milk", "object cannot be sat on", "object is gone":
 			return "Nothing to harvest there"
-		"object is out of reach", "animal is out of reach":
+		"object is out of reach", "animal is out of reach", "npc out of reach":
 			return "Object is out of reach"
+		"cannot strike companion":
+			return "You will not strike your companion"
+		"npc not found":
+			return "Nothing to hit"
+		"cannot sit while airborne":
+			return "Cannot sit while jumping"
 		"weapon missing":
 			return "Equip a weapon"
 		"cow was milked recently":
@@ -343,6 +366,24 @@ static func valid_milk(data: Variant) -> bool:
 	return data is Dictionary and data.get("object_id") is String and (data.get("water") is float or data.get("water") is int) and data.water >= 0 and data.water <= 100 and data.get("player") is Dictionary
 
 ## How an animal bit back: absent, or the damage it meant, the damage that got through and the armour's share.
+static func valid_npc_strike(data: Variant) -> bool:
+	if not data is Dictionary or not data.get("npc_id") is String:
+		return false
+	if not (data.get("health") is float or data.get("health") is int):
+		return false
+	if not (data.get("max_health") is float or data.get("max_health") is int):
+		return false
+	if not data.get("hostile") is bool or not data.get("defeated") is bool:
+		return false
+	var counter: Variant = data.get("counter")
+	if counter == null:
+		return true
+	if not counter is Dictionary:
+		return false
+	if not (counter.get("damage") is float or counter.get("damage") is int):
+		return false
+	return counter.get("died") is bool
+
 static func valid_counter(counter: Variant) -> bool:
 	if counter == null:
 		return true
@@ -413,7 +454,9 @@ func _move_received(result: int, code: int, _headers: PackedStringArray, body: P
 	_move_sequence = int(sequence)
 	if data.get("stats") is Dictionary:
 		stats_changed.emit(data.stats)
-	position_changed.emit(data.position, data.moving)
+	var seated: bool = data.get("sitting") == true
+	swimming_changed.emit(data.get("swimming") == true)
+	position_changed.emit(data.position, data.moving, seated)
 
 static func valid_obituary(data: Variant) -> bool:
 	if not data is Dictionary or not data.get("name") is String:
@@ -486,7 +529,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		failed.emit("Player is dead")
 		return
 	if code < 200 or code >= 300:
-		if path in ["/players/me/harvest", "/players/me/butcher", "/players/me/milk", "/players/me/craft", "/players/me/block"] or path.begins_with("/players/me/equip"):
+		if path in ["/players/me/harvest", "/players/me/butcher", "/players/me/milk", "/players/me/craft", "/players/me/block", "/players/me/sit", "/players/me/stand", "/story/npc/strike"] or path.begins_with("/players/me/equip"):
 			var message := action_error(code, body.get_string_from_utf8())
 			if not message.is_empty():
 				failed.emit(message)
@@ -547,6 +590,13 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if not data is Dictionary:
 		failed.emit("Invalid player profile")
 		return
+	if path == "/story/npc/strike":
+		if not valid_npc_strike(data):
+			failed.emit("Invalid player profile")
+			return
+		npc_struck.emit(data)
+		refresh()
+		return
 	var harvest_reply: Dictionary = {}
 	var milk_reply: Dictionary = {}
 	if path == "/players/me/milk":
@@ -560,6 +610,11 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 			failed.emit("Invalid player profile")
 			return
 		harvest_reply = data
+		data = data.player
+	if path == "/players/me/sit" or path == "/players/me/stand":
+		if not data.get("sitting") is bool or not data.get("player") is Dictionary:
+			failed.emit("Invalid player profile")
+			return
 		data = data.player
 	var block_reply: Dictionary = {}
 	if path == "/players/me/block":

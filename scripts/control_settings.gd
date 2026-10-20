@@ -18,8 +18,8 @@ var _voice_volume: HSlider
 
 func _ready() -> void:
 	title = tr("Settings")
-	size = Vector2i(360, 560)
-	min_size = Vector2i(300, 520)
+	size = Vector2i(400, 640)
+	min_size = Vector2i(320, 480)
 	transient = true
 	exclusive = true
 	close_requested.connect(_close)
@@ -41,9 +41,17 @@ func _ready() -> void:
 		_feedback.text = "" if save_fullscreen(enabled) else tr("Could not save controls")
 	)
 	column.add_child(_fullscreen)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(scroll)
+	var bindings := VBoxContainer.new()
+	bindings.add_theme_constant_override("separation", 6)
+	bindings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(bindings)
 	for index in controls.ACTIONS.size():
 		var row := HBoxContainer.new()
-		column.add_child(row)
+		bindings.add_child(row)
 		var label := Label.new()
 		label.text = controls.LABELS[index]
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -142,7 +150,7 @@ func open() -> void:
 	_feedback.text = ""
 	_fullscreen.set_pressed_no_signal(is_fullscreen())
 	_refresh()
-	popup_centered(Vector2i(mini(360, get_tree().root.size.x - 16), mini(560, get_tree().root.size.y - 32)))
+	popup_centered(Vector2i(mini(400, get_tree().root.size.x - 16), mini(640, get_tree().root.size.y - 32)))
 
 static func is_fullscreen() -> bool:
 	var mode := DisplayServer.window_get_mode()

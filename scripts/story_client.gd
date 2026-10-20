@@ -127,7 +127,8 @@ static func valid_reply(data: Variant) -> bool:
 	if not data.open:
 		return true
 	var node: Variant = data.get("node")
-	if not node is Dictionary or not node.get("node") is String or not node.get("text_key") is String or not node.get("choices") is Array or node.choices.size() > 8:
+	# Authored dialogues stay at most 8 choices; the server may inject a 9th apology.
+	if not node is Dictionary or not node.get("node") is String or not node.get("text_key") is String or not node.get("choices") is Array or node.choices.size() > 9:
 		return false
 	if node.get("voice") != null and (not node.voice is String or not valid_media_url(node.voice)):
 		return false
@@ -194,6 +195,12 @@ static func valid_quests(data: Variant) -> bool:
 	for entry: Variant in data:
 		if not entry is Dictionary or not entry.get("quest") is String or not entry.get("title_key") is String or not entry.get("stage") is String or not entry.get("text_key") is String or not entry.get("final") is bool:
 			return false
+		var excerpt: Variant = entry.get("excerpt")
+		if excerpt != null:
+			if not excerpt is Dictionary or not excerpt.get("paraphrase_key") is String:
+				return false
+			if excerpt.get("akkadian_key") != null and not excerpt.akkadian_key is String:
+				return false
 	return true
 
 ## Asks where the quests point to; asked after every quest poll, so a new item shows up within seconds.
@@ -245,8 +252,10 @@ static func error_key(code: int, text: String) -> String:
 	match text.strip_edges():
 		"character is out of reach":
 			return "Too far away to talk"
-		"not enough to pay":
+		"not enough to pay", "not enough gold":
 			return "Not enough gold"
+		"npc not hostile":
+			return "Conversation unavailable"
 		"inventory is full", "stack is full":
 			return "Inventory is full"
 	return "Conversation unavailable"

@@ -92,7 +92,7 @@ func _test_disk_model() -> void:
 	root_node.add_child(player)
 	player.owner = root_node
 	var library := AnimationLibrary.new()
-	for clip in ["Idle", "Walk"]:
+	for clip in ["Idle", "Walk", "Run", "Jump", "Sit", "Die"]:
 		var animation := Animation.new()
 		animation.length = 1.0
 		library.add_animation(clip, animation)
@@ -108,7 +108,9 @@ func _test_disk_model() -> void:
 	var model := CATALOG.create_model("protagonists/criminalMaleA")
 	var clips: AnimationPlayer = model.get_node_or_null("CharacterAnimation")
 	_check(clips != null and clips.has_animation("idle") and clips.has_animation("walk") and clips.is_playing(), "The model of a disk plays its Idle and Walk clips under the names of the controls")
+	_check(clips != null and clips.has_animation("run") and clips.has_animation("jump") and clips.has_animation("sit") and clips.has_animation("die"), "The model of a disk maps Run, Jump, Sit and Die when those clips exist")
 	_check(clips != null and clips.get_animation("walk").loop_mode == Animation.LOOP_LINEAR, "The walking clip loops")
+	_check(clips != null and clips.get_animation("jump").loop_mode == Animation.LOOP_NONE and clips.get_animation("die").loop_mode == Animation.LOOP_NONE, "Jump and Die play once")
 	model.free()
 	CATALOG.set_disk_model("", null)
 	_check(not CATALOG.is_disk_character("protagonists/criminalMaleA"), "The model can be withdrawn")

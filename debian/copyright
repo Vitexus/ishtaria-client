@@ -115,6 +115,12 @@ Copyright: polarvoid
 License: CC-BY-4.0
 Comment: "goos" from Sketchfab (https://sketchfab.com/3d-models/goos-82c7cbb4b6d4463c8fe9d87fee78bcdf); credit polarvoid. Reoriented and given Idle/Walk bob clips for Ishtaria.
 
+Files: assets/props/heart_grenade/*
+Copyright: 2026 Vitex Software
+License: MIT
+Comment: Original Blender prop for the love minigame. Not the Cults3D
+ "Grenade Heart" (CULTS PU), which cannot be redistributed.
+
 Files: assets/branding/*
 Copyright: 2026 VitexSoftware
 License: MIT

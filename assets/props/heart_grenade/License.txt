@@ -1,0 +1,10 @@
+Heart grenade (love minigame projectile)
+========================================
+
+Original low-poly prop created for Ishtaria (Blender).
+Released under the MIT License of the ishtaria-client package.
+
+This is not the Cults3D "Grenade Heart" by AquarianSentinel
+(https://cults3d.com/en/3d-model/art/grenade-heart), which is CULTS PU
+and may not be redistributed. The idea of a heart-shaped love-grenade
+inspired this original mesh.

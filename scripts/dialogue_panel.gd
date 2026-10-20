@@ -267,7 +267,11 @@ func _choose(index: int) -> void:
 	choice_made.emit(_npc_id, _seq, index)
 
 func _text(key: String) -> String:
-	return story.text(key) if story != null else key
+	if story != null:
+		var found: String = story.text(key)
+		if found != key:
+			return found
+	return tr(key)
 
 func _start_media(reply: Dictionary) -> void:
 	portrait.texture = null

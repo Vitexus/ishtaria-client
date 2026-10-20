@@ -38,7 +38,17 @@ override_dh_auto_install:
 ifneq ($(WEB_TEMPLATE),)
 	install -d debian/ishtaria-client-web/usr/share/ishtaria-client-web/html
 	cp -r build/web/. debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/
-	cd debian/ishtaria-client-web/usr/share/ishtaria-client-web/html && ls index.html index.js index.wasm index.pck
+	# Per-host default API URL (empty stub; /etc/ishtaria/client-web-config.js overrides via Alias).
+	install -m 0644 debian/ishtaria-config.js \
+		debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/ishtaria-config.js
+	# Load before the engine so window.ISHTARIA_SERVER_URL is set when main.gd runs.
+	sed -i 's|</head>|<script src="ishtaria-config.js"></script>\n\t</head>|' \
+		debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/index.html
+	cd debian/ishtaria-client-web/usr/share/ishtaria-client-web/html && ls index.html index.js index.wasm index.pck ishtaria-config.js
+	grep -q 'ishtaria-config.js' debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/index.html
+	# Site-local default (conffile); Apache/nginx Alias this over html/ishtaria-config.js.
+	install -D -m 0644 debian/client-web-config.js \
+		debian/ishtaria-client-web/etc/ishtaria/client-web-config.js
 endif
 
 # Godot binaries are already stripped and may not survive objcopy.

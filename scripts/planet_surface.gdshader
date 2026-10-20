@@ -13,6 +13,7 @@ uniform float detail_discard = 0.00012;
 uniform vec2 wave_phase = vec2(0.0);
 varying vec3 surface_point;
 varying float detail_elevation;
+varying float detail_water;
 varying vec3 local_point;
 
 vec2 map_coordinates(vec3 direction, float size) {
@@ -49,6 +50,7 @@ vec2 sample_environment(vec3 direction) {
 void vertex() {
 	surface_point = normalize(is_detail ? NORMAL : VERTEX);
 	detail_elevation = UV2.x;
+	detail_water = UV2.y;
 	local_point = VERTEX;
 	if (has_heightmap && !is_detail) {
 		float elevation = (sample_height(surface_point) * 2.0 - 1.0) * elevation_scale;
@@ -85,7 +87,11 @@ void fragment() {
 		NORMAL = dot(slope_normal, NORMAL) < 0.0 ? -slope_normal : slope_normal;
 		if (water_pass) {
 			float level = 0.0;
-			if (has_environment) {
+			if (is_detail) {
+				// The local patch carries its own water level per vertex (-100 on dry ground): rivers of a
+				// landscape patch show even where the coarse cell is a river, not a lake or the sea.
+				level = detail_water;
+			} else if (has_environment) {
 				vec2 environment = sample_environment(direction);
 				int biome = int(round(environment.g * 7.0));
 				if (biome != 0 && biome != 1) { discard; }

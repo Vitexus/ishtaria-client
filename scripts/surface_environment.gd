@@ -19,11 +19,17 @@ const PORTAL_MODEL := "res://assets/kenney/survival-kit/Models/GLB format/struct
 const PORTAL_STATES := ["building", "open", "closed"]
 ## Scale of the gate model: the model is half a metre tall, so the portal is four metres tall.
 const PORTAL_SCALE_M := 8.0
+## Default detail disk (km) without a datadisk landscape patch. Large enough to walk and to
+## hide the coarse globe underfoot; small enough that the mesh stays fine (~5.5 m cells).
 const DETAIL_RADIUS := 0.7
+## Cap when a landscape patch (Uruk's 6 km floodplain) would otherwise demand a huge disk.
+const DETAIL_RADIUS_MAX := 2.4
 ## Outer band (km) where the detail mesh eases toward the unpatched planet so its rim does not
 ## stand as a floating plateau with a hard shadow over the coarse globe.
 const DETAIL_EDGE_FEATHER := 0.08
 const DETAIL_SEGMENTS := 128
+## Upper bound when the disk grows with a patch (keeps rebuild cost bounded).
+const DETAIL_SEGMENTS_MAX := 192
 const MEMORIALS := preload("res://scripts/survival_panel.gd")
 const CHARACTERS := preload("res://scripts/character_catalog.gd")
 const FACE := preload("res://scripts/character_face.gd")
@@ -118,7 +124,11 @@ const HOLD_RELEASE_MS := 4000
 var portals: Node3D
 var target := Vector3.ZERO
 var server_url := ""
+## Bearer token for `/world/objects` so the server can unlock Easter-egg clips; empty for guests.
+var auth_token := ""
 var objects_loaded := false
+## Soft ambient one-shots while an NPC stands (not gated by the server).
+const COMMON_GESTURES := ["Point", "Sad", "Happy", "Salute"]
 var _origin_metres: Array = []
 var _models: Dictionary = {}
 var _objects_request: HTTPRequest
@@ -130,6 +140,9 @@ var _terrain_requests: Dictionary = {}
 var _region_generation := 0
 var _scenes: Dictionary = {}
 var _detail_vertices := PackedVector3Array()
+## Radius (km) and segment count of the detail disk last built; grow with landscape patches.
+var _detail_radius := DETAIL_RADIUS
+var _detail_segments := DETAIL_SEGMENTS
 var _memorial_entries: Array = []
 var _portal_entries: Array = []
 var _portal_request: HTTPRequest
@@ -459,6 +472,20 @@ func show_region(direction: Vector3) -> void:
 	_build_detail()
 	_request_objects(direction.normalized())
 
+## How far the patched detail disk reaches (km). Grows with the largest landscape patch so a
+## city like Uruk is not cut by a 700 m circle, but stays capped for mesh cost.
+func _compute_detail_radius() -> float:
+	var radius := DETAIL_RADIUS
+	for patch: Dictionary in _terrain_patches:
+		var half_km := maxf(float(patch.extent[0]), float(patch.extent[1])) * 0.5 / 1000.0
+		# About 70 % of the half-extent covers the walled city without dragging in the whole floodplain.
+		radius = maxf(radius, minf(DETAIL_RADIUS_MAX, half_km * 0.7))
+	return radius
+
+func _compute_detail_segments(radius_km: float) -> int:
+	var segments := int(round(float(DETAIL_SEGMENTS) * radius_km / DETAIL_RADIUS / 8.0) * 8.0)
+	return clampi(segments, DETAIL_SEGMENTS, DETAIL_SEGMENTS_MAX)
+
 func _build_detail() -> void:
 	_detail_vertices.clear()
 	for child in detail.get_children():
@@ -466,6 +493,9 @@ func _build_detail() -> void:
 		child.queue_free()
 	if target == Vector3.ZERO or heightmap == null or environment.is_empty():
 		return
+	_detail_radius = _compute_detail_radius()
+	_detail_segments = _compute_detail_segments(_detail_radius)
+	var feather := maxf(DETAIL_EDGE_FEATHER, _detail_radius * 0.06)
 	var unit := target.normalized()
 	var reference := Vector3.UP if absf(unit.y) < 0.9 else Vector3.RIGHT
 	var tangent := reference.cross(unit).normalized()
@@ -474,10 +504,10 @@ func _build_detail() -> void:
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var water_tool := SurfaceTool.new()
 	water_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for row in DETAIL_SEGMENTS + 1:
-		for column in DETAIL_SEGMENTS + 1:
-			var horizontal: float = (float(column) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
-			var vertical: float = (float(row) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
+	for row in _detail_segments + 1:
+		for column in _detail_segments + 1:
+			var horizontal: float = (float(column) / _detail_segments * 2.0 - 1.0) * _detail_radius
+			var vertical: float = (float(row) / _detail_segments * 2.0 - 1.0) * _detail_radius
 			var direction: Array = []
 			for axis in 3:
 				direction.append(float(unit[axis]) * RADIUS + float(tangent[axis]) * horizontal + float(forward[axis]) * vertical)
@@ -489,30 +519,31 @@ func _build_detail() -> void:
 			# Ease the rim toward the unpatched globe so a landscape patch does not read as a floating card.
 			var radial := Vector2(horizontal, vertical).length()
 			var edge := 1.0
-			if DETAIL_EDGE_FEATHER > 0.0 and radial > DETAIL_RADIUS - DETAIL_EDGE_FEATHER:
-				edge = clampf((DETAIL_RADIUS - radial) / DETAIL_EDGE_FEATHER, 0.0, 1.0)
+			if feather > 0.0 and radial > _detail_radius - feather:
+				edge = clampf((_detail_radius - radial) / feather, 0.0, 1.0)
 				edge = edge * edge * (3.0 - 2.0 * edge)
 				height = lerpf(elevation64_base(direction), height, edge)
-			var patch_water := _terrain_water_m(direction)
-			var water := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(point)])) / 1000.0 + 0.001
-			if edge < 1.0:
-				var base_water := float(environment.water_m[environment_index(point)]) / 1000.0 + 0.001
-				water = lerpf(base_water, water, edge)
+			var water_level := _detail_water_km(direction, point, height)
+			if edge < 1.0 and is_finite(water_level):
+				var base_water := float(environment.water_m[environment_index(point)]) / 1000.0
+				water_level = lerpf(base_water, water_level, edge)
+			# Dry ground carries no water: the vertex sinks under the land and the shader discards it.
+			var water := (water_level if is_finite(water_level) else height - 0.01) + 0.001
 			tool.set_normal(point)
 			tool.set_uv2(Vector2(height, 0))
 			tool.add_vertex(_render_position([direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0]))
 			water_tool.set_normal(point)
-			water_tool.set_uv2(Vector2(height, 0))
+			water_tool.set_uv2(Vector2(height, water_level if is_finite(water_level) else -100.0))
 			water_tool.add_vertex(_render_position([direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0]))
 	# A disk, not a square: the old axis-aligned patch looked like a huge floating tile from above.
-	for row in DETAIL_SEGMENTS:
-		for column in DETAIL_SEGMENTS:
-			var mid_h: float = ((float(column) + 0.5) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
-			var mid_v: float = ((float(row) + 0.5) / DETAIL_SEGMENTS * 2.0 - 1.0) * DETAIL_RADIUS
-			if Vector2(mid_h, mid_v).length() > DETAIL_RADIUS:
+	for row in _detail_segments:
+		for column in _detail_segments:
+			var mid_h: float = ((float(column) + 0.5) / _detail_segments * 2.0 - 1.0) * _detail_radius
+			var mid_v: float = ((float(row) + 0.5) / _detail_segments * 2.0 - 1.0) * _detail_radius
+			if Vector2(mid_h, mid_v).length() > _detail_radius:
 				continue
-			var first := row * (DETAIL_SEGMENTS + 1) + column
-			for index in [first, first + DETAIL_SEGMENTS + 1, first + 1, first + 1, first + DETAIL_SEGMENTS + 1, first + DETAIL_SEGMENTS + 2]:
+			var first := row * (_detail_segments + 1) + column
+			for index in [first, first + _detail_segments + 1, first + 1, first + 1, first + _detail_segments + 1, first + _detail_segments + 2]:
 				tool.add_index(index)
 				water_tool.add_index(index)
 	var mesh := tool.commit()
@@ -531,7 +562,7 @@ func _build_detail() -> void:
 	water_detail.set_shader_parameter("wave_phase", Vector2(fposmod((anchor[0] + anchor[1] * 0.7 + anchor[2] * 0.3) * 0.65, TAU), fposmod((anchor[0] * 0.2 + anchor[1] * 0.5 + anchor[2]) * 0.7, TAU)))
 	local_water.material_override = water_detail
 	detail.add_child(local_water)
-	var discard_radius: float = DETAIL_RADIUS * 1.05 / RADIUS
+	var discard_radius: float = _detail_radius * 1.05 / RADIUS
 	land_material.set_shader_parameter("detail_direction", unit)
 	land_material.set_shader_parameter("detail_discard", discard_radius)
 	water_material.set_shader_parameter("detail_direction", unit)
@@ -556,12 +587,12 @@ func ground_position64(coordinates_metres: Array) -> Vector3:
 	var denominator := up.dot(unit)
 	if denominator <= 0:
 		return point
-	var column := int(floor((up.dot(tangent) * RADIUS / denominator / DETAIL_RADIUS + 1.0) * 0.5 * DETAIL_SEGMENTS))
-	var row := int(floor((up.dot(forward) * RADIUS / denominator / DETAIL_RADIUS + 1.0) * 0.5 * DETAIL_SEGMENTS))
-	for sample_row in range(maxi(0, row - 1), mini(DETAIL_SEGMENTS, row + 2)):
-		for sample_column in range(maxi(0, column - 1), mini(DETAIL_SEGMENTS, column + 2)):
-			var first := sample_row * (DETAIL_SEGMENTS + 1) + sample_column
-			for triangle in [[first, first + DETAIL_SEGMENTS + 1, first + 1], [first + 1, first + DETAIL_SEGMENTS + 1, first + DETAIL_SEGMENTS + 2]]:
+	var column := int(floor((up.dot(tangent) * RADIUS / denominator / _detail_radius + 1.0) * 0.5 * _detail_segments))
+	var row := int(floor((up.dot(forward) * RADIUS / denominator / _detail_radius + 1.0) * 0.5 * _detail_segments))
+	for sample_row in range(maxi(0, row - 1), mini(_detail_segments, row + 2)):
+		for sample_column in range(maxi(0, column - 1), mini(_detail_segments, column + 2)):
+			var first := sample_row * (_detail_segments + 1) + sample_column
+			for triangle in [[first, first + _detail_segments + 1, first + 1], [first + 1, first + _detail_segments + 1, first + _detail_segments + 2]]:
 				var hit: Variant = Geometry3D.ray_intersects_triangle(point + up * 0.002, -up, _detail_vertices[triangle[0]], _detail_vertices[triangle[1]], _detail_vertices[triangle[2]])
 				if hit is Vector3 and hit.distance_to(point) < 0.002:
 					return hit
@@ -577,7 +608,10 @@ func _request_objects(unit: Vector3) -> void:
 	_objects_request.request_completed.connect(_on_objects_received.bind(_region_generation))
 	add_child(_objects_request)
 	var point := unit * RADIUS * 1000.0
-	if _objects_request.request(server_url + "/world/objects?x=%.9f&y=%.9f&z=%.9f" % [point.x, point.y, point.z]) != OK:
+	var headers := PackedStringArray()
+	if not auth_token.is_empty():
+		headers.append("Authorization: Bearer " + auth_token)
+	if _objects_request.request(server_url + "/world/objects?x=%.9f&y=%.9f&z=%.9f" % [point.x, point.y, point.z], headers) != OK:
 		_cancel_objects()
 		objects_failed.emit("Surface objects unavailable")
 
@@ -596,6 +630,7 @@ func apply_objects(data: Variant) -> bool:
 	if not data.get("objects") is Array or data.objects.size() > MAX_OBJECTS:
 		return false
 	var identities := {}
+	var accepted: Array = []
 	for entry: Variant in data.objects:
 		if not entry is Dictionary or not entry.get("id") is String or entry.id.is_empty() or identities.has(entry.id) or not entry.get("model") is String or not _models.has(entry.model):
 			return false
@@ -606,7 +641,7 @@ func apply_objects(data: Variant) -> bool:
 			if not (value is float or value is int) or not is_finite(float(value)) or absf(value) > 7000000.0:
 				return false
 		var point := Vector3(entry.position[0] / 1000.0, entry.position[1] / 1000.0, entry.position[2] / 1000.0)
-		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1 or (target != Vector3.ZERO and point.normalized().distance_to(target.normalized()) * RADIUS > DETAIL_RADIUS * 1.2):
+		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1 or (target != Vector3.ZERO and point.normalized().distance_to(target.normalized()) * RADIUS > _detail_radius * 1.2):
 			return false
 		for key in ["scale_m", "yaw", "collision_radius_m", "biome"]:
 			var value: Variant = entry.get(key)
@@ -617,14 +652,17 @@ func apply_objects(data: Variant) -> bool:
 		# Farm animals graze wherever their settlement is. An empty biomes list means the
 		# model is overlay-only (e.g. Early Dynastic wildlife): the server may place it
 		# in any biome, and the catalog does not spawn it from global biome weights.
+		# Skip a mismatched biome instead of rejecting the whole region: dry datadisk
+		# patches over coarse river/sea cells can still carry beach overlay flora.
 		var allowed: Array = _models[entry.model].biomes
 		if not ":farm:" in entry.id and not allowed.is_empty() and not BIOMES[int(entry.biome)] in allowed:
-			return false
+			continue
 		if entry.has("wander") and _parse_route(entry.wander).is_empty():
 			return false
+		accepted.append(entry)
 	_clock_offset_ms = _server_offset(data.get("server_time_ms"))
 	_clear_objects()
-	for entry: Dictionary in data.objects:
+	for entry: Dictionary in accepted:
 		_place_object(entry)
 	if not apply_memorials(data.get("memorials", [])):
 		return false
@@ -747,7 +785,7 @@ func apply_memorials(data: Variant) -> bool:
 			if not (value is float or value is int) or not is_finite(float(value)) or absf(value) > 7000000.0:
 				return false
 		var point := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
-		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1 or (target != Vector3.ZERO and point.normalized().distance_to(target.normalized()) * RADIUS > DETAIL_RADIUS * 1.02):
+		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1 or (target != Vector3.ZERO and point.normalized().distance_to(target.normalized()) * RADIUS > _detail_radius * 1.02):
 			return false
 	if data == _memorial_entries:
 		return true
@@ -810,12 +848,21 @@ func apply_npcs(data: Variant) -> bool:
 		label.no_depth_test = false
 		label.text = _npc_name(entry.name_key)
 		placement.add_child(label)
+		_attach_health_bar(placement, entry, head)
 		npcs.add_child(placement)
 		_npc_entries.append(entry.duplicate(true))
 		if entry.has("wander"):
 			var route := _parse_route(entry.wander)
 			if not route.is_empty():
-				_npc_walkers.append({"id": entry.id, "index": _npc_entries.size() - 1, "route": route, "walking": false, "player": _npc_player(model)})
+				_npc_walkers.append({
+					"id": entry.id,
+					"index": _npc_entries.size() - 1,
+					"route": route,
+					"walking": false,
+					"player": _npc_player(model),
+					"gesture_until": 0,
+					"gesture_clip": "",
+				})
 		if entry.get("model") != null and fetch_media.is_valid() and preload("res://scripts/story_client.gd").valid_media_url(entry.model) and entry.model.ends_with(".glb"):
 			fetch_media.call(entry.model)
 	npcs_changed.emit()
@@ -837,7 +884,7 @@ func media_ready(url: String, resource: Resource) -> void:
 		if model == null:
 			continue
 		for child in placement.get_children():
-			if child is Node3D and not child is Label3D:
+			if child is Node3D and not child is Label3D and child.name != "HealthBar":
 				placement.remove_child(child)
 				child.queue_free()
 		# A datadisk's model is authored in metres; the pack characters are larger in client units.
@@ -851,10 +898,110 @@ func media_ready(url: String, resource: Resource) -> void:
 				walker.player = clips
 				walker.walking = false
 		var label := placement.get_node_or_null("Name") as Label3D
+		var head := CHARACTERS.head_height(model) * model.scale.y
 		if label != null:
-			label.position = Vector3(0, CHARACTERS.head_height(model) * model.scale.y * 1.08, 0)
+			label.position = Vector3(0, head * 1.08, 0)
+		_attach_health_bar(placement, _npc_entries[index], head)
 
-## Landscape patches the server announces for the region (ADR 0013). Their grids are the
+## Health bar above the name: green for a friend (escort), red for a foe; hidden when absent.
+func _attach_health_bar(placement: Node3D, entry: Dictionary, head: float) -> void:
+	var old := placement.get_node_or_null("HealthBar")
+	if old != null:
+		placement.remove_child(old)
+		old.queue_free()
+	var health: Variant = entry.get("health")
+	if not health is Dictionary:
+		return
+	var current: Variant = health.get("current")
+	var maximum: Variant = health.get("max")
+	var relation := str(health.get("relation", ""))
+	if not (current is float or current is int) or not (maximum is float or maximum is int):
+		return
+	var max_hp := float(maximum)
+	if max_hp <= 0.0:
+		return
+	var ratio := clampf(float(current) / max_hp, 0.0, 1.0)
+	var root := Node3D.new()
+	root.name = "HealthBar"
+	root.position = Vector3(0, head * 1.08 + 0.14, 0)
+	var bg := MeshInstance3D.new()
+	var bg_mesh := BoxMesh.new()
+	bg_mesh.size = Vector3(0.45, 0.045, 0.012)
+	bg.mesh = bg_mesh
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bg_mat.albedo_color = Color(0.08, 0.08, 0.1, 0.85)
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	bg.material_override = bg_mat
+	root.add_child(bg)
+	var fill := MeshInstance3D.new()
+	var fill_mesh := BoxMesh.new()
+	fill_mesh.size = Vector3(0.42 * maxf(ratio, 0.02), 0.032, 0.014)
+	fill.mesh = fill_mesh
+	# Left-align the fill inside the background while billboarded.
+	fill.position = Vector3(-0.21 * (1.0 - ratio), 0, 0.001)
+	var fill_mat := StandardMaterial3D.new()
+	fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fill_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	if relation == "friend":
+		fill_mat.albedo_color = Color(0.28, 0.88, 0.35)
+	else:
+		fill_mat.albedo_color = Color(0.92, 0.22, 0.2)
+	fill.material_override = fill_mat
+	root.add_child(fill)
+	placement.add_child(root)
+
+## Updates one character's health bar from a server or event payload without rebuilding the region.
+func set_npc_health(npc_id: String, current: int, maximum: int, relation: String) -> void:
+	var index := -1
+	for i in _npc_entries.size():
+		var entry_id := str(_npc_entries[i].get("id", ""))
+		if entry_id == npc_id:
+			index = i
+			break
+		if ":" in entry_id and entry_id.get_slice(":", 1) == npc_id:
+			index = i
+			break
+		if ":" in npc_id and npc_id.get_slice(":", 1) == entry_id:
+			index = i
+			break
+	if index < 0 or index >= npcs.get_child_count():
+		return
+	var entry: Dictionary = _npc_entries[index]
+	if current >= maximum and relation != "foe":
+		entry.erase("health")
+	else:
+		entry["health"] = {"current": current, "max": maximum, "relation": relation}
+	_npc_entries[index] = entry
+	var placement := npcs.get_child(index) as Node3D
+	var label := placement.get_node_or_null("Name") as Label3D
+	var head := 1.6
+	if label != null:
+		head = label.position.y / 1.08
+	_attach_health_bar(placement, entry, head)
+
+## Applies health fields from a fresh `/world/objects` npc list onto the current characters.
+func sync_npc_health(data: Variant) -> void:
+	if not data is Array:
+		return
+	for entry: Variant in data:
+		if not entry is Dictionary or not entry.get("id") is String:
+			continue
+		var health: Variant = entry.get("health")
+		if health == null:
+			# Apology or healed escort: hide the bar once the server stops announcing it.
+			set_npc_health(entry.id, 100, 100, "friend")
+			continue
+		if not health is Dictionary:
+			continue
+		var current: Variant = health.get("current")
+		var maximum: Variant = health.get("max")
+		var relation := str(health.get("relation", "foe"))
+		if (current is float or current is int) and (maximum is float or maximum is int):
+			set_npc_health(entry.id, int(current), int(maximum), relation)
+
+## Landscape patches the server announces for the region (ADR 0013): their grids are the
 ## disk's own 16-bit PNGs, fetched apart from `fetch_media` (which would hand over Godot's
 ## half-float image and lose the decimetre step), and kept while the region keeps naming them.
 func apply_terrains(data: Variant) -> bool:
@@ -1111,8 +1258,10 @@ func _terrain_offset_m(direction: Array, metres: float) -> float:
 		var vertical := clampf((float(local[1]) + float(patch.extent[1]) * 0.5) / float(patch.extent[1]) * height - 0.5, 0.0, height - 1)
 		var column := int(horizontal)
 		var row := int(vertical)
+		# Bilinear corners must stay inside the grid: at the south/east edge, row+1 / column+1
+		# would otherwise index past the last sample (PackedFloat32Array out of bounds).
 		var corner := func(at_column: int, at_row: int) -> float:
-			return float(grid[at_row * width + mini(at_column, width - 1)])
+			return float(grid[mini(at_row, height - 1) * width + mini(at_column, width - 1)])
 		var west: float = corner.call(column, row)
 		var east: float = corner.call(column + 1, row)
 		var north: float = corner.call(column, row + 1)
@@ -1369,6 +1518,48 @@ func _terrain_cleared(direction: Array) -> bool:
 			return true
 	return false
 
+## Whether the minimap (and the player's eyes) should treat this direction as open water.
+## The water surface (km) of the local patch mesh at a vertex, or NAN on dry ground. The server walks the
+## same rules (`WalkingTerrain::surface`): a river of a landscape patch is water, and a coarse river cell
+## on a flat plain is dry unless water stands at least half a metre above the ground.
+func _detail_water_km(direction: Array, point: Vector3, height: float) -> float:
+	var patch_water := _terrain_water_m(direction)
+	if is_finite(patch_water):
+		return patch_water / 1000.0
+	var index := environment_index(point)
+	var water_m: float = float(environment.water_m[index])
+	if water_m <= -8001.0:
+		return NAN
+	var biome := int(environment.biomes[index])
+	if biome != 0 and biome != 1:
+		if water_m <= float(environment.elevation_m[index]) or water_m - height * 1000.0 < 0.5:
+			return NAN
+	return water_m / 1000.0
+
+## Matches `planet_surface.gdshader` water_pass: ocean and lake fill, plus landscape-patch
+## rivers. Coarse "river" cells from drainage on a flat plain (Early Dynastic floodplain)
+## must not paint the whole 150 km cell blue when the heightmap underfoot is dry land.
+func _minimap_water_at(direction: Array) -> bool:
+	var height := elevation64(direction)
+	var patch_water := _terrain_water_m(direction)
+	if is_finite(patch_water):
+		return patch_water / 1000.0 + 0.001 > height
+	if environment.is_empty():
+		return height <= 0.001
+	var point := Vector3(float(direction[0]), float(direction[1]), float(direction[2]))
+	var index := environment_index(point)
+	var water_m: float = float(environment.water_m[index])
+	if water_m <= -8001.0:
+		return false
+	var biome := int(environment.biomes[index])
+	# Planet water pass only draws ocean and lake; flow rivers are line meshes, not a flood.
+	if biome != 0 and biome != 1:
+		var elevation_m: float = float(environment.elevation_m[index])
+		# Standing ponding above the coarse ground (a carved channel) still counts.
+		if water_m <= elevation_m or water_m - height * 1000.0 < 0.5:
+			return false
+	return water_m / 1000.0 + 0.001 > height
+
 ## The baked region picture (see `water_map`): settlement clear-mask under water where the water
 ## plane stands above the ground, so the minimap shows the city silhouette and its rivers.
 func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
@@ -1385,9 +1576,7 @@ func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
 			var dir := [direction.x, direction.y, direction.z]
 			if _terrain_cleared(dir):
 				image.set_pixel(column, row, SETTLEMENT_MAP_COLOR)
-			var patch_water := _terrain_water_m(dir)
-			var level := (patch_water if is_finite(patch_water) else float(environment.water_m[environment_index(direction)])) / 1000.0 + 0.001
-			if level > elevation64(dir):
+			if _minimap_water_at(dir):
 				image.set_pixel(column, row, WATER_MAP_COLOR)
 	water_map = {
 		"texture": ImageTexture.create_from_image(image),
@@ -1497,6 +1686,7 @@ func _apply_night(light: Node) -> void:
 
 ## Things that characters put into the world: campfires, benches, tents and crops. The list is what
 ## the server says; an entry with an unknown model or a strange value is skipped, never drawn.
+## Datadisk models (`disk:…`) wait for media like town structures.
 func apply_placed(data: Variant) -> bool:
 	_clear_placed()
 	if not data is Array or data.size() > 500:
@@ -1505,7 +1695,8 @@ func apply_placed(data: Variant) -> bool:
 		if not entry is Dictionary or not (entry.get("id") is float or entry.get("id") is int) or not entry.get("kind") is String or not entry.get("position") is Array or entry.position.size() != 3:
 			continue
 		var path := prop_path(entry.get("model"))
-		var finite := not path.is_empty()
+		var url := structure_url(entry.get("model"))
+		var finite := not path.is_empty() or not url.is_empty()
 		for value: Variant in entry.position:
 			finite = finite and (value is float or value is int) and is_finite(float(value)) and absf(value) <= 7000000.0
 		for key in ["yaw", "scale"]:
@@ -1515,12 +1706,6 @@ func apply_placed(data: Variant) -> bool:
 		var point := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
 		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
 			continue
-		if not _prop_scenes.has(path):
-			_prop_scenes[path] = load(path)
-		var model: Node = (_prop_scenes[path] as PackedScene).instantiate()
-		if not model is Node3D:
-			model.free()
-			continue
 		var placement := Node3D.new()
 		placement.name = "Placed%d" % int(entry.id)
 		placement.position = _render_position(entry.position)
@@ -1528,6 +1713,18 @@ func apply_placed(data: Variant) -> bool:
 		# Crops are small food models; they are drawn larger so that a field can be seen.
 		var factor := 2.5 if String(entry.model).begins_with("food.") else 1.0
 		placement.scale = Vector3.ONE * float(entry.scale) * factor / 1000.0
+		if not url.is_empty():
+			placed.add_child(placement)
+			_placed_entries.append(entry.duplicate(true))
+			_place_structure(placement, url)
+			continue
+		if not _prop_scenes.has(path):
+			_prop_scenes[path] = load(path)
+		var model: Node = (_prop_scenes[path] as PackedScene).instantiate()
+		if not model is Node3D:
+			model.free()
+			placement.free()
+			continue
 		_light_materials(model)
 		placement.add_child(model)
 		placed.add_child(placement)
@@ -1578,6 +1775,35 @@ func _clear_npcs() -> void:
 	for child in npcs.get_children():
 		npcs.remove_child(child)
 		child.queue_free()
+
+## Briefly sends an NPC to a point (metres from the planet's centre) at a run, then lets wander resume.
+## Used when wild Enkidu tears a snare; `seconds` is how long they stay at the point.
+func rush_npc(npc_id: String, metres: Array, seconds: float = 3.5) -> void:
+	if metres.size() != 3 or seconds <= 0.0 or seconds > 20.0:
+		return
+	var index := -1
+	for i in _npc_entries.size():
+		var id := str(_npc_entries[i].get("id", ""))
+		if id == npc_id or id.ends_with(":" + npc_id):
+			index = i
+			break
+	if index < 0 or index >= npcs.get_child_count():
+		return
+	var held_id := str(_npc_entries[index].id)
+	hold_npc(held_id, true)
+	var node := npcs.get_child(index) as Node3D
+	var home := node.position
+	var target := _render_position(metres)
+	var tween := create_tween()
+	tween.tween_property(node, "position", target, 0.9).set_trans(Tween.TRANS_SINE)
+	var player := _npc_player(node)
+	if player != null:
+		_play_npc(player, 4.0)
+	tween.tween_interval(seconds)
+	tween.tween_property(node, "position", home, 1.2).set_trans(Tween.TRANS_SINE)
+	tween.tween_callback(func() -> void:
+		hold_npc(held_id, false)
+	)
 
 ## The nearest character within reach of a server position in metres.
 func nearest_npc(player_metres: Vector3, reach_m: float) -> Dictionary:
@@ -1757,11 +1983,14 @@ func _walk_npcs(delta: float) -> void:
 	if _npc_walkers.is_empty():
 		return
 	var now := Time.get_unix_time_from_system() * 1000.0 + _clock_offset_ms
+	var ticks := Time.get_ticks_msec()
 	for walker in _npc_walkers:
 		var index: int = walker.index
 		if index >= npcs.get_child_count() or index >= _npc_entries.size():
 			continue
 		if _held_npcs.has(walker.id):
+			walker.gesture_until = 0
+			walker.gesture_clip = ""
 			continue	# it talks to the player: it stands (`_face_held`)
 		var node := npcs.get_child(index) as Node3D
 		var sample := _route_sample(walker.route, now)
@@ -1772,14 +2001,25 @@ func _walk_npcs(delta: float) -> void:
 		var speed := velocity.length()
 		var walking := speed > 0.05
 		if walking:
+			walker.gesture_until = 0
+			walker.gesture_clip = ""
 			var up := metres.normalized()
 			var forward := (velocity - up * velocity.dot(up)).normalized()
 			# Models face +Z, and a basis that looks at a point has -Z pointing there.
 			var facing := Basis.looking_at(-forward, up).get_rotation_quaternion()
 			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 5.0))
+		var gesturing := int(walker.gesture_until) > ticks
+		if gesturing and not walking:
+			continue
+		if walker.gesture_until != 0 and not gesturing and not walking:
+			walker.gesture_until = 0
+			walker.gesture_clip = ""
+			_play_npc(walker.player, 0.0)
 		if walking != walker.walking or walking:
 			walker.walking = walking
 			_play_npc(walker.player, speed if walking else 0.0)
+			if not walking:
+				_maybe_npc_gesture(walker, _npc_entries[index])
 
 ## The player starts or ends a conversation with a character. While it lasts the character stands still and turns to the player (the server
 ## stops the clock of its walk too, so it is where the client sees it); afterwards a walking character goes on to where it was going (the
@@ -1842,6 +2082,62 @@ func _npc_walker(npc_id: String) -> Variant:
 			return walker
 	return null
 
+## Plays a one-shot clip on an NPC model (duel flourish or Easter egg). Returns false when missing.
+func play_npc_clip(npc_id: String, clip: String) -> bool:
+	var player: AnimationPlayer = null
+	var walker: Variant = _npc_walker(npc_id)
+	if walker != null:
+		player = walker.player
+	else:
+		for index in _npc_entries.size():
+			if _npc_entries[index].id == npc_id and index < npcs.get_child_count():
+				player = _npc_player(npcs.get_child(index))
+				break
+	if player == null or clip.is_empty():
+		return false
+	var name := _npc_clip(player, clip.to_lower())
+	if name.is_empty():
+		# Egg clips keep their authored capitalisation (`Twerk`).
+		for candidate in player.get_animation_list():
+			if String(candidate) == clip or String(candidate).ends_with("|" + clip):
+				name = String(candidate)
+				break
+	if name.is_empty():
+		return false
+	player.get_animation(name).loop_mode = Animation.LOOP_NONE
+	player.speed_scale = 1.0
+	player.play(name, 0.12)
+	if walker != null:
+		walker.gesture_clip = name
+		walker.gesture_until = Time.get_ticks_msec() + int(maxf(player.current_animation_length, 0.3) * 1000.0)
+	return true
+
+## Rare ambient or unlocked egg while the character stands still.
+func _maybe_npc_gesture(walker: Dictionary, entry: Dictionary) -> void:
+	if walker.player == null or int(walker.gesture_until) > Time.get_ticks_msec():
+		return
+	var slot := int(Time.get_unix_time_from_system() / 17.0)
+	var roll: int = absi(("%s:%s" % [entry.id, slot]).hash()) % 100
+	var eggs: Array = entry.get("unlocked_eggs", []) if entry.get("unlocked_eggs") is Array else []
+	var pick := ""
+	if roll < 4 and not eggs.is_empty():
+		pick = str(eggs[abs(("%s:egg:%s" % [entry.id, slot]).hash()) % eggs.size()])
+	elif roll < 12:
+		var common: Array[String] = []
+		for name in COMMON_GESTURES:
+			if not _npc_clip(walker.player, name.to_lower()).is_empty() or _npc_has_clip(walker.player, name):
+				common.append(name)
+		if not common.is_empty():
+			pick = common[abs(("%s:soft:%s" % [entry.id, slot]).hash()) % common.size()]
+	if not pick.is_empty():
+		play_npc_clip(entry.id, pick)
+
+func _npc_has_clip(player: AnimationPlayer, clip: String) -> bool:
+	for candidate in player.get_animation_list():
+		if String(candidate) == clip or String(candidate).ends_with("|" + clip):
+			return true
+	return false
+
 ## Asks the server for the routes of the animals again, without rebuilding the region.
 func _request_animals() -> void:
 	if server_url.is_empty() or target == Vector3.ZERO or not objects_loaded or (_walkers.is_empty() and _npc_walkers.is_empty()) or is_instance_valid(_animals_request):
@@ -1853,7 +2149,10 @@ func _request_animals() -> void:
 	_animals_request.request_completed.connect(_on_animals_received.bind(_region_generation))
 	add_child(_animals_request)
 	var point := target.normalized() * RADIUS * 1000.0
-	if _animals_request.request(server_url + "/world/objects?x=%.9f&y=%.9f&z=%.9f" % [point.x, point.y, point.z]) != OK:
+	var headers := PackedStringArray()
+	if not auth_token.is_empty():
+		headers.append("Authorization: Bearer " + auth_token)
+	if _animals_request.request(server_url + "/world/objects?x=%.9f&y=%.9f&z=%.9f" % [point.x, point.y, point.z], headers) != OK:
 		_animals_request.queue_free()
 		_animals_request = null
 
@@ -1888,6 +2187,7 @@ func _on_animals_received(result: int, code: int, _headers: PackedStringArray, b
 				walker.route = walks[walker.id]
 				if _held_npcs.has(walker.id) and _held_npcs[walker.id].released_at != 0:
 					_held_npcs.erase(walker.id)	# the new route goes on from where it stood
+		sync_npc_health(data.npcs)
 
 ## The nearest walking animal within reach of a server position in metres.
 func nearest_animal(player_metres: Vector3, reach_m: float) -> Dictionary:

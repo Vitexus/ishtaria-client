@@ -1,10 +1,35 @@
 extends Node3D
 
-const ACTIONS := ["walk_forward", "walk_backward", "walk_left", "walk_right", "jump"]
-const DEFAULT_KEYS := [KEY_W, KEY_S, KEY_A, KEY_D, KEY_SPACE]
-const LABELS := ["Forward", "Backward", "Left", "Right", "Jump"]
+## Every gameplay key the player can rebind. Settings lists these; Escape alone stays reserved.
+const ACTIONS := [
+	"walk_forward", "walk_backward", "walk_left", "walk_right", "jump", "run",
+	"inventory", "crafting", "quest_log", "chat", "friends", "pickup", "portals", "interact", "minimap",
+	"spell_1", "spell_2", "spell_3", "spell_4", "spell_5", "spell_6", "spell_7", "spell_8", "spell_9",
+]
+const DEFAULT_KEYS := [
+	KEY_W, KEY_S, KEY_A, KEY_D, KEY_SPACE, KEY_SHIFT,
+	KEY_I, KEY_C, KEY_J, KEY_ENTER, KEY_F, KEY_G, KEY_P, KEY_E, KEY_M,
+	KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+]
+const LABELS := [
+	"Forward", "Backward", "Left", "Right", "Jump", "Run",
+	"Inventory", "Crafting", "Quest log", "Chat", "Friends", "Pick up", "Portals", "Interact", "Minimap",
+	"Spell 1", "Spell 2", "Spell 3", "Spell 4", "Spell 5", "Spell 6", "Spell 7", "Spell 8", "Spell 9",
+]
 const JUMP := 4
-const RESERVED_KEYS := [KEY_ESCAPE, KEY_SHIFT, KEY_I, KEY_E, KEY_P, KEY_G, KEY_ENTER, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9]
+const RUN := 5
+const INVENTORY := 6
+const CRAFTING := 7
+const QUEST_LOG := 8
+const CHAT := 9
+const FRIENDS := 10
+const PICKUP := 11
+const PORTALS := 12
+const INTERACT := 13
+const MINIMAP := 14
+const SPELL_1 := 15
+## Only Escape cannot be assigned; every other functional key is listed in Settings.
+const RESERVED_KEYS := [KEY_ESCAPE]
 const RADIUS := 6371.0
 ## The camera looks over the shoulder of its character at the closest zoom and from the middle from this distance (metres, before the
 ## size of the character is applied) on.
@@ -35,11 +60,15 @@ var _position_target := Vector3.ZERO
 var _ground_surface: Node
 var airborne := false
 var on_object := false
+var sitting := false
 var jump_pending := false
 var jump_direction := Vector3.ZERO
 var jump_running := false
+var _dying := false
 var _glow_until := 0
 var _swinging := false
+var _combat_until := 0
+var _strike_index := 0
 var _glow_total := 1.0
 var _glow_surfaces: Array[Dictionary] = []
 
@@ -47,21 +76,24 @@ func _ready() -> void:
 	load_preferences()
 
 func load_preferences() -> void:
-	if not InputMap.has_action("run"):
-		InputMap.add_action("run")
-		var run_key := InputEventKey.new()
-		run_key.physical_keycode = KEY_SHIFT
-		InputMap.action_add_event("run", run_key)
 	var config := ConfigFile.new()
 	config.load(settings_path)
 	var used := []
 	for index in ACTIONS.size():
+		var has_saved := config.has_section_key("controls", ACTIONS[index])
 		var key: Variant = config.get_value("controls", ACTIONS[index], DEFAULT_KEYS[index])
-		if not key is int or key <= 0 or key in RESERVED_KEYS or key in used:
+		if not key is int or key <= 0 or key in RESERVED_KEYS:
 			key = DEFAULT_KEYS[index]
 		if key in used:
-			reset_keys()
-			break
+			if has_saved:
+				# Duplicate saved bindings are corrupt; fall back to defaults.
+				reset_keys()
+				return
+			# New action after an upgrade: keep older remaps, assign another free key.
+			key = _first_free_key(used)
+			if key <= 0:
+				reset_keys()
+				return
 		_set_key(index, key)
 		used.append(key)
 	var saved: Variant = config.get_value("controls", "sensitivity", 0.002)
@@ -69,6 +101,15 @@ func load_preferences() -> void:
 		sensitivity = clampf(saved, 0.0005, 0.01)
 	var inverted: Variant = config.get_value("controls", "invert_y", false)
 	invert_y = inverted if inverted is bool else false
+
+func _first_free_key(used: Array) -> int:
+	for candidate in DEFAULT_KEYS:
+		if candidate not in used and candidate not in RESERVED_KEYS:
+			return candidate
+	for code in range(KEY_A, KEY_Z + 1):
+		if code not in used and code not in RESERVED_KEYS:
+			return code
+	return -1
 
 func _set_key(index: int, key: int) -> void:
 	if not InputMap.has_action(ACTIONS[index]):
@@ -103,6 +144,24 @@ func save_preferences() -> bool:
 	config.set_value("controls", "sensitivity", sensitivity)
 	config.set_value("controls", "invert_y", invert_y)
 	return config.save(settings_path) == OK
+
+## Whether a key event matches a remappable action (physical key; keypad Enter aliases Chat when bound to Enter).
+func matches_action(event: InputEvent, index: int) -> bool:
+	if not event is InputEventKey or index < 0 or index >= ACTIONS.size():
+		return false
+	var key: int = key_for(index)
+	if event.physical_keycode == key:
+		return true
+	if index == CHAT and key == KEY_ENTER and event.keycode == KEY_KP_ENTER:
+		return true
+	return false
+
+## Spell hotbar slot 0..8 for a key press, or -1 when it is not a spell binding.
+func spell_slot(event: InputEvent) -> int:
+	for slot in 9:
+		if matches_action(event, SPELL_1 + slot):
+			return slot
+	return -1
 
 func start(character: String, point: Vector3, coordinates: Dictionary = {}) -> void:
 	stop()
@@ -147,12 +206,35 @@ func reload_avatar() -> void:
 	add_child(avatar)
 	_animation = avatar.get_node_or_null("CharacterAnimation")
 
+## Story handed the player another body: keep position and control, change the look.
+func swap_character(character: String) -> void:
+	if not preload("res://scripts/character_catalog.gd").is_valid(character):
+		return
+	if character == _character:
+		reload_avatar()
+		return
+	_character = character
+	reload_avatar()
+	if not is_instance_valid(avatar):
+		# First body after a failed look: place a new model at the last known point.
+		avatar = preload("res://scripts/character_catalog.gd").create_model(character)
+		if avatar == null:
+			return
+		avatar.scale = Vector3.ONE * 0.001
+		avatar.position = _position_target
+		avatar.basis = Basis.looking_at(-_forward, direction).scaled(Vector3.ONE * 0.001)
+		add_child(avatar)
+		_animation = avatar.get_node_or_null("CharacterAnimation")
+
+
 func stop() -> void:
 	active = false
 	moving = false
 	_ground_surface = null
 	airborne = false
 	on_object = false
+	sitting = false
+	_dying = false
 	direction = Vector3.ZERO
 	if is_instance_valid(avatar):
 		avatar.hide()
@@ -192,7 +274,7 @@ func intent() -> Vector3:
 
 ## Whether a key event is the (rebindable) jump key.
 func is_jump_event(event: InputEvent) -> bool:
-	return event is InputEventKey and event.physical_keycode == key_for(JUMP)
+	return matches_action(event, JUMP)
 
 func queue_jump() -> void:
 	if active and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not airborne and not jump_pending:
@@ -235,10 +317,15 @@ func apply_position(data: Variant, is_moving: bool) -> bool:
 	_play_animation(moving and active and intent().length_squared() > 0.0001)
 	return true
 
-## A short lunge for a swing of the tool in hand. The original Kenney clips only have idle and
-## run, so the swing is a quick squash and stretch of the whole character.
-func swing() -> void:
+## A swing of the tool or weapon. Disk models with combat clips play `box` / `kick` / `sweep`
+## (see `play_combat`); Kenney packs keep a short squash-and-stretch lunge.
+func swing(kind := "") -> void:
 	if not is_instance_valid(avatar) or _swinging:
+		return
+	var clip := kind
+	if clip.is_empty():
+		clip = _next_strike_clip()
+	if play_combat(clip):
 		return
 	_swinging = true
 	var rest := avatar.scale
@@ -251,6 +338,44 @@ func swing() -> void:
 		if is_instance_valid(avatar):
 			avatar.scale = rest
 	)
+
+## True when the disk model has at least one strike clip (bare-handed wildlife blows).
+func has_combat_clips() -> bool:
+	for name in ["box", "kick", "sweep"]:
+		if _has_clip(name):
+			return true
+	return false
+
+## Plays a one-shot combat clip (`box`, `kick`, `sweep`, `hit`, …). Returns false when missing.
+func play_combat(clip: String) -> bool:
+	if clip.is_empty() or not _has_clip(clip) or _dying:
+		return false
+	_swinging = true
+	_animation.speed_scale = 1.0
+	_animation.play(clip, 0.08)
+	var length := _animation.current_animation_length
+	_combat_until = Time.get_ticks_msec() + int(maxf(length, 0.2) * 1000.0)
+	get_tree().create_timer(maxf(length, 0.2)).timeout.connect(func() -> void:
+		_swinging = false
+		_combat_until = 0
+		if not _dying:
+			_play_animation(false)
+	, CONNECT_ONE_SHOT)
+	return true
+
+func _next_strike_clip() -> String:
+	var order: Array[String] = ["box", "kick", "sweep"]
+	if running():
+		order = ["kick", "box", "sweep"]
+	var available: Array[String] = []
+	for name in order:
+		if _has_clip(name):
+			available.append(name)
+	if available.is_empty():
+		return ""
+	var chosen: String = available[_strike_index % available.size()]
+	_strike_index += 1
+	return chosen
 
 ## Makes the character shine for a while, for example after reaching a new level.
 func glow(seconds: float = 10.0) -> void:
@@ -316,14 +441,73 @@ func _ground_avatar(surface: Node) -> void:
 		var height: float = surface.elevation64(absolute) if surface.has_method("elevation64") else surface.elevation(up)
 		avatar.position += up * (RADIUS + height - radius / 1000.0)
 
-func _play_animation(walking: bool) -> void:
+## Plays a death clip once. Prefer a variant matching `cause` (`fall`, `creature`, …).
+func play_death(cause := "") -> void:
+	_dying = true
+	_swinging = false
 	if not is_instance_valid(_animation):
 		return
-	if airborne:
-		# In the air the legs stop moving: the current pose is held until landing.
-		_animation.speed_scale = 0.0
+	var clip := _death_clip(cause)
+	if clip.is_empty():
 		return
-	var action := "walk" if walking else "idle"
+	_animation.speed_scale = 1.0
+	_animation.play(clip, 0.1)
+
+func _death_clip(cause: String) -> String:
+	var preferred: Array[String] = []
+	match cause:
+		"fall":
+			preferred = ["die", "die2", "dieleft"]
+		"creature":
+			preferred = ["dieleft", "die2", "die", "hit"]
+		"exhaustion", "dehydration":
+			preferred = ["die2", "die", "dieleft"]
+		_:
+			preferred = ["die", "die2", "dieleft"]
+	for name in preferred:
+		if _has_clip(name):
+			return name
+	var deaths: Array[String] = []
+	for candidate in _animation.get_animation_list():
+		if String(candidate).begins_with("die"):
+			deaths.append(String(candidate))
+	if deaths.is_empty():
+		return ""
+	var key := "%s:%s" % [_character, cause]
+	return deaths[abs(key.hash()) % deaths.size()]
+
+func set_sitting(value: bool) -> void:
+	sitting = value
+	_play_animation(false)
+
+func _has_clip(name: String) -> bool:
+	return is_instance_valid(_animation) and _animation.has_animation(name)
+
+func _play_animation(walking: bool) -> void:
+	if not is_instance_valid(_animation) or _dying:
+		return
+	if _swinging or Time.get_ticks_msec() < _combat_until:
+		return
+	if sitting and _has_clip("sit"):
+		_animation.speed_scale = 1.0
+		if _animation.current_animation != "sit":
+			_animation.play("sit", 0.15)
+		return
+	if airborne:
+		if _has_clip("jump"):
+			_animation.speed_scale = 1.0
+			if _animation.current_animation != "jump":
+				_animation.play("jump", 0.1)
+		else:
+			# Without a jump clip the legs stop until landing.
+			_animation.speed_scale = 0.0
+		return
+	var action := "idle"
+	if walking:
+		if running() and _has_clip("run"):
+			action = "run"
+		else:
+			action = "walk"
 	_animation.speed_scale = _walk_speed if walking else 1.0
 	if _animation.current_animation != action:
 		_animation.play(action, 0.15)

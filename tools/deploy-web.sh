@@ -31,11 +31,9 @@ sudo python3 - "$VHOST" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-block = '''    # Browser client (HTML5 / WebAssembly) of the package ishtaria-client-web. Without ?server= the page would look for a server on the
-    # visitor's own computer, so it is sent to this site's own /api/ (the game server behind the proxy below, same origin: no CORS).
-    RewriteEngine On
-    RewriteCond %{QUERY_STRING} !(^|&)server=
-    RewriteRule ^/play/?$ /play/?server=/api [R=302,L,QSD]
+block = '''    # Browser client (HTML5 / WebAssembly). Default API URL is /etc/ishtaria/client-web-config.js
+    # (window.ISHTARIA_SERVER_URL), not a hardcoded world. Optional: /play/?server=/api still works.
+    Alias /play/ishtaria-config.js /etc/ishtaria/client-web-config.js
     Alias /play/ /usr/share/ishtaria-client-web/html/
     <Directory /usr/share/ishtaria-client-web/html/>
         Options -Indexes +FollowSymLinks
@@ -47,6 +45,10 @@ block = '''    # Browser client (HTML5 / WebAssembly) of the package ishtaria-cl
             AddOutputFilterByType DEFLATE text/html text/javascript application/javascript application/wasm
         </IfModule>
     </Directory>
+    <Location "/play/ishtaria-config.js">
+        Require all granted
+        Header set Cache-Control "no-cache"
+    </Location>
 
 '''
 marker = '    # Documentation of the ishtaria-doc package'

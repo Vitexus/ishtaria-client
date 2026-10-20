@@ -78,12 +78,20 @@ threads**, so a web server needs no special headers). It needs the web export te
 does not have: `PLATFORMS=web tools/fetch-godot.sh` fetches `web_nothreads_release.zip`. `make serve-web` serves it on
 `http://127.0.0.1:8060/`.
 
-The page takes the server from its address: `?server=https://world.example` or a path of the same site, `?server=/server`
-(a reverse proxy forwards that to the game server, so that no CORS is needed; the game server itself sends no CORS headers). A page
-served over https can only reach servers over https. The Debian package `ishtaria-client-web` carries the files
-(`/usr/share/ishtaria-client-web/html`, built when `debian/rules` finds the template), and the portal `ishtaria-web` publishes
-them as `/play/`. The look of the terrain differs a little from the desktop build (Compatibility instead of Forward+), and the
-data is large (about the size of the desktop client), so the first load takes a while.
+The page takes the server in this order (nothing public is hardcoded in the client):
+
+1. `?server=https://world.example` or a same-origin path `?server=/server` / `?server=/`
+2. `window.ISHTARIA_SERVER_URL` from `ishtaria-config.js` — each host sets this in
+   `/etc/ishtaria/client-web-config.js` (Apache/nginx Alias; see `ishtaria-web` site examples)
+3. Otherwise the saved address, then `http://127.0.0.1:7400`
+
+A reverse proxy can forward a path to the game server so that no CORS is needed (the game server
+itself sends no CORS headers). A page served over https can only reach servers over https. The
+Debian package `ishtaria-client-web` carries the files (`/usr/share/ishtaria-client-web/html`,
+built when `debian/rules` finds the template), and the portal `ishtaria-web` publishes them as
+`/play/`. The look of the terrain differs a little from the desktop build (Compatibility instead of
+Forward+), and the data is large (about the size of the desktop client), so the first load takes a
+while.
 
 These builds are **not code-signed or notarized**, and they are not tested by the
 project: Windows SmartScreen and macOS Gatekeeper will warn (on macOS, right-click →
@@ -186,9 +194,11 @@ or a physical landing simulation.
 
 WASD walks relative to the camera heading; diagonal movement is normalized.
 Hold Shift to run at 6 metres per second instead of walking at 4; release it
-to return to walking. Press I to open the existing inventory and release the
-cursor. Inventory and other game panels stop walking and running input.
-Space (rebindable) jumps once per press. Hold a walking direction at the press to launch in
+to return to walking. Defaults for the other actions: Space jumps, I opens
+inventory, C crafting, J the quest log, Enter chat, F friends, E interact, G
+pick up, P portals, M the minimap, and 1–9 cast learned spells. Inventory,
+crafting and other game panels stop walking and running input.
+Space jumps once per press. Hold a walking direction at the press to launch in
 that direction, or jump vertically without one. The unobstructed apex is about
 2.15 metres normally or 3.68 metres while running in a direction; running jumps
 also stay airborne longer and travel farther. Shift alone does not boost a stationary jump.
@@ -201,13 +211,15 @@ above the HUD, including narrow windows. Escape releases the cursor and stops
 walking. Clicking unobstructed scenery captures it again. Opening game panels
 or losing application focus also releases the cursor.
 
-Open the HUD gear and choose **Controls** to rebind the four walking keys and the jump key,
-adjust mouse sensitivity, invert vertical mouse movement or restore defaults.
-Click a binding and press its replacement; Escape cancels capture. Conflicting
-bindings swap rather than assigning one key to two directions. These preferences
-reserve Shift for running, I for inventory and Escape for releasing the cursor, and
-are saved in the local `[controls]` section without altering server, language
-or account settings.
+Open the HUD gear and choose **Controls** to see every gameplay binding and rebind
+it (walk, run, jump, inventory, crafting, quest log, chat, friends, pick up,
+portals, interact, minimap, spell slots 1–9), adjust mouse sensitivity, invert
+vertical mouse movement or restore defaults. That list is the authoritative key
+reference.
+Click a binding and press its replacement; Escape cancels capture and remains the
+only key that cannot be assigned. Conflicting bindings swap rather than assigning
+one key to two actions. Preferences are saved in the local `[controls]` section
+without altering server, language or account settings.
 
 The client sends intentions every 100 ms, never a trusted destination or elapsed
 time. Only accepted server responses move the avatar; saved position survives
@@ -386,8 +398,9 @@ the approach; open it to change server or sign out.
 
 ### Inventory And Memorials
 
-Inventory shows the server-owned capacity, exact stacks and food calories.
-Edible items offer **Eat**; the client sends only the item identifier.
+Inventory (I) shows the server-owned capacity, exact stacks and food calories.
+Crafting (C) is a separate panel with recipes; both keys are remappable in
+Settings. Edible items offer **Eat**; the client sends only the item identifier.
 Eating when already fully fed restores five health, capped at 100. Movement
 acknowledgements update the HUD's server-owned stamina, water and health.
 Long walks consume stamina; running consumes it five times faster and uses more
@@ -468,7 +481,7 @@ Thanks to [Kenney](https://kenney.nl/) for making high-quality game assets
 freely available, and to the [Godot](https://godotengine.org/) contributors
 for the open-source engine powering this client.
 
-The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the six spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0).
+The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the six spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0). The love-minigame heart grenade (`assets/props/heart_grenade/`) is an original Blender prop under MIT — a humorous anachronism for Šamḫat’s throws at Enkidu, not the Cults3D CULTS PU listing that inspired the joke.
 
 The client includes resources from:
 
@@ -534,8 +547,9 @@ press *Accept*, and the server swaps everything at once. Changing an offer withd
 Inventory buttons **Place** (campfire, bedroll, workbench, anvil, tent, fence) and **Plant** (seeds) put a thing two metres in
 front of the character; the server checks the ground, reach, spacing and your limits. **E** harvests your own ripe crop,
 **G** takes one of your things (or an unripe crop, for its seed) back. Crops ripen by the server's clock, also while you are
-away. Recipes that name a station (cooking and smelting at a **campfire**, weapons and heavy armour at an **anvil**, furniture and
-rods at a **workbench**) work only within four metres of one, whoever placed it. A **fishing rod** in hand and water within reach:
+away. The crafting panel (C) lists recipes; those that name a station (cooking and smelting at a **campfire**, weapons and heavy
+armour at an **anvil**, furniture and rods at a **workbench**) work only within four metres of one, whoever placed it. A **fishing
+rod** in hand and water within reach:
 left click casts (a few seconds between casts, about every second cast catches a fish). Cooked food fills more than raw.
 
 ## Magic

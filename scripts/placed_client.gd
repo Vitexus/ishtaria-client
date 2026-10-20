@@ -45,7 +45,7 @@ func is_running() -> bool:
 static func valid_thing(thing: Variant) -> bool:
 	if not thing is Dictionary or not (thing.get("id") is float or thing.get("id") is int) or thing.id <= 0:
 		return false
-	if not thing.get("kind") is String or thing.kind.length() > 40 or not thing.get("model") is String or thing.model.length() > 60:
+	if not thing.get("kind") is String or thing.kind.length() > 40 or not thing.get("model") is String or thing.model.length() > 160:
 		return false
 	if not thing.get("position") is Array or thing.position.size() != 3:
 		return false
@@ -116,6 +116,12 @@ static func error_key(code: int, text: String) -> String:
 			return "Inventory is full"
 		"not enough to pay":
 			return "You do not have that"
+		"no snare quest":
+			return "You have no snare to set"
+		"snares already done":
+			return "Your snares are finished"
+		"snare already set":
+			return "A snare is already set"
 	return "" if code == 429 else "Action unavailable"
 
 # --- requests ---

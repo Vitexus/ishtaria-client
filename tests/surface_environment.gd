@@ -105,6 +105,15 @@ func _run() -> void:
 	var indices: PackedInt32Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 	# A disk inscribed in the old square: full vertex grid, fewer triangles (about π/4 of the square).
 	_check(vertices.size() == 129 * 129 and indices.size() < 128 * 128 * 6 and indices.size() > int(128 * 128 * 6 * 0.7), "Fine detail is a shared-vertex disk, not a floating square tile")
+	_check(is_equal_approx(surface._detail_radius, surface.DETAIL_RADIUS), "Without a landscape patch the detail disk stays at the default radius")
+	# A city patch (Uruk is 6 km) widens the disk so the walled precinct is not cut by a 700 m circle.
+	surface._terrain_patches = [{"extent": [6000.0, 6000.0], "offset": [0.0, 0.0], "feather": 120.0, "axes": [[1, 0, 0], [0, 0, 1]], "grid": null, "water_grid": null, "width": 0, "height": 0, "anchor_height_m": 0.0, "place": "uruk", "heightmap_url": "", "water_url": "", "clear_url": ""}]
+	surface.show_region(Vector3.FORWARD)
+	var city_vertices: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	_check(surface._detail_radius > surface.DETAIL_RADIUS + 0.5 and surface._detail_radius <= surface.DETAIL_RADIUS_MAX, "A landscape patch widens the detail disk toward the settlement")
+	_check(city_vertices.size() == (surface._detail_segments + 1) * (surface._detail_segments + 1), "A widened disk keeps a shared-vertex grid scaled to its radius")
+	surface._terrain_patches = []
+	surface.show_region(Vector3.FORWARD)
 	_check(surface.detail.top_level and surface.detail.get_child(0).material_override.get_shader_parameter("is_detail"), "Detail uses local coordinates without a second planet-scale transform")
 	_check(vertices[0].length() < 2.0, "Detail vertices are local, not planet-scale")
 	var shifted := precise.duplicate()
@@ -149,6 +158,57 @@ func _run() -> void:
 	surface.show_region(Vector3.FORWARD)
 	_check(surface.placements.is_empty(), "No objects spawn underwater")
 	_check(not surface.water_map.is_empty() and surface.water_map.has("texture"), "A flooded region bakes a water picture for the minimap")
+	# Flow rivers on dry floodplain must not paint the whole coarse cell blue (Gilgamesh hunter).
+	var river := data.duplicate(true)
+	river.biomes.fill(2)
+	river.elevation_m.fill(30)
+	river.water_m.fill(30)
+	_check(surface.apply_environment(river, "fixture", "43"), "A flow river cell is accepted")
+	surface.heightmap = Image.create(16, 16, false, Image.FORMAT_RF)
+	# Pixel 128 ≈ +31 m land (same encoding as the planet heightmap).
+	surface.heightmap.fill(Color(128.0 / 255.0, 0, 0, 1))
+	surface.show_region(Vector3(1, 0, 0))
+	_check(not surface._minimap_water_at([1.0, 0.0, 0.0]), "A dry floodplain in a coarse river cell is not water on the minimap")
+	# Landscape patches: bilinear sample at the south/east edge must not index past the grid
+	# (regression: row+1 / column+1 without clamping → PackedFloat32Array out of bounds).
+	var patch_axes: Array = surface._terrain_axes([1.0, 0.0, 0.0])
+	var patch_grid := PackedFloat32Array()
+	patch_grid.resize(4 * 4)
+	for index in patch_grid.size():
+		patch_grid[index] = float(index)
+	var edge_patch := {
+		"place": "edge",
+		"grid": patch_grid,
+		"water_grid": null,
+		"width": 4,
+		"height": 4,
+		"extent": [40.0, 40.0],
+		"offset": [0.0, 0.0],
+		"feather": 2.0,
+		"anchor_height_m": 1000.0,
+		"anchor": [6371000.0, 0.0, 0.0],
+		"axes": patch_axes,
+	}
+	surface._terrain_patches = [edge_patch]
+	var rim_ok := true
+	var rim_hit := false
+	for local_x in [0.0, 19.5, -19.5]:
+		for local_z in [0.0, 19.5, -19.5]:
+			var direction: Array = [
+				1.0 + float(patch_axes[0][0]) * local_x / 6371000.0 + float(patch_axes[1][0]) * local_z / 6371000.0,
+				0.0 + float(patch_axes[0][1]) * local_x / 6371000.0 + float(patch_axes[1][1]) * local_z / 6371000.0,
+				0.0 + float(patch_axes[0][2]) * local_x / 6371000.0 + float(patch_axes[1][2]) * local_z / 6371000.0,
+			]
+			var length := sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+			direction = [direction[0] / length, direction[1] / length, direction[2] / length]
+			if surface._terrain_local(edge_patch, direction).is_empty():
+				continue
+			rim_hit = true
+			var sample: float = surface._terrain_offset_m(direction, 1000.0)
+			if not is_finite(sample):
+				rim_ok = false
+	_check(rim_hit and rim_ok, "Terrain patch height sample at the grid rim stays in bounds")
+	surface._terrain_patches = []
 	_check(surface._map_prop_kind("town.road") == "road", "Road modules are roads on the map")
 	_check(surface._map_prop_kind("town.wall") == "building" and surface._map_prop_kind("quaternius.castle") == "building", "Walls and ready-made buildings are buildings on the map")
 	_check(surface._map_prop_kind("disk:gilgamesh:media/models/architecture/uruk_quarter_01.glb") == "building", "Datadisk structures are buildings on the map whatever their model is named")

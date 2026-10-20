@@ -1,0 +1,25 @@
+Browser client — per-host game server URL
+-----------------------------------------
+
+The WebAssembly build does not embed a world address. Each site that serves
+/play/ chooses the default API URL for that instance:
+
+  1. Query string (highest priority):  /play/?server=https://world.example
+     or a same-origin path:            /play/?server=/
+
+  2. window.ISHTARIA_SERVER_URL from ishtaria-config.js (this host's default)
+
+  3. Otherwise the player's saved address, then http://127.0.0.1:7400
+
+Edit /etc/ishtaria/client-web-config.js (conffile), for example:
+
+  window.ISHTARIA_SERVER_URL = "https://world.example";
+  window.ISHTARIA_SERVER_URL = "/";       # API on the same origin as /play/
+
+Point the web server at that file as /play/ishtaria-config.js (see the
+ishtaria-web Apache/nginx site examples). After changing the file, reload the
+web server; browsers may cache the old script briefly.
+
+Desktop builds use the environment variable of the same name instead:
+
+  ISHTARIA_SERVER_URL=https://world.example ishtaria-client

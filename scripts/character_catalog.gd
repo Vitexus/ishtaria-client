@@ -37,9 +37,25 @@ static var disk_character := ""
 static var disk_model: PackedScene
 ## How tall the disk says that character stands, in metres (0: as the model was authored).
 static var disk_height_m := 0.0
-## The clips of such a model that stand in for the idle and walking actions (a glTF clip name may
-## carry a prefix before a `|`).
-const DISK_CLIPS := {"idle": "Idle", "walk": "Walk"}
+## The clips of such a model that stand in for locomotion and poses (a glTF clip name may
+## carry a prefix before a `|`). Missing clips are skipped; the controls fall back.
+const DISK_CLIPS := {
+	"idle": "Idle",
+	"walk": "Walk",
+	"run": "Run",
+	"jump": "Jump",
+	"sit": "Sit",
+	"die": "Die",
+	"die2": "Die2",
+	"dieleft": "DieLeft",
+	"box": "Box",
+	"kick": "Kick",
+	"sweep": "Sweep",
+	"hit": "Hit",
+	"hit2": "Hit2",
+}
+## One-shot clips; `die*` variants are also treated as once in `_create_disk_model`.
+const DISK_CLIP_ONCE := ["jump", "die", "die2", "dieleft", "box", "kick", "sweep", "hit", "hit2"]
 
 static func is_valid(character: String) -> bool:
 	var parts := character.split("/")
@@ -130,9 +146,22 @@ static func _create_disk_model() -> Node3D:
 		for candidate in player.get_animation_list():
 			if candidate == DISK_CLIPS[action] or candidate.ends_with("|" + DISK_CLIPS[action]):
 				var animation: Animation = player.get_animation(candidate).duplicate()
-				animation.loop_mode = Animation.LOOP_LINEAR
+				animation.loop_mode = (
+					Animation.LOOP_NONE if action in DISK_CLIP_ONCE or action.begins_with("die") else Animation.LOOP_LINEAR
+				)
 				library.add_animation(action, animation)
 				break
+	# Extra Die3… / unnamed death clips from the disk, under lower-case names.
+	for candidate in player.get_animation_list():
+		var base := String(candidate)
+		var parts := base.split("|")
+		if not parts.is_empty():
+			base = parts[parts.size() - 1]
+		if not base.begins_with("Die") or library.has_animation(base.to_lower()):
+			continue
+		var animation: Animation = player.get_animation(candidate).duplicate()
+		animation.loop_mode = Animation.LOOP_NONE
+		library.add_animation(base.to_lower(), animation)
 	for existing in player.get_animation_library_list():
 		player.remove_animation_library(existing)
 	player.add_animation_library("", library)

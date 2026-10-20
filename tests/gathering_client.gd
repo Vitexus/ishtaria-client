@@ -80,27 +80,30 @@ func _run() -> void:
 	_check(environment._harvest_info({"kind": "castle", "tool": "axe", "hits": 1}).is_empty() and environment._harvest_info("x").is_empty(), "unknown kinds are scenery")
 	environment.queue_free()
 
-	# Crafting is offered only with the ingredients and the tool in the inventory.
-	var panel := preload("res://scripts/survival_panel.gd").new()
-	root.add_child(panel)
+	# Crafting is its own panel; recipes need ingredients and the tool in inventory.
+	var crafting := preload("res://scripts/crafting_panel.gd").new()
+	root.add_child(crafting)
 	var chop := _recipe("chop_oak_log", [_stack("oak_log", "Oak log", "1")], [_stack("oak_wood", "Oak wood", "20")], "axe")
-	panel.set_recipes([chop, {"id": 5}, _recipe("bad", [], [])])
-	_check(panel._recipes.size() == 1, "malformed recipes are ignored")
-	panel.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "inventory": {"used": 1, "capacity": 100, "items": [_stack("oak_log", "Oak log", "1")]}})
-	_check(not panel.can_craft(chop), "no axe, no chopping")
-	panel.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "inventory": {"used": 2, "capacity": 100, "items": [_stack("oak_log", "Oak log", "1"), _stack("axe", "Axe", "1")]}})
-	_check(panel.can_craft(chop), "log and axe allow chopping")
-	panel.open()
-	var recipe_row := panel.find_child("Recipe_chop_oak_log", true, false)
+	crafting.set_recipes([chop, {"id": 5}, _recipe("bad", [], [])])
+	_check(crafting._recipes.size() == 1, "malformed recipes are ignored")
+	crafting.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "inventory": {"used": 1, "capacity": 100, "items": [_stack("oak_log", "Oak log", "1")]}})
+	_check(not crafting.can_craft(chop), "no axe, no chopping")
+	crafting.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "inventory": {"used": 2, "capacity": 100, "items": [_stack("oak_log", "Oak log", "1"), _stack("axe", "Axe", "1")]}})
+	_check(crafting.can_craft(chop), "log and axe allow chopping")
+	crafting.open()
+	var recipe_row := crafting.find_child("Recipe_chop_oak_log", true, false)
 	_check(recipe_row != null, "the recipe is listed")
 	var craft_button: Button = recipe_row.find_child("Craft", true, false) if recipe_row != null else null
 	_check(craft_button != null and not craft_button.disabled, "the craft button is enabled")
 	var requested := []
-	panel.craft_requested.connect(func(id: String) -> void: requested.append(id))
+	crafting.craft_requested.connect(func(id: String) -> void: requested.append(id))
 	if craft_button != null:
 		craft_button.pressed.emit()
 	_check(requested == ["chop_oak_log"], "pressing craft requests the recipe")
+	crafting.queue_free()
 	# Tools and weapons can be put in hand; the one in hand can be taken out.
+	var panel := preload("res://scripts/survival_panel.gd").new()
+	root.add_child(panel)
 	var hand_events := []
 	panel.equip_requested.connect(func(id: String) -> void: hand_events.append(["equip", id]))
 	panel.unequip_requested.connect(func() -> void: hand_events.append(["unequip"]))

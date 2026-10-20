@@ -11,4 +11,5 @@
 	You may use these graphics in personal and commercial projects.
 	Credit (Kenney or www.kenney.nl) would be nice but is not mandatory.
 
-###############################################################################
+###############################################################################---
+heart.png: simple geometric CC0 placeholder for the Šamḫat love minigame (not from the Kenney pack; replace with Kenney Game Icons heart when bundling).

@@ -109,6 +109,17 @@ static func valid_event(data: Variant) -> bool:
 			return true
 		"solar":
 			return true
+		"snare":
+			# subject: armed | too_close | animal | animal_fled | ruined; body is optional JSON.
+			return data.subject in ["armed", "too_close", "animal", "animal_fled", "ruined"] \
+				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
+		"escort":
+			# subject: started | ended | threatened | protected | hurt | failed
+			return data.subject in ["started", "ended", "threatened", "protected", "hurt", "failed"] \
+				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
+		"love":
+			return data.subject in ["zone", "hit", "won", "miss"] \
+				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
 	return false
 
 ## Speaks to the players nearby; the server tells how many heard (nobody is fine).

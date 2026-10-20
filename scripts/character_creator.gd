@@ -181,8 +181,8 @@ func _label(parent: Node, text: String) -> void:
 	parent.add_child(label)
 
 ## A datadisk may decide the character of its players (`player_character` of the disk the server
-## announces): the choice of a look is hidden and the preview shows that character. An empty or
-## unknown id gives the choice back.
+## announces): the choice of a look is hidden and the preview shows that character (and its
+## `player_model` when the disk ships one). An empty or unknown id gives the choice back.
 func lock_character(fixed: String) -> void:
 	_locked = fixed if CATALOG.is_valid(fixed) else ""
 	packs.visible = _locked.is_empty()

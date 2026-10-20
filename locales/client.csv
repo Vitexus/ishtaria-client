@@ -13,6 +13,20 @@ Backward,Backward,Vzad
 Left,Left,Vlevo
 Right,Right,Vpravo
 Jump,Jump,Skok
+Run,Run,Běh
+Chat,Chat,Chat
+Pick up,Pick up,Sebrat
+Interact,Interact,Akce
+Minimap,Minimap,Minimapa
+Spell 1,Spell 1,Kouzlo 1
+Spell 2,Spell 2,Kouzlo 2
+Spell 3,Spell 3,Kouzlo 3
+Spell 4,Spell 4,Kouzlo 4
+Spell 5,Spell 5,Kouzlo 5
+Spell 6,Spell 6,Kouzlo 6
+Spell 7,Spell 7,Kouzlo 7
+Spell 8,Spell 8,Kouzlo 8
+Spell 9,Spell 9,Kouzlo 9
 Mouse sensitivity,Mouse sensitivity,Citlivost myši
 Invert mouse Y,Invert mouse Y,Obrátit svislý pohyb myši
 Restore defaults,Restore defaults,Obnovit výchozí
@@ -152,9 +166,13 @@ Craft,Craft,Vyrobit
 Needs,Needs,Potřebuje
 tool,tool,nástroj
 Crafted,Crafted,Vyrobeno
+No recipes yet,No recipes yet,Zatím žádné recepty
 Nothing to harvest nearby,Nothing to harvest nearby,V okolí není co sbírat
 E: Fell tree,E: Fell tree,E: Pokácet strom
 E: Mine rock,E: Mine rock,E: Těžit kámen
+E: Sit,E: Sit,E: Sednout
+E: Stand up,E: Stand up,E: Vstát
+Cannot sit while jumping,Cannot sit while jumping,Nelze sedět ve skoku
 E: Take logs,E: Take logs,E: Vzít klády
 Harvested: %s,Harvested: %s,Získáno: %s
 Hit %s / %s,Hit %s / %s,Úder %s / %s
@@ -542,6 +560,33 @@ Dawn breaks,Dawn breaks,Svítá
 Night falls,Night falls,Nastává soumrak
 Road,Road,Cesta
 Building,Building,Budova
+Snare,Snare,Past (oko)
+Stand far from the snare and wait,Stand far from the snare and wait,Vzdal se od pasti a čekej
+Too close — the herd will not come,Too close — the herd will not come,Příliš blízko — stádo nepřijde
+Wildlife approaches the snare…,Wildlife approaches the snare…,Zvěř se blíží k pasti…
+The animal fled — you were too close,The animal fled — you were too close,Zvíře uprchlo — byl jsi příliš blízko
+Wild Enkidu tore the snare — the catch fled,Wild Enkidu tore the snare — the catch fled,Divoký Enkidu strhl past — úlovek unikl
+You have no snare to set,You have no snare to set,Nemáš past k položení
+Your snares are finished,Your snares are finished,Tvé pasti už jsou hotové
+A snare is already set,A snare is already set,Past už je položená
+Your story continues in another body,Your story continues in another body,Tvůj příběh pokračuje v jiném těle
+Continue,Continue,Pokračovat
+Protect Šamḫat on the road,Protect Šamḫat on the road,Chraň Šamḫat na cestě
+Šamḫat is safe now,Šamḫat is safe now,Šamḫat je teď v bezpečí
+A predator threatens Šamḫat — drive it off!,A predator threatens Šamḫat — drive it off!,Predátor ohrožuje Šamḫat — odežeň ho!
+Šamḫat is safe — the beast fled,Šamḫat is safe — the beast fled,Šamḫat je v bezpečí — šelma uprchla
+Šamḫat is hurt — protect her!,Šamḫat is hurt — protect her!,Šamḫat je zraněná — chraň ji!
+Šamḫat fell — protect her better on the road,Šamḫat fell — protect her better on the road,Šamḫat padla — chraň ji na cestě lépe
+Love takes hold (%s/%s),Love takes hold (%s/%s),Láska působí (%s/%s)
+Enkidu's heart softens — he will speak with you,Enkidu's heart softens — he will speak with you,Enkiduovo srdce měkne — promluví s tebou
+The heart missed the water-hole,The heart missed the water-hole,Srdíčko minulo napajedlo
+Throw hearts of love at Enkidu,Throw hearts of love at Enkidu,Házej po Enkiduovi srdíčka lásky
+Apologize (50 gold),Apologize (50 gold),Omluvit se (50 zlatých)
+They will remember this,They will remember this,Tohle si bude pamatovat
+They stop fighting,They stop fighting,Přestává bojovat
+They strike back: -%s health,They strike back: -%s health,Bijí zpět: −%s zdraví
+You will not strike your companion,You will not strike your companion,Svého společníka neudeříš
+They accept your apology,They accept your apology,Přijímají tvou omluvu
 Tell me about yourself,Tell me about yourself,Pověz mi něco o sobě
 Back to the conversation,Back to the conversation,Zpět k rozhovoru
 Read more on Wikipedia,Read more on Wikipedia,Číst více na Wikipedii
@@ -549,3 +594,4 @@ Opens the article in your web browser,Opens the article in your web browser,Otev
 Open this page in your web browser?,Open this page in your web browser?,Otevřít tuto stránku ve webovém prohlížeči?
 Open in browser,Open in browser,Otevřít v prohlížeči
 Active quest,Active quest,Aktivní úkol
+You are swimming and drowning: get to the shore!,You are swimming and drowning: get to the shore!,Plavete a topíte se: doplavte ke břehu!

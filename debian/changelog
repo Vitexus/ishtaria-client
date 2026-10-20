@@ -1,3 +1,16 @@
+ishtaria-client (0.2.0.2~trixie) unstable; urgency=medium
+
+  * Web default server from window.ISHTARIA_SERVER_URL (/etc config), not hardcoded.
+  * Immortality tablet epilog; quest checkpoint toast.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 20 Oct 2026 19:40:00 +0200
+
+ishtaria-client (0.2.0.1~trixie) unstable; urgency=medium
+
+  * Heart-grenade love throws; NPC health bars; escort and dialogue apology.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 20 Oct 2026 14:18:57 +0200
+
 ishtaria-client (0.2.0) unstable; urgency=medium
 
   * Release 0.2.0: server version compatibility check, farm animals, quest compass.
