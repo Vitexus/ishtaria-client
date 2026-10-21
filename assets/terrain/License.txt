@@ -1,0 +1,11 @@
+Ground textures from Poly Haven (https://polyhaven.com/), released under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/). Downloaded at 1k from the Poly Haven API.
+Each has a page at https://polyhaven.com/a/<name>:
+
+  grass_ground     diffuse
+  forest_ground_06 diffuse
+  gravelly_sand    diffuse
+  gravel_ground_01 diffuse
+  gray_rocks       diffuse, normal (OpenGL)
+
+Only the files used by scripts/planet_surface.gdshader are bundled.

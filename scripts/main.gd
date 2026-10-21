@@ -160,6 +160,12 @@ func _ready() -> void:
 	_terrain_material = ShaderMaterial.new()
 	_terrain_material.shader = preload("res://scripts/planet_surface.gdshader")
 	planet.material_override = _terrain_material
+	# Poly Haven CC0 ground layers for the local detail disk (assets/terrain, credited in the README).
+	for layer: String in ["grass_ground", "forest_ground_06", "gravelly_sand", "gravel_ground_01", "gray_rocks"]:
+		var parameter: String = {"grass_ground": "tex_grass", "forest_ground_06": "tex_soil", "gravelly_sand": "tex_sand", "gravel_ground_01": "tex_gravel", "gray_rocks": "tex_rock"}[layer]
+		_terrain_material.set_shader_parameter(parameter, load("res://assets/terrain/%s/%s_diff_1k.jpg" % [layer, layer]))
+	_terrain_material.set_shader_parameter("tex_rock_normal", load("res://assets/terrain/gray_rocks/gray_rocks_nor_gl_1k.jpg"))
+	_terrain_material.set_shader_parameter("use_textures", true)
 	add_child(planet)
 	var ocean := MeshInstance3D.new()
 	ocean.name = "Ocean"
@@ -176,6 +182,7 @@ func _ready() -> void:
 	ocean.visible = false
 	add_child(ocean)
 	_environment = preload("res://scripts/surface_environment.gd").new()
+	_environment.async_detail = true
 	_environment.land_material = _terrain_material
 	_environment.water_material = _water_material
 	add_child(_environment)
@@ -183,6 +190,15 @@ func _ready() -> void:
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-35, 40, 0)
+	# Scene units are kilometres: cascades cover the walking area (250 m), distant terrain stays unshadowed.
+	# Bias values are scaled the same way (Godot's defaults assume metres). Checked on a flat plain at 09:00: 0.0001 and
+	# 0.002 gave shadow acne (concentric stripes over the ground), 0.004 and 0.05 are clean with the shadow still attached.
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 0.25
+	sun.directional_shadow_blend_splits = true
+	sun.shadow_bias = 0.004
+	sun.shadow_normal_bias = 0.05
 	add_child(sun)
 	_sky = preload("res://scripts/planet_sky.gd").new()
 	_sky.sun = sun
@@ -1785,6 +1801,7 @@ func _update_area_music(delta: float) -> void:
 	_area_music.set_target(found.get("area", {}), found.get("level", 0.0))
 
 func _on_swimming_changed(swimming: bool) -> void:
+	_controls.set_swimming(swimming)
 	if swimming != _swimming:
 		_swimming = swimming
 		_update_prompt()

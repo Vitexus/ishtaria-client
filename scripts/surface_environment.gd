@@ -61,7 +61,10 @@ const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 ## Built / tilled ground from a datadisk clear mask (streets, houses, fields).
 const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
 
-var heightmap: Image
+var heightmap: Image:
+	set(value):
+		_stop_detail_work()
+		heightmap = value
 var environment: Dictionary = {}
 var catalog: Array[Dictionary] = []
 var placements: Array[Dictionary] = []
@@ -77,6 +80,9 @@ var _animals_elapsed := 0.0
 var land_material: ShaderMaterial
 var water_material: ShaderMaterial
 var detail: Node3D
+## Decorative grass tufts around the region centre (see grass_cover.gd).
+var grass: Node3D
+var grass_cover := preload("res://scripts/grass_cover.gd").new(self)
 var objects: Node3D
 var memorials: Node3D
 ## Characters of story datadisks, standing near the player.
@@ -143,17 +149,39 @@ var _detail_vertices := PackedVector3Array()
 ## Radius (km) and segment count of the detail disk last built; grow with landscape patches.
 var _detail_radius := DETAIL_RADIUS
 var _detail_segments := DETAIL_SEGMENTS
+## Computes the detail disk on a worker thread (the game); the tests leave it off and get the mesh at once.
+var async_detail := false
+var _detail_generation := 0
+var _detail_pending := false
+var _detail_tasks: Array = []
+var _detail_anchor: Array = []
 var _memorial_entries: Array = []
 var _portal_entries: Array = []
 var _portal_request: HTTPRequest
 var _memorial_request: HTTPRequest
 var _memorial_elapsed := 0.0
 
+func _exit_tree() -> void:
+	_stop_detail_work()
+
+## Drops any detail disk still being computed and waits for its worker: the workers read the heightmap,
+## environment and landscape patches, so those may only change while none runs.
+func _stop_detail_work() -> void:
+	_detail_generation += 1
+	_detail_pending = false
+	for id: int in _detail_tasks:
+		WorkerThreadPool.wait_for_task_completion(id)
+	_detail_tasks.clear()
+
 func _ready() -> void:
 	load_catalog("res://assets/world_objects.json")
 	detail = Node3D.new()
 	add_child(detail)
 	detail.top_level = true
+	grass = Node3D.new()
+	grass.name = "Grass"
+	add_child(grass)
+	grass.top_level = true
 	objects = Node3D.new()
 	add_child(objects)
 	objects.top_level = true
@@ -230,6 +258,7 @@ func load_catalog(path: String) -> bool:
 	return true
 
 func apply_environment(data: Variant, expected_sha256: String, expected_seed: String) -> bool:
+	_stop_detail_work()
 	if not data is Dictionary or (data.get("version") != 1 and data.get("version") != 2) or data.get("heightmap_sha256") != expected_sha256 or data.get("seed") != expected_seed:
 		return false
 	var size: Variant = data.get("face_size")
@@ -262,6 +291,7 @@ func apply_environment(data: Variant, expected_sha256: String, expected_seed: St
 	return true
 
 func clear_world() -> void:
+	_stop_detail_work()
 	environment.clear()
 	heightmap = null
 	target = Vector3.ZERO
@@ -271,7 +301,7 @@ func clear_world() -> void:
 	_clear_placed()
 	for child in get_children():
 		# Nodes of the owner that live under the environment (such as the other players) stay.
-		if child != detail and child != objects and child != memorials and child != portals and child != npcs and child != props and child != lamps and child != placed and not child.has_meta("persistent"):
+		if child != detail and child != grass and child != objects and child != memorials and child != portals and child != npcs and child != props and child != lamps and child != placed and not child.has_meta("persistent"):
 			remove_child(child)
 			child.queue_free()
 	_clear_region()
@@ -459,6 +489,9 @@ func _clear_region(clear_objects: bool = true) -> void:
 	for child in detail.get_children():
 		detail.remove_child(child)
 		child.queue_free()
+	for child in grass.get_children():
+		grass.remove_child(child)
+		child.queue_free()
 	land_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_map = {}
@@ -486,28 +519,77 @@ func _compute_detail_segments(radius_km: float) -> int:
 	var segments := int(round(float(DETAIL_SEGMENTS) * radius_km / DETAIL_RADIUS / 8.0) * 8.0)
 	return clampi(segments, DETAIL_SEGMENTS, DETAIL_SEGMENTS_MAX)
 
+## Rebuilds the local detail disk. With `async_detail` the vertices are computed on a worker thread and
+## swapped in when ready (the old disk stays, shifted to the new render origin, meanwhile); otherwise the
+## mesh is ready when this returns, which is what the headless tests rely on.
 func _build_detail() -> void:
-	_detail_vertices.clear()
-	for child in detail.get_children():
-		detail.remove_child(child)
-		child.queue_free()
+	_detail_generation += 1
 	if target == Vector3.ZERO or heightmap == null or environment.is_empty():
+		_detail_pending = false
+		_detail_vertices.clear()
+		for child in detail.get_children():
+			detail.remove_child(child)
+			child.queue_free()
+		detail.position = Vector3.ZERO
+		for child in grass.get_children():
+			grass.remove_child(child)
+			child.queue_free()
 		return
 	_detail_radius = _compute_detail_radius()
 	_detail_segments = _compute_detail_segments(_detail_radius)
-	var feather := maxf(DETAIL_EDGE_FEATHER, _detail_radius * 0.06)
 	var unit := target.normalized()
 	var reference := Vector3.UP if absf(unit.y) < 0.9 else Vector3.RIGHT
 	var tangent := reference.cross(unit).normalized()
-	var forward := unit.cross(tangent).normalized()
-	var tool := SurfaceTool.new()
-	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var water_tool := SurfaceTool.new()
-	water_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for row in _detail_segments + 1:
-		for column in _detail_segments + 1:
-			var horizontal: float = (float(column) / _detail_segments * 2.0 - 1.0) * _detail_radius
-			var vertical: float = (float(row) / _detail_segments * 2.0 - 1.0) * _detail_radius
+	var job := {
+		"generation": _detail_generation,
+		"unit": unit,
+		"tangent": tangent,
+		"forward": unit.cross(tangent).normalized(),
+		"radius": _detail_radius,
+		"segments": _detail_segments,
+		"feather": maxf(DETAIL_EDGE_FEATHER, _detail_radius * 0.06),
+		"anchor": (_origin_metres.duplicate() if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]),
+		"map_extent": _map_extent_m(),
+	}
+	if not async_detail:
+		_detail_pending = false
+		_finish_detail(_compute_detail(job))
+		return
+	_detail_pending = true
+	# A task must be waited for once to release it, so finished ones are collected here, not just forgotten.
+	var running: Array = []
+	for id: int in _detail_tasks:
+		if WorkerThreadPool.is_task_completed(id):
+			WorkerThreadPool.wait_for_task_completion(id)
+		else:
+			running.append(id)
+	_detail_tasks = running
+	_detail_tasks.append(WorkerThreadPool.add_task(func() -> void: _finish_detail.call_deferred(_compute_detail(job))))
+
+## Worker-safe: reads the heightmap, environment and landscape patches, writes nothing shared.
+func _compute_detail(job: Dictionary) -> Dictionary:
+	var unit: Vector3 = job.unit
+	var tangent: Vector3 = job.tangent
+	var forward: Vector3 = job.forward
+	var radius_km: float = job.radius
+	var segments: int = job.segments
+	var feather: float = job.feather
+	var anchor: Array = job.anchor
+	var count := (segments + 1) * (segments + 1)
+	var land := PackedVector3Array()
+	var land_normals := PackedVector3Array()
+	var land_uv2 := PackedVector2Array()
+	var water_vertices := PackedVector3Array()
+	var water_uv2 := PackedVector2Array()
+	land.resize(count)
+	land_normals.resize(count)
+	water_vertices.resize(count)
+	land_uv2.resize(count)
+	water_uv2.resize(count)
+	for row in segments + 1:
+		for column in segments + 1:
+			var horizontal: float = (float(column) / segments * 2.0 - 1.0) * radius_km
+			var vertical: float = (float(row) / segments * 2.0 - 1.0) * radius_km
 			var direction: Array = []
 			for axis in 3:
 				direction.append(float(unit[axis]) * RADIUS + float(tangent[axis]) * horizontal + float(forward[axis]) * vertical)
@@ -519,8 +601,8 @@ func _build_detail() -> void:
 			# Ease the rim toward the unpatched globe so a landscape patch does not read as a floating card.
 			var radial := Vector2(horizontal, vertical).length()
 			var edge := 1.0
-			if feather > 0.0 and radial > _detail_radius - feather:
-				edge = clampf((_detail_radius - radial) / feather, 0.0, 1.0)
+			if feather > 0.0 and radial > radius_km - feather:
+				edge = clampf((radius_km - radial) / feather, 0.0, 1.0)
 				edge = edge * edge * (3.0 - 2.0 * edge)
 				height = lerpf(elevation64_base(direction), height, edge)
 			var water_level := _detail_water_km(direction, point, height)
@@ -529,45 +611,86 @@ func _build_detail() -> void:
 				water_level = lerpf(base_water, water_level, edge)
 			# Dry ground carries no water: the vertex sinks under the land and the shader discards it.
 			var water := (water_level if is_finite(water_level) else height - 0.01) + 0.001
-			tool.set_normal(point)
-			tool.set_uv2(Vector2(height, 0))
-			tool.add_vertex(_render_position([direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0]))
-			water_tool.set_normal(point)
-			water_tool.set_uv2(Vector2(height, water_level if is_finite(water_level) else -100.0))
-			water_tool.add_vertex(_render_position([direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0]))
+			var index := row * (segments + 1) + column
+			land_normals[index] = point
+			land_uv2[index] = Vector2(height, water_level if is_finite(water_level) else -100.0)
+			land[index] = _position_from(anchor, [direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0])
+			water_uv2[index] = Vector2(height, water_level if is_finite(water_level) else -100.0)
+			water_vertices[index] = _position_from(anchor, [direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0])
 	# A disk, not a square: the old axis-aligned patch looked like a huge floating tile from above.
-	for row in _detail_segments:
-		for column in _detail_segments:
-			var mid_h: float = ((float(column) + 0.5) / _detail_segments * 2.0 - 1.0) * _detail_radius
-			var mid_v: float = ((float(row) + 0.5) / _detail_segments * 2.0 - 1.0) * _detail_radius
-			if Vector2(mid_h, mid_v).length() > _detail_radius:
+	var indices := PackedInt32Array()
+	for row in segments:
+		for column in segments:
+			var mid_h: float = ((float(column) + 0.5) / segments * 2.0 - 1.0) * radius_km
+			var mid_v: float = ((float(row) + 0.5) / segments * 2.0 - 1.0) * radius_km
+			if Vector2(mid_h, mid_v).length() > radius_km:
 				continue
-			var first := row * (_detail_segments + 1) + column
-			for index in [first, first + _detail_segments + 1, first + 1, first + 1, first + _detail_segments + 1, first + _detail_segments + 2]:
-				tool.add_index(index)
-				water_tool.add_index(index)
-	var mesh := tool.commit()
-	_detail_vertices = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+			var first := row * (segments + 1) + column
+			indices.append_array(PackedInt32Array([first, first + segments + 1, first + 1, first + 1, first + segments + 1, first + segments + 2]))
+	var tufts: Dictionary = grass_cover.compute(unit, anchor)
+	var water_image := _bake_water_image(unit, tangent, forward, float(job.map_extent))
+	return {"job": job, "grass": tufts, "water_image": water_image, "land": land, "normals": land_normals, "uv2": land_uv2, "water": water_vertices, "water_uv2": water_uv2, "indices": indices}
+
+func _build_detail_mesh(vertices: PackedVector3Array, normals: PackedVector3Array, uv2: PackedVector2Array, indices: PackedInt32Array) -> ArrayMesh:
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+## Main thread: takes a computed disk, unless a newer build has been asked for since.
+func _finish_detail(result: Dictionary) -> void:
+	var job: Dictionary = result.job
+	if int(job.generation) != _detail_generation or not is_inside_tree():
+		return
+	_detail_pending = false
+	for child in detail.get_children():
+		detail.remove_child(child)
+		child.queue_free()
+	detail.position = Vector3.ZERO
+	grass.position = Vector3.ZERO
+	grass_cover.apply(grass, result.grass)
+	_detail_anchor = job.anchor
+	var unit: Vector3 = job.unit
+	var mesh := _build_detail_mesh(result.land, result.normals, result.uv2, result.indices)
+	_detail_vertices = result.land
 	var local_land := MeshInstance3D.new()
 	local_land.mesh = mesh
 	var material := land_material.duplicate() as ShaderMaterial
 	material.set_shader_parameter("is_detail", true)
+	# Texture coordinates are planet-fixed metres, so the (changing) render origin is added back, modulo the tile period.
+	material.set_shader_parameter("texture_anchor", Vector3(fposmod(float(job.anchor[0]), 1024.0), fposmod(float(job.anchor[1]), 1024.0), fposmod(float(job.anchor[2]), 1024.0)))
 	local_land.material_override = material
 	detail.add_child(local_land)
 	var local_water := MeshInstance3D.new()
-	local_water.mesh = water_tool.commit()
-	var water_detail := water_material.duplicate() as ShaderMaterial
-	water_detail.set_shader_parameter("is_detail", true)
-	var anchor: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
+	local_water.mesh = _build_detail_mesh(result.water, result.normals, result.water_uv2, result.indices)
+	var water_detail := ShaderMaterial.new()
+	water_detail.shader = preload("res://scripts/local_water.gdshader")
+	var anchor: Array = job.anchor
 	water_detail.set_shader_parameter("wave_phase", Vector2(fposmod((anchor[0] + anchor[1] * 0.7 + anchor[2] * 0.3) * 0.65, TAU), fposmod((anchor[0] * 0.2 + anchor[1] * 0.5 + anchor[2]) * 0.7, TAU)))
 	local_water.material_override = water_detail
 	detail.add_child(local_water)
-	var discard_radius: float = _detail_radius * 1.05 / RADIUS
+	var discard_radius: float = float(job.radius) * 1.05 / RADIUS
 	land_material.set_shader_parameter("detail_direction", unit)
 	land_material.set_shader_parameter("detail_discard", discard_radius)
 	water_material.set_shader_parameter("detail_direction", unit)
 	water_material.set_shader_parameter("detail_discard", discard_radius)
-	_bake_water_map(unit, tangent, forward)
+	_apply_water_map(result.water_image, unit, job.tangent, job.forward, float(job.map_extent))
+
+## The water surface (km above the planet's radius) under a point given in metres from the planet's centre, or NAN on
+## dry ground: the same rule the water mesh and the server use, so what swims is what is drawn as water.
+func water_surface_km(coordinates_metres: Array) -> float:
+	var radius := sqrt(float(coordinates_metres[0]) * coordinates_metres[0] + float(coordinates_metres[1]) * coordinates_metres[1] + float(coordinates_metres[2]) * coordinates_metres[2])
+	if radius <= 0.0 or heightmap == null or environment.is_empty():
+		return NAN
+	var direction: Array = [float(coordinates_metres[0]) / radius, float(coordinates_metres[1]) / radius, float(coordinates_metres[2]) / radius]
+	var height := elevation64(direction)
+	var level := _detail_water_km(direction, Vector3(direction[0], direction[1], direction[2]), height)
+	return level if is_finite(level) and level > height else NAN
 
 func ground_position64(coordinates_metres: Array) -> Vector3:
 	var radius := sqrt(float(coordinates_metres[0]) * coordinates_metres[0] + float(coordinates_metres[1]) * coordinates_metres[1] + float(coordinates_metres[2]) * coordinates_metres[2])
@@ -577,7 +700,8 @@ func ground_position64(coordinates_metres: Array) -> Vector3:
 	for axis in 3:
 		projected.append(direction[axis] * (RADIUS + height) * 1000.0)
 	var point := _render_position(projected)
-	if _detail_vertices.is_empty() or target == Vector3.ZERO:
+	# While a new disk is computed the old vertices sit in the previous origin's frame: the exact height will do.
+	if _detail_vertices.is_empty() or target == Vector3.ZERO or _detail_pending:
 		return point
 	var up := Vector3(direction[0], direction[1], direction[2])
 	var unit := target.normalized()
@@ -1005,6 +1129,7 @@ func sync_npc_health(data: Variant) -> void:
 ## disk's own 16-bit PNGs, fetched apart from `fetch_media` (which would hand over Godot's
 ## half-float image and lose the decimetre step), and kept while the region keeps naming them.
 func apply_terrains(data: Variant) -> bool:
+	_stop_detail_work()
 	if not data is Array or data.size() > 8:
 		return false
 	var patches := []
@@ -1098,6 +1223,7 @@ func _terrain_fetch(url: String) -> void:
 		_terrain_requests.erase(url)
 
 func _terrain_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, url: String) -> void:
+	_stop_detail_work()
 	if _terrain_requests.get(url) is HTTPRequest:
 		(_terrain_requests[url] as HTTPRequest).queue_free()
 		_terrain_requests.erase(url)
@@ -1563,8 +1689,12 @@ func _minimap_water_at(direction: Array) -> bool:
 ## The baked region picture (see `water_map`): settlement clear-mask under water where the water
 ## plane stands above the ground, so the minimap shows the city silhouette and its rivers.
 func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
+	_apply_water_map(_bake_water_image(unit, tangent, forward, _map_extent_m()), unit, tangent, forward, _map_extent_m())
+
+## Worker-safe: only reads terrain data, and returns the picture.
+func _bake_water_image(unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float) -> Image:
 	var pixels := WATER_MAP_PIXELS
-	var step := _map_extent_m() * 2.0 / float(pixels)
+	var step := extent_m * 2.0 / float(pixels)
 	var image := Image.create(pixels, pixels, false, Image.FORMAT_RGBA8)
 	image.fill(Color.TRANSPARENT)
 	for row in pixels:
@@ -1578,6 +1708,10 @@ func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
 				image.set_pixel(column, row, SETTLEMENT_MAP_COLOR)
 			if _minimap_water_at(dir):
 				image.set_pixel(column, row, WATER_MAP_COLOR)
+	return image
+
+func _apply_water_map(image: Image, unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float) -> void:
+	var step := extent_m * 2.0 / float(WATER_MAP_PIXELS)
 	water_map = {
 		"texture": ImageTexture.create_from_image(image),
 		"centre": unit * (RADIUS + elevation64([unit.x, unit.y, unit.z])) * 1000.0,
@@ -1833,6 +1967,11 @@ func set_render_origin(coordinates_metres: Array) -> void:
 	for index in _lamp_positions.size():
 		lamps.get_child(index).position = _render_position(_lamp_positions[index])
 	_build_detail()
+	# Until the rebuilt disk arrives the old one is slid into the new origin's frame instead of jumping.
+	if _detail_pending and _detail_anchor.size() == 3:
+		var now: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
+		grass.position = Vector3((float(_detail_anchor[0]) - float(now[0])) / 1000.0, (float(_detail_anchor[1]) - float(now[1])) / 1000.0, (float(_detail_anchor[2]) - float(now[2])) / 1000.0)
+		detail.position = Vector3((float(_detail_anchor[0]) - float(now[0])) / 1000.0, (float(_detail_anchor[1]) - float(now[1])) / 1000.0, (float(_detail_anchor[2]) - float(now[2])) / 1000.0)
 
 ## Where a point (metres from the planet's centre) is in the scene, relative to the render origin.
 func render_position(metres: Array) -> Vector3:
@@ -1840,6 +1979,9 @@ func render_position(metres: Array) -> Vector3:
 
 func _render_position(metres: Array) -> Vector3:
 	var anchor: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
+	return _position_from(anchor, metres)
+
+func _position_from(anchor: Array, metres: Array) -> Vector3:
 	return Vector3((float(metres[0]) - anchor[0]) / 1000.0, (float(metres[1]) - anchor[1]) / 1000.0, (float(metres[2]) - anchor[2]) / 1000.0)
 
 ## Plays the looping animation `name` (with or without the armature prefix) of an animated model.

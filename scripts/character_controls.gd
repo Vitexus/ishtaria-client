@@ -31,6 +31,11 @@ const SPELL_1 := 15
 ## Only Escape cannot be assigned; every other functional key is listed in Settings.
 const RESERVED_KEYS := [KEY_ESCAPE]
 const RADIUS := 6371.0
+## A swimmer floats with the feet this far (km) under the water surface, chest-deep; the paddling clip is slowed.
+const SWIM_DRAFT_KM := 0.0012
+const SWIM_SPEED_SCALE := 0.55
+## With the swimming clip the body lies on the water, hips 0.9 m above the feet: the back should just break the surface.
+const SWIM_CLIP_DRAFT_KM := 0.0009
 ## The camera looks over the shoulder of its character at the closest zoom and from the middle from this distance (metres, before the
 ## size of the character is applied) on.
 const OVER_SHOULDER_NEAR_M := 2.5
@@ -61,6 +66,7 @@ var _ground_surface: Node
 var airborne := false
 var on_object := false
 var sitting := false
+var swimming := false
 var jump_pending := false
 var jump_direction := Vector3.ZERO
 var jump_running := false
@@ -433,7 +439,15 @@ func _ground_avatar(surface: Node) -> void:
 	var absolute: Array = []
 	for axis in 3:
 		absolute.append(float(_anchor_metres[axis]) + float(avatar.position[axis]) * 1000.0)
-	if surface.has_method("ground_position64"):
+	var level: float = surface.water_surface_km(absolute) if swimming and surface.has_method("water_surface_km") else NAN
+	if is_finite(level):
+		# The server keeps a swimmer on the bed; what is shown floats chest-deep at the surface.
+		var radius_m := sqrt(float(absolute[0]) * absolute[0] + float(absolute[1]) * absolute[1] + float(absolute[2]) * absolute[2])
+		var up := Vector3(absolute[0] / radius_m, absolute[1] / radius_m, absolute[2] / radius_m)
+		# A giant of a datadisk floats as much deeper as it is taller than a man.
+		var draft := (SWIM_CLIP_DRAFT_KM if _has_clip("swim") else SWIM_DRAFT_KM) * preload("res://scripts/character_catalog.gd").body_scale(_character)
+		avatar.position += up * (RADIUS + level - draft - radius_m / 1000.0)
+	elif surface.has_method("ground_position64"):
 		avatar.position = surface.ground_position64(absolute)
 	else:
 		var radius := sqrt(float(absolute[0]) * absolute[0] + float(absolute[1]) * absolute[1] + float(absolute[2]) * absolute[2])
@@ -476,6 +490,14 @@ func _death_clip(cause: String) -> String:
 	var key := "%s:%s" % [_character, cause]
 	return deaths[abs(key.hash()) % deaths.size()]
 
+## The server says the character is in water: it swims at the surface (the `swim` clip, or the slowed walk of a model without
+## one) instead of standing on the bed.
+func set_swimming(value: bool) -> void:
+	if value == swimming:
+		return
+	swimming = value
+	_play_animation(moving)
+
 func set_sitting(value: bool) -> void:
 	sitting = value
 	_play_animation(false)
@@ -502,13 +524,19 @@ func _play_animation(walking: bool) -> void:
 			# Without a jump clip the legs stop until landing.
 			_animation.speed_scale = 0.0
 		return
+	if swimming and _has_clip("swim"):
+		# The swimming clip is a prone stroke, played whether the swimmer moves or treads water.
+		_animation.speed_scale = 1.0 if walking else 0.6
+		if _animation.current_animation != "swim":
+			_animation.play("swim", 0.2)
+		return
 	var action := "idle"
 	if walking:
 		if running() and _has_clip("run"):
 			action = "run"
 		else:
 			action = "walk"
-	_animation.speed_scale = _walk_speed if walking else 1.0
+	_animation.speed_scale = (_walk_speed if walking else 1.0) * (SWIM_SPEED_SCALE if swimming else 1.0)
 	if _animation.current_animation != action:
 		_animation.play(action, 0.15)
 

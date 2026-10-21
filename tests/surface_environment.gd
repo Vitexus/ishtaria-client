@@ -14,6 +14,88 @@ func _check(condition: bool, message: String) -> void:
 		_failures += 1
 		push_error(message)
 
+## The worker-thread disk: identical to the synchronous one, slid (not jumped) while it is computed,
+## and a build that was asked for and superseded never reaches the scene.
+func _test_async_detail(surface: Node3D) -> void:
+	surface.show_region(Vector3.FORWARD)
+	var expected: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	surface.async_detail = true
+	surface.show_region(Vector3.FORWARD)
+	_check(surface._detail_pending, "An asynchronous build is pending until the worker has finished")
+	surface.show_region(Vector3.FORWARD)
+	for _frame in 600:
+		if not surface._detail_pending:
+			break
+		await process_frame
+	_check(not surface._detail_pending and surface.detail.get_child_count() == 2, "The asynchronous build arrives as one land and one water mesh")
+	var arrived: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	_check(arrived == expected, "The asynchronous disk has exactly the vertices of the synchronous one")
+	var moved: Array = surface._origin_metres.duplicate()
+	moved = [6371001.0, 0.0, 0.0] if moved.size() != 3 else moved
+	surface.set_render_origin(moved)
+	surface.set_render_origin([])
+	_check(surface._detail_pending, "Moving the origin twice leaves only the last build pending")
+	for _frame in 600:
+		if not surface._detail_pending:
+			break
+		await process_frame
+	_check(not surface._detail_pending and surface.detail.position == Vector3.ZERO and surface.detail.get_child_count() == 2, "A superseded build is dropped and the disk is back at its own origin")
+	surface.async_detail = false
+	surface.show_region(Vector3.FORWARD)
+
+## A pond of a landscape patch is water for the client as it is for the server: the surface is announced where the
+## water stands above the ground, and nowhere else.
+func _test_pond(surface: Node3D) -> void:
+	var point := [0.0, 0.0, -1.0]
+	var size := 200
+	var grid := PackedFloat32Array()
+	var water := PackedFloat32Array()
+	grid.resize(size * size)
+	grid.fill(-20.0)
+	water.resize(size * size)
+	water.fill(-4.0)
+	var height_m: float = surface.elevation64_base(point) * 1000.0
+	var saved: Array = surface._terrain_patches
+	surface._terrain_patches = [{"place": "pond", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": height_m, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}]
+	var metres := [0.0, 0.0, -6371000.0 - height_m]
+	var level: float = surface.water_surface_km(metres)
+	_check(is_finite(level) and absf(level * 1000.0 - (height_m - 0.4)) < 0.01, "The surface of a pond is announced 40 cm under the anchor height")
+	surface._terrain_patches = []
+	_check(not is_finite(surface.water_surface_km(metres)) or absf(surface.water_surface_km(metres) * 1000.0 - (height_m - 0.4)) > 0.01, "Without the patch there is no pond")
+	surface._terrain_patches = [{"place": "pond", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": height_m, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}]
+	grid.fill(0.0)
+	surface._terrain_patches[0].grid = grid
+	_check(not is_finite(surface.water_surface_km(metres)), "Water below the ground is not a surface")
+	surface._terrain_patches = saved
+
+## Grass is decorative and deterministic: the same place grows the same tufts, only grassy ground grows any.
+func _test_grass(surface: Node3D) -> void:
+	surface.show_region(Vector3.FORWARD)
+	var first := _grass_signature(surface)
+	surface.show_region(Vector3.FORWARD)
+	_check(first[0] > 0, "Forest ground grows grass tufts")
+	_check(first == _grass_signature(surface), "The same region grows exactly the same grass")
+	var forest_count: int = first[0]
+	surface.environment.biomes.fill(3)
+	surface.show_region(Vector3.FORWARD)
+	_check(_grass_signature(surface)[0] == 0, "Beaches grow no grass")
+	surface.environment.biomes.fill(4)
+	surface.show_region(Vector3.FORWARD)
+	_check(_grass_signature(surface)[0] > forest_count, "Grassland is thicker than forest floor")
+	surface.environment.biomes.fill(5)
+	surface.show_region(Vector3.FORWARD)
+
+## [tufts, checksum of every transform] of the grass under the region.
+func _grass_signature(surface: Node3D) -> Array:
+	var count := 0
+	var sum := 0.0
+	for chunk in surface.grass.get_children():
+		var buffer: PackedFloat32Array = chunk.multimesh.buffer
+		count += buffer.size() / 16
+		for value in buffer:
+			sum += value
+	return [count, snappedf(sum, 0.0001)]
+
 func _fixture(size: int) -> Dictionary:
 	var count := size * size * 6
 	var data := {"version":1,"heightmap_sha256":"fixture","seed":"18446744073709551615","face_size":size,"elevation_m":[],"water_m":[],"biomes":[],"downstream":[],"flow":[]}
@@ -122,6 +204,9 @@ func _run() -> void:
 	var rebased: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	_check(absf((vertices[0].x - rebased[0].x) - 0.00001) < 0.0000001, "Terrain rebase preserves one centimetre without moving its absolute surface")
 	surface.set_render_origin([])
+	await _test_async_detail(surface)
+	_test_grass(surface)
+	_test_pond(surface)
 	for placement in surface.placements:
 		_check(placement.position.is_finite() and absf(placement.position.length() - (surface.RADIUS + surface.elevation(placement.position) + 0.0005)) < 0.002, "Objects stand on actual terrain")
 	for sample in [
