@@ -1,0 +1,7 @@
+Flora of 0 A.D.
+===============
+
+Models: acacia_01, aleppo_pine_1, aleppo_pine_2, aleppo_pine_3, aleppo_pine_4, aleppo_pine_5, aleppo_pine_6, aleppo_pine_7, aleppo_pine_8, bush_desert_a, cattails, cedar_atlas_1, cedar_atlas_2, cedar_atlas_3, cedar_atlas_dead_1, cedar_atlas_dead_2, cretan_date_01, cretan_date_02, cretan_date_03, cretan_date_04, cypress_med, cypress_tall, fig_a, fig_b, fig_top_a, fig_top_b, olive_01, olive_02, olive_03, palm_date_a, palm_date_b, palm_date_c, palm_date_d, palm_date_e, palm_date_fruit_1, palm_date_fruit_2, palm_date_new_1, palm_date_new_2, palm_date_new_3, palm_date_new_4, palm_dead_1, palm_dead_2, palm_dead_3, palm_doum_1, palm_doum_2, papyrus_1, papyrus_2, poplar_lombardy, poplar_lombardy_dead, reed_beach_a, reed_beach_b, reed_giant, reed_pond_lush, tamarix_a, willow_a.
+
+Author and copyright: Wildfire Games (http://www.wildfiregames.com/), 0 A.D. art.
+Licence: CC BY-SA 3.0. Converted with tools/zeroad-scenery.py. Catalogue ids: zeroad.<name>.

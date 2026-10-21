@@ -3235,6 +3235,843 @@
         "grassland"
       ],
       "metallic": 0
+    },
+    {
+      "id": "zeroad.palm_date_a",
+      "scene": "res://assets/zeroad/flora/palm_date_a.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_b",
+      "scene": "res://assets/zeroad/flora/palm_date_b.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.6,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_c",
+      "scene": "res://assets/zeroad/flora/palm_date_c.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_new_1",
+      "scene": "res://assets/zeroad/flora/palm_date_new_1.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_new_2",
+      "scene": "res://assets/zeroad/flora/palm_date_new_2.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.reed_beach_a",
+      "scene": "res://assets/zeroad/flora/reed_beach_a.glb",
+      "biomes": [],
+      "weight": 1.6,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.reed_beach_b",
+      "scene": "res://assets/zeroad/flora/reed_beach_b.glb",
+      "biomes": [],
+      "weight": 1.6,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.reed_pond_lush",
+      "scene": "res://assets/zeroad/flora/reed_pond_lush.glb",
+      "biomes": [],
+      "weight": 2.0,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.papyrus_1",
+      "scene": "res://assets/zeroad/flora/papyrus_1.glb",
+      "biomes": [],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.papyrus_2",
+      "scene": "res://assets/zeroad/flora/papyrus_2.glb",
+      "biomes": [],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.cattails",
+      "scene": "res://assets/zeroad/flora/cattails.glb",
+      "biomes": [],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.tamarix_a",
+      "scene": "res://assets/zeroad/flora/tamarix_a.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.cedar_atlas_1",
+      "scene": "res://assets/zeroad/flora/cedar_atlas_1.glb",
+      "biomes": [
+        "mountain",
+        "forest"
+      ],
+      "weight": 2.0,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.cedar_atlas_2",
+      "scene": "res://assets/zeroad/flora/cedar_atlas_2.glb",
+      "biomes": [
+        "mountain",
+        "forest"
+      ],
+      "weight": 2.0,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.cedar_atlas_3",
+      "scene": "res://assets/zeroad/flora/cedar_atlas_3.glb",
+      "biomes": [
+        "mountain",
+        "forest"
+      ],
+      "weight": 1.6,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.cypress_med",
+      "scene": "res://assets/zeroad/flora/cypress_med.glb",
+      "biomes": [
+        "grassland",
+        "forest"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.cypress_tall",
+      "scene": "res://assets/zeroad/flora/cypress_tall.glb",
+      "biomes": [
+        "grassland",
+        "forest"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.acacia_01",
+      "scene": "res://assets/zeroad/flora/acacia_01.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.poplar_lombardy",
+      "scene": "res://assets/zeroad/flora/poplar_lombardy.glb",
+      "biomes": [
+        "grassland",
+        "forest"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.bush_desert_a",
+      "scene": "res://assets/zeroad/flora/bush_desert_a.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.willow_a",
+      "scene": "res://assets/zeroad/flora/willow_a.glb",
+      "biomes": [
+        "grassland",
+        "forest"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.olive_01",
+      "scene": "res://assets/zeroad/flora/olive_01.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.olive_02",
+      "scene": "res://assets/zeroad/flora/olive_02.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.olive_03",
+      "scene": "res://assets/zeroad/flora/olive_03.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.aleppo_pine_1",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_1.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_2",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_2.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_3",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_3.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.palm_doum_1",
+      "scene": "res://assets/zeroad/flora/palm_doum_1.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_doum_2",
+      "scene": "res://assets/zeroad/flora/palm_doum_2.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.fig_top_a",
+      "scene": "res://assets/zeroad/flora/fig_top_a.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.fig_top_b",
+      "scene": "res://assets/zeroad/flora/fig_top_b.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.reed_giant",
+      "scene": "res://assets/zeroad/flora/reed_giant.glb",
+      "biomes": [],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.45
+    },
+    {
+      "id": "zeroad.cretan_date_01",
+      "scene": "res://assets/zeroad/flora/cretan_date_01.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.cretan_date_02",
+      "scene": "res://assets/zeroad/flora/cretan_date_02.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.cretan_date_03",
+      "scene": "res://assets/zeroad/flora/cretan_date_03.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.cretan_date_04",
+      "scene": "res://assets/zeroad/flora/cretan_date_04.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.aleppo_pine_4",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_4.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_5",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_5.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_6",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_6.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_7",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_7.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.aleppo_pine_8",
+      "scene": "res://assets/zeroad/flora/aleppo_pine_8.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.fig_a",
+      "scene": "res://assets/zeroad/flora/fig_a.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.fig_b",
+      "scene": "res://assets/zeroad/flora/fig_b.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 1.2,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_dead_1",
+      "scene": "res://assets/zeroad/flora/palm_dead_1.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_dead_2",
+      "scene": "res://assets/zeroad/flora/palm_dead_2.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_dead_3",
+      "scene": "res://assets/zeroad/flora/palm_dead_3.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_fruit_1",
+      "scene": "res://assets/zeroad/flora/palm_date_fruit_1.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_fruit_2",
+      "scene": "res://assets/zeroad/flora/palm_date_fruit_2.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.cedar_atlas_dead_1",
+      "scene": "res://assets/zeroad/flora/cedar_atlas_dead_1.glb",
+      "biomes": [
+        "mountain",
+        "forest"
+      ],
+      "weight": 0.6,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.cedar_atlas_dead_2",
+      "scene": "res://assets/zeroad/flora/cedar_atlas_dead_2.glb",
+      "biomes": [
+        "mountain",
+        "forest"
+      ],
+      "weight": 0.6,
+      "scale_m": 1.0,
+      "max_slope": 0.5
+    },
+    {
+      "id": "zeroad.poplar_lombardy_dead",
+      "scene": "res://assets/zeroad/flora/poplar_lombardy_dead.glb",
+      "biomes": [
+        "grassland",
+        "forest"
+      ],
+      "weight": 0.4,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_d",
+      "scene": "res://assets/zeroad/flora/palm_date_d.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_e",
+      "scene": "res://assets/zeroad/flora/palm_date_e.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_new_3",
+      "scene": "res://assets/zeroad/flora/palm_date_new_3.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.palm_date_new_4",
+      "scene": "res://assets/zeroad/flora/palm_date_new_4.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 0.8,
+      "scale_m": 1.0,
+      "max_slope": 0.4
+    },
+    {
+      "id": "zeroad.gazelle",
+      "scene": "res://assets/zeroad/fauna/gazelle.glb",
+      "biomes": [
+        "grassland",
+        "beach"
+      ],
+      "weight": 2.0,
+      "scale_m": 0.75,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.goat",
+      "scene": "res://assets/zeroad/fauna/goat.glb",
+      "biomes": [],
+      "weight": 2.0,
+      "scale_m": 0.75,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.sheep",
+      "scene": "res://assets/zeroad/fauna/sheep.glb",
+      "biomes": [],
+      "weight": 2.0,
+      "scale_m": 0.75,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.cow",
+      "scene": "res://assets/zeroad/fauna/cow.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.bull",
+      "scene": "res://assets/zeroad/fauna/bull.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.donkey",
+      "scene": "res://assets/zeroad/fauna/donkey.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.pig",
+      "scene": "res://assets/zeroad/fauna/pig.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.75,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.chicken",
+      "scene": "res://assets/zeroad/fauna/chicken.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.55,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.fox",
+      "scene": "res://assets/zeroad/fauna/fox.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.75,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.wolf",
+      "scene": "res://assets/zeroad/fauna/wolf.glb",
+      "biomes": [
+        "forest",
+        "mountain"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.75,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.lion",
+      "scene": "res://assets/zeroad/fauna/lion.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.5,
+      "scale_m": 0.65,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.lioness",
+      "scene": "res://assets/zeroad/fauna/lioness.glb",
+      "biomes": [
+        "beach",
+        "grassland"
+      ],
+      "weight": 0.5,
+      "scale_m": 0.65,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.deer",
+      "scene": "res://assets/zeroad/fauna/deer.glb",
+      "biomes": [
+        "forest",
+        "grassland"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.75,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.boar",
+      "scene": "res://assets/zeroad/fauna/boar.glb",
+      "biomes": [
+        "forest"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.75,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.crocodile",
+      "scene": "res://assets/zeroad/fauna/crocodile.glb",
+      "biomes": [],
+      "weight": 0.5,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.camel",
+      "scene": "res://assets/zeroad/fauna/camel.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.horse_persian",
+      "scene": "res://assets/zeroad/fauna/horse_persian.glb",
+      "biomes": [
+        "grassland"
+      ],
+      "weight": 0.5,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.zebu",
+      "scene": "res://assets/zeroad/fauna/zebu.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.7,
+      "max_slope": 0.35,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.mastiff",
+      "scene": "res://assets/zeroad/fauna/mastiff.glb",
+      "biomes": [],
+      "weight": 1.0,
+      "scale_m": 0.65,
+      "max_slope": 0.4,
+      "fauna": true,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.hawk",
+      "scene": "res://assets/zeroad/fauna/hawk.glb",
+      "biomes": [
+        "grassland",
+        "mountain"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.45,
+      "max_slope": 0.5,
+      "fauna": true,
+      "flying": true,
+      "altitude_m": 22.0,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.crow",
+      "scene": "res://assets/zeroad/fauna/crow.glb",
+      "biomes": [
+        "beach",
+        "grassland",
+        "forest"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.4,
+      "max_slope": 0.5,
+      "fauna": true,
+      "flying": true,
+      "altitude_m": 16.0,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.seagull",
+      "scene": "res://assets/zeroad/fauna/seagull.glb",
+      "biomes": [
+        "beach"
+      ],
+      "weight": 1.0,
+      "scale_m": 0.4,
+      "max_slope": 0.5,
+      "fauna": true,
+      "flying": true,
+      "altitude_m": 14.0,
+      "animation": "Idle"
+    },
+    {
+      "id": "zeroad.fish_generic",
+      "scene": "res://assets/zeroad/fauna/fish_generic.glb",
+      "biomes": [
+        "lake",
+        "river"
+      ],
+      "weight": 2.0,
+      "scale_m": 0.35,
+      "max_slope": 10.0,
+      "fauna": true,
+      "animation": "Idle",
+      "aquatic": true
     }
   ]
 }

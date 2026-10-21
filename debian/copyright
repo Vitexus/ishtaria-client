@@ -32,6 +32,12 @@ Comment: Ground textures grass_ground, forest_ground_06, gravelly_sand, gravel_g
  (1k diffuse and normal maps) by their Poly Haven authors, see assets/terrain/License.txt.
 License: CC0-1.0
 
+Files: assets/zeroad/*
+Copyright: 2009-2026 Wildfire Games (http://www.wildfiregames.com/), 0 A.D.
+License: CC-BY-SA-3.0
+Comment: Bridges, flora, fauna, Persian structures and terrain albedos converted from the art of 0 A.D., see assets/zeroad/*/License.txt.
+ Share-alike applies to these files and their modifications only, not to the rest of the client.
+
 Files: assets/quaternius/*
 Copyright: Quaternius (https://quaternius.com/)
 Comment: Except the CC-BY-3.0 characters listed below, which take precedence.
@@ -136,3 +142,7 @@ Files: assets/icons/items/acorn.png assets/icons/items/coconut.png assets/icons/
 Copyright: 2026 VitexSoftware
 License: MIT
 Comment: Generated for the project with InvokeAI.
+
+License: CC-BY-SA-3.0
+ On Debian systems, the full text of the Creative Commons Attribution-ShareAlike 3.0
+ Unported license can be found in /usr/share/common-licenses/CC-BY-SA-3.0.

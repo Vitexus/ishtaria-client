@@ -1,0 +1,21 @@
+Terrain albedos of 0 A.D.
+========================
+
+Maps: desert_dirt_persia_1, desert_dirt_persia_2, desert_dirt_persia_rocks,
+desert_dirt_persia_rocky, desert_cliff_persia_1, desert_cliff_persia_2,
+desert_cliff_persia_base, desert_plants_b_persia, persia_dirt_plants_01,
+desert_farmland, desert_city_tile_pers.
+
+Author and copyright: Wildfire Games (http://www.wildfiregames.com/), 0 A.D. art,
+https://gitlab.com/0ad/0ad (art/textures/terrain/types/).
+
+Licence: Creative Commons Attribution-ShareAlike 3.0, http://creativecommons.org/licenses/by-sa/3.0/
+These files are modifications of the originals and are released under the same licence (CC BY-SA 3.0).
+
+Changes: converted with tools/zeroad-terrain.py from cached DDS/PNG of the 0ad-data package to PNG
+at most 1024 px. The client detail shader blends desert_dirt_persia_1 into sand,
+persia_dirt_plants_01 into soil and desert_cliff_persia_1 into rock (`use_persia_textures`,
+`persia_blend` ≈ 0.35); Poly Haven layers remain the base.
+
+Some of the textures of 0 A.D. are derived from materials of CGTextures (http://www.cgtextures.com/)
+with their special permission to distribute them as CC BY-SA; see art/LICENSE.txt of 0 A.D.

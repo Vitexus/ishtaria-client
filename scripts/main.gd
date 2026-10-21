@@ -165,6 +165,12 @@ func _ready() -> void:
 		var parameter: String = {"grass_ground": "tex_grass", "forest_ground_06": "tex_soil", "gravelly_sand": "tex_sand", "gravel_ground_01": "tex_gravel", "gray_rocks": "tex_rock"}[layer]
 		_terrain_material.set_shader_parameter(parameter, load("res://assets/terrain/%s/%s_diff_1k.jpg" % [layer, layer]))
 	_terrain_material.set_shader_parameter("tex_rock_normal", load("res://assets/terrain/gray_rocks/gray_rocks_nor_gl_1k.jpg"))
+	# 0 A.D. Persia albedos (CC BY-SA) blended into dry sand/soil and rock — see assets/zeroad/terrain/.
+	_terrain_material.set_shader_parameter("tex_sand_persia", load("res://assets/zeroad/terrain/desert_dirt_persia_1.png"))
+	_terrain_material.set_shader_parameter("tex_soil_persia", load("res://assets/zeroad/terrain/persia_dirt_plants_01.png"))
+	_terrain_material.set_shader_parameter("tex_rock_persia", load("res://assets/zeroad/terrain/desert_cliff_persia_1.png"))
+	_terrain_material.set_shader_parameter("persia_blend", 0.35)
+	_terrain_material.set_shader_parameter("use_persia_textures", true)
 	_terrain_material.set_shader_parameter("use_textures", true)
 	add_child(planet)
 	var ocean := MeshInstance3D.new()
@@ -214,6 +220,7 @@ func _ready() -> void:
 	add_child(_controls)
 	_control_settings = preload("res://scripts/control_settings.gd").new()
 	_control_settings.controls = _controls
+	_control_settings.sky = _sky
 	add_child(_control_settings)
 
 	var settings := ConfigFile.new()
@@ -236,6 +243,7 @@ func _ready() -> void:
 	_audio = preload("res://scripts/interface_audio.gd").new()
 	if settings.get_value("display", "fullscreen", false) == true and DisplayServer.get_name() != "headless":
 		_control_settings.apply_fullscreen(true)
+	_sky.set_light_shafts(settings.get_value("display", "light_shafts", false) == true)
 	var saved_sound: Variant = settings.get_value("audio", "interface_sounds", true)
 	_audio.enabled = saved_sound if saved_sound is bool else true
 	add_child(_audio)

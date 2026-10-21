@@ -1,0 +1,21 @@
+Bridges of 0 A.D.
+=================
+
+Models: bridge_edge_wooden, bridge_edge_hele and broken_rope_bridge_long.
+
+Author and copyright: Wildfire Games (http://www.wildfiregames.com/), 0 A.D. art, https://gitlab.com/0ad/0ad
+(art/meshes/props/special/bridge_edge_wooden.dae, bridge_edge_hele.dae, broken_rope_bridge_long.dae and the
+textures art/textures/skins/props/bridge_edge_wooden.png, structural/hele_struct_b.png, structural/iber_siege_ram.dds).
+
+Licence: Creative Commons Attribution-ShareAlike 3.0, http://creativecommons.org/licenses/by-sa/3.0/
+These files are modifications of the originals and are released under the same licence (CC BY-SA 3.0).
+
+Note: the top of bridge_edge_wooden is unpainted (black) in the original: 0 A.D. lays the walkway as a ground
+decal. Sizes in model units: wooden 87 x 15 x 15, stone arches 64 x 6 x 14, rope bridge 9 x 10 x 70 (widened 2.2 times from 4 by the converter).
+
+Changes: converted with tools/zeroad-bridges.py from the compiled meshes of the 0ad-data package (the same
+geometry, normals and UVs) to glTF binary: Z-up to Y-up, centred on the footprint and standing on y = 0, the
+textures reduced to at most 1024 px and embedded. The game's units (about a metre) are kept.
+
+Some of the textures of 0 A.D. are derived from materials of CGTextures (http://www.cgtextures.com/) with their
+special permission to distribute them as CC BY-SA; see art/LICENSE.txt of 0 A.D.

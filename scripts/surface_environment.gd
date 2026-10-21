@@ -44,7 +44,7 @@ const LAMP_RANGE_M := 7.0
 ## energy is tiny: 3e-6 = intensity 3.0 at one metre (0.75 at two, 0.08 at six) with attenuation 2.
 const LAMP_ENERGY := 3.0e-6
 const LAMP_FLICKER := 0.07
-const PROP_KITS := {"graveyard": "graveyard-kit", "town": "fantasy-town-kit", "castle": "castle-kit", "retro": "retro-fantasy-kit", "pirate": "pirate-kit", "survival": "survival-kit/Models/GLB format", "food": "food-kit/Models/GLB format", "quaternius": ""}
+const PROP_KITS := {"graveyard": "graveyard-kit", "town": "fantasy-town-kit", "castle": "castle-kit", "retro": "retro-fantasy-kit", "pirate": "pirate-kit", "survival": "survival-kit/Models/GLB format", "food": "food-kit/Models/GLB format", "quaternius": "", "zeroad": ""}
 ## What the minimap draws of the generated places: the road modules of the towns and the
 ## structural props (walls, roofs, stalls, fountains, towers, crypts, fences, quaternius
 ## buildings). Trees, graves and other small scenery stay off the map. Mirrors the models
@@ -250,7 +250,7 @@ func load_catalog(path: String) -> bool:
 			if not (metallic is float or metallic is int) or not is_finite(float(metallic)) or metallic < 0 or metallic > 1:
 				return false
 		validated.append(entry)
-	if validated.is_empty() or validated.size() > 320:
+	if validated.is_empty() or validated.size() > 512:
 		return false
 	catalog = validated
 	_models = identifiers
@@ -1442,7 +1442,14 @@ static func prop_path(model: Variant) -> String:
 	if parts.size() != 2 or not PROP_KITS.has(parts[0]) or not parts[1].is_valid_filename() or parts[1].contains("/") or parts[1].contains("."):
 		return ""
 	var path := "res://assets/kenney/%s/%s.glb" % [PROP_KITS[parts[0]], parts[1]]
-	if parts[0] == "quaternius":
+	if parts[0] == "zeroad":
+		# 0 A.D. props (CC BY-SA 3.0): bridges, flora, fauna and structures from tools/zeroad-*.py.
+		for folder in ["bridges", "flora", "fauna", "structures"]:
+			var candidate := "res://assets/zeroad/%s/%s.glb" % [folder, parts[1]]
+			if ResourceLoader.exists(candidate):
+				path = candidate
+				break
+	elif parts[0] == "quaternius":
 		# A model has a folder of its own, or is one of the ready-made buildings.
 		path = "res://assets/quaternius/%s/Models/%s.glb" % [parts[1], parts[1]]
 		if not ResourceLoader.exists(path):
@@ -1997,7 +2004,12 @@ func _animate(model: Node, animation_name: String, identity: String) -> Animatio
 
 func _play_clip(player: AnimationPlayer, animation_name: String, identity: String) -> void:
 	for candidate in player.get_animation_list():
-		if candidate == animation_name or candidate.ends_with("|" + animation_name):
+		# Exact, glTF "Armature|Idle", or Blender-style "Idle_Armature".
+		if (
+			candidate == animation_name
+			or candidate.ends_with("|" + animation_name)
+			or candidate.begins_with(animation_name + "_")
+		):
 			var animation := player.get_animation(candidate)
 			animation.loop_mode = Animation.LOOP_LINEAR
 			player.play(candidate)

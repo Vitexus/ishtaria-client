@@ -28,6 +28,12 @@ uniform sampler2D tex_sand : source_color, filter_linear_mipmap_anisotropic, rep
 uniform sampler2D tex_gravel : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tex_rock : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tex_rock_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+// Optional 0 A.D. Persia albedos (CC BY-SA), blended into dry / rocky ground.
+uniform bool use_persia_textures = false;
+uniform float persia_blend = 0.35;
+uniform sampler2D tex_sand_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_soil_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_rock_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 
 vec2 map_coordinates(vec3 direction, float size) {
 		vec3 magnitude = abs(direction);
@@ -112,6 +118,11 @@ void fragment() {
 			vec3 soil = texture(tex_soil, flat_uv / 4.0).rgb;
 			vec3 sand = texture(tex_sand, flat_uv / 4.0).rgb;
 			vec3 gravel = texture(tex_gravel, flat_uv / 4.0).rgb;
+			if (use_persia_textures) {
+				float w = clamp(persia_blend, 0.0, 1.0);
+				soil = mix(soil, texture(tex_soil_persia, flat_uv / 4.0).rgb, w * 0.7);
+				sand = mix(sand, texture(tex_sand_persia, flat_uv / 4.0).rgb, w);
+			}
 			// Patches of bare soil and gravel, cheaply, from the grass picture seen at a very different scale.
 			float patches = texture(tex_grass, flat_uv / 64.0).g;
 			vec3 blend = pow(abs(geometric), vec3(4.0));
@@ -120,17 +131,36 @@ void fragment() {
 			vec3 rock_y = texture(tex_rock, world.xz / 8.0).rgb;
 			vec3 rock_z = texture(tex_rock, world.xy / 8.0).rgb;
 			vec3 rock = rock_x * blend.x + rock_y * blend.y + rock_z * blend.z;
+			if (use_persia_textures) {
+				float w = clamp(persia_blend, 0.0, 1.0);
+				vec3 persia_rock = (
+					texture(tex_rock_persia, world.yz / 8.0).rgb * blend.x
+					+ texture(tex_rock_persia, world.xz / 8.0).rgb * blend.y
+					+ texture(tex_rock_persia, world.xy / 8.0).rgb * blend.z
+				);
+				rock = mix(rock, persia_rock, w);
+			}
 			// Land colour class: the biome tint above decides which flat layer dominates.
 			float beach = 1.0 - smoothstep(0.0, 0.004, elevation);
 			float dry = smoothstep(0.55, 0.62, land.r + land.g * 0.4 - land.b);
 			vec3 ground = mix(mix(grass, soil, smoothstep(0.45, 0.75, patches) * 0.85), gravel, dry * 0.7);
 			ground = mix(ground, sand, max(beach, dry * 0.5));
 			float rock_weight = max(smoothstep(0.07, 0.22, slope), smoothstep(2.0, 3.5, elevation));
+			// Loose scree gathers on the steep ground just below the bare cliffs.
+			float scree = smoothstep(0.04, 0.09, slope) * (1.0 - smoothstep(0.16, 0.26, slope));
+			ground = mix(ground, gravel * 0.9, scree * 0.8);
+			// Sedimentary banding: rock colour steps with absolute height (4 m period repeats with the anchor).
+			float strata = texture(tex_rock, vec2(0.5, detail_elevation * 1000.0 / 4.0)).g;
+			rock *= mix(0.8, 1.15, smoothstep(0.35, 0.65, strata));
 			vec3 textured = mix(ground, rock, rock_weight);
+			// Macro variation: a 256 m view of the grass picture lightens or darkens large areas, hiding the tiling.
+			float macro = texture(tex_grass, flat_uv / 256.0).g;
+			textured *= mix(0.85, 1.12, macro);
 			// Far away the pictures only alias: fade to the plain biome colour.
 			float near_detail = 1.0 - smoothstep(120.0, 600.0, view_distance_m);
 			vec3 surface = mix(land, mix(land, textured, 0.8), near_detail);
-			ALBEDO = mix(surface, vec3(0.88, 0.94, 0.96), snow);
+			// Snow does not stay on steep rock.
+			ALBEDO = mix(surface, vec3(0.88, 0.94, 0.96), snow * (1.0 - smoothstep(0.12, 0.3, slope)));
 			ROUGHNESS = mix(0.95, 0.8, rock_weight);
 			// Wet bank: ground within half a metre above the water of its vertex is darker and smoother.
 			float above_water_m = (detail_elevation - detail_water) * 1000.0;

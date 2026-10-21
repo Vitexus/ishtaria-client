@@ -1,0 +1,8 @@
+Persian / Achaemenid structures of 0 A.D.
+========================================
+
+Models: baby_defense_tower, pers_apadana, pers_ballista_tower, pers_barracks, pers_bireme, pers_blacksmith, pers_chariot_a, pers_chariot_b, pers_chariot_e, pers_corral, pers_dock, pers_farmstead, pers_fishship, pers_fortress, pers_fortress_b, pers_gardens, pers_hall, pers_house_a, pers_house_b, pers_house_c, pers_house_d, pers_ice_house, pers_ice_house_b, pers_ishtar, pers_lamassu, pers_lamassu_small, pers_market, pers_market_b, pers_merchant, pers_palace, pers_plinth, pers_range, pers_scout_tower, pers_scout_tower_b, pers_shrine, pers_siege_ram, pers_stable, pers_stable_elephant, pers_storehouse, pers_tachara, pers_temple, pers_trireme, pers_wall_gate, pers_wall_long, pers_wall_medium, pers_wall_short, pers_wall_tower, pers_wooden_tower, pers_workshop.
+
+Author and copyright: Wildfire Games (http://www.wildfiregames.com/), 0 A.D. art.
+Licence: CC BY-SA 3.0. Converted with tools/zeroad-structures.py.
+Mirrored on the Gilgamesh disk under media/models/architecture/zeroad/.

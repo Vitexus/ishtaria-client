@@ -31,7 +31,7 @@ void sky() {
 		vec3 local_direction = vec3(dot(direction, east), dot(direction, local_up), dot(direction, north));
 		vec2 surface_uv = panorama_coordinates(local_direction);
 		vec3 inertial = direction;
-		inertial.xz = vec2(cos(sidereal_angle) * direction.x - sin(sidereal_angle) * direction.z, sin(sidereal_angle) * direction.x + cos(sidereal_angle) * direction.z);
+		inertial.xz = vec2(cos(sidereal_angle) * direction.x + sin(sidereal_angle) * direction.z, -sin(sidereal_angle) * direction.x + cos(sidereal_angle) * direction.z);
 		orbital = texture(orbit_panorama, panorama_coordinates(inertial)).rgb;
 		float baked_disc = 1.0 - smoothstep(0.65, 1.0, length((surface_uv - vec2(0.91646, 0.22163)) / vec2(0.045, 0.065)));
 		vec2 clean_uv = vec2(1.0 - surface_uv.x, surface_uv.y);

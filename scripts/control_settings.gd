@@ -7,7 +7,10 @@ var controls: Node3D
 var dialogue: Node
 ## Whether closing the dialog gives the mouse back to the game; off when the ESC menu opened it.
 var recapture := true
+## The sky whose volumetric light shafts the check box switches.
+var sky: Node
 var _fullscreen: CheckBox
+var _light_shafts: CheckBox
 var _buttons: Array[Button] = []
 var _waiting := -1
 var _feedback: Label
@@ -41,6 +44,15 @@ func _ready() -> void:
 		_feedback.text = "" if save_fullscreen(enabled) else tr("Could not save controls")
 	)
 	column.add_child(_fullscreen)
+	_light_shafts = CheckBox.new()
+	_light_shafts.name = "LightShafts"
+	_light_shafts.text = tr("Light shafts")
+	_light_shafts.toggled.connect(func(enabled: bool) -> void:
+		if is_instance_valid(sky):
+			sky.set_light_shafts(enabled)
+		_feedback.text = "" if save_light_shafts(enabled) else tr("Could not save controls")
+	)
+	column.add_child(_light_shafts)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -149,6 +161,7 @@ func open() -> void:
 	_waiting = -1
 	_feedback.text = ""
 	_fullscreen.set_pressed_no_signal(is_fullscreen())
+	_light_shafts.set_pressed_no_signal(is_instance_valid(sky) and sky.light_shafts)
 	_refresh()
 	popup_centered(Vector2i(mini(400, get_tree().root.size.x - 16), mini(640, get_tree().root.size.y - 32)))
 
@@ -164,6 +177,12 @@ func save_fullscreen(enabled: bool) -> bool:
 	var config := ConfigFile.new()
 	config.load(controls.settings_path)
 	config.set_value("display", "fullscreen", enabled)
+	return config.save(controls.settings_path) == OK
+
+func save_light_shafts(enabled: bool) -> bool:
+	var config := ConfigFile.new()
+	config.load(controls.settings_path)
+	config.set_value("display", "light_shafts", enabled)
 	return config.save(controls.settings_path) == OK
 
 func _begin_binding(index: int) -> void:

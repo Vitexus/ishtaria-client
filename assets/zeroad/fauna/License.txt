@@ -1,0 +1,21 @@
+Fauna of 0 A.D.
+===============
+
+Models: gazelle, goat, sheep, cow, bull, donkey, pig, chicken, fox, wolf, lion, lioness, deer,
+boar, crocodile, camel, horse_persian, zebu, mastiff, hawk, crow, seagull, fish_generic.
+
+Author and copyright: Wildfire Games (http://www.wildfiregames.com/), 0 A.D. art,
+https://gitlab.com/0ad/0ad (art/meshes/skeletal/*, art/textures/skins/skeletal/*,
+art/animation/*, actors under art/actors/fauna/).
+
+Licence: Creative Commons Attribution-ShareAlike 3.0, http://creativecommons.org/licenses/by-sa/3.0/
+These files are modifications of the originals and are released under the same licence (CC BY-SA 3.0).
+
+Changes: converted with tools/zeroad-fauna-anim.py from compiled PSMD meshes and PSSA animations
+to glTF with Idle and Walk clips. Birds map glide→Idle and flight→Walk; fish maps two idle clips.
+Mastiff Walk uses the 0 A.D. run clip. Catalogue ids: `zeroad.<name>`.
+
+Do not re-run tools/zeroad-scenery.py over these files.
+
+Some of the textures of 0 A.D. are derived from materials of CGTextures (http://www.cgtextures.com/)
+with their special permission to distribute them as CC BY-SA; see art/LICENSE.txt of 0 A.D.

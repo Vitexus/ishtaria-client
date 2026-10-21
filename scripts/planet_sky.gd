@@ -6,6 +6,10 @@ const SPACE_SKIES := ["band", "dark", "day", "galaxy", "nebula"]
 ## so that the surface stays readable without breaking the dark sky.
 const NIGHT_AMBIENT := 0.12
 const NIGHT_AMBIENT_COLOR := Color(0.42, 0.52, 0.86)
+## Depth fog of the local view in kilometres: clear within the walking area, fully hazy at the detail rim.
+const AERIAL_BEGIN_KM := 0.25
+const AERIAL_END_KM := 2.4
+const AERIAL_DENSITY := 0.55
 const DEFAULTS := {
 	"skybox": "day", "space_skybox": "galaxy",
 	"sun_color": [1.0, 0.95, 0.85], "sun_energy": 1.2,
@@ -19,6 +23,9 @@ var environment: Environment
 var material: ShaderMaterial
 var surface_blend := 0.0
 var _settings: Dictionary = {}
+## Volumetric light shafts (client preference, costs frame time); only in the local surface view.
+var light_shafts := false
+var _local_view := false
 var sun_direction := Vector3.RIGHT
 var sun_elevation_degrees := 90.0
 var daylight := 1.0
@@ -128,7 +135,7 @@ func solar_direction(seconds: float) -> Vector3:
 	var ascension := atan2(cos(obliquity) * sin(longitude), cos(longitude))
 	var declination := asin(sin(obliquity) * sin(longitude))
 	var sidereal := deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days, 360.0))
-	return Vector3(cos(declination) * cos(ascension - sidereal), sin(declination), cos(declination) * sin(ascension - sidereal))
+	return Vector3(cos(declination) * cos(ascension - sidereal), sin(declination), -cos(declination) * sin(ascension - sidereal))
 
 func clock_state() -> Dictionary:
 	if _solar.is_empty():
@@ -203,3 +210,32 @@ func set_altitude(altitude_m: float, local_view := false) -> void:
 	material.set_shader_parameter("surface_blend", surface_blend)
 	material.set_shader_parameter("horizon_dip", acos(6371000.0 / (6371000.0 + _altitude_m)))
 	environment.fog_enabled = local_view and float(_settings.fog_density) > 0.0
+	_local_view = local_view
+	_apply_light_shafts()
+	# Atmospheric perspective: the server's fog colour tints the far end of the detail disk (scene units are
+	# kilometres), so distant relief turns lighter and bluer without hiding the walking area or the sky.
+	environment.fog_mode = Environment.FOG_MODE_DEPTH
+	environment.fog_depth_begin = AERIAL_BEGIN_KM
+	environment.fog_depth_end = AERIAL_END_KM
+	environment.fog_depth_curve = 1.6
+	environment.fog_density = AERIAL_DENSITY
+	environment.fog_aerial_perspective = 0.35
+	environment.fog_sky_affect = 0.0
+
+func set_light_shafts(enabled: bool) -> void:
+	light_shafts = enabled
+	_apply_light_shafts()
+
+## Gentle volumetric haze lit by the sun, in kilometres like the rest of the scene; fades with daylight.
+func _apply_light_shafts() -> void:
+	var active := light_shafts and _local_view and not _settings.is_empty()
+	environment.volumetric_fog_enabled = active
+	if not active:
+		return
+	environment.volumetric_fog_density = 0.6 * daylight
+	environment.volumetric_fog_albedo = _color(_settings.fog_color)
+	environment.volumetric_fog_anisotropy = 0.7
+	environment.volumetric_fog_length = 1.2
+	environment.volumetric_fog_detail_spread = 2.0
+	environment.volumetric_fog_ambient_inject = 0.3
+	environment.volumetric_fog_sky_affect = 0.0

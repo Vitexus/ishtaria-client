@@ -129,7 +129,7 @@ func _run() -> void:
 	surface.water_material.shader = SHADER
 	surface.water_material.set_shader_parameter("water_pass", true)
 	world.add_child(surface)
-	_check(surface.catalog.size() == 259, "All original Nature variants, packs and ED waterfowl have validated entries")
+	_check(surface.catalog.size() == 337, "All Nature variants, packs, ED waterfowl and the 0 A.D. flora and fauna have validated entries")
 	_check(surface.catalog.filter(func(entry: Dictionary) -> bool: return entry.id.begins_with("nature.")).size() == 162, "161 Nature Kit variants plus the reed clump")
 	for entry in surface.catalog:
 		var scene := load(entry.scene) as PackedScene
@@ -300,6 +300,9 @@ func _run() -> void:
 	_check(surface._map_prop_kind("town.tree").is_empty() and surface._map_prop_kind("retro.barrels").is_empty(), "Trees and crates stay off the map")
 	var footprint: Vector2 = surface._kit_footprint(surface.prop_path("town.road"))
 	_check(absf(footprint.x - 1.0) < 0.01 and absf(footprint.y - 1.0) < 0.01, "The road tile's footprint is one model unit square")
+	for bridge in ["bridge_edge_wooden", "bridge_edge_hele", "broken_rope_bridge_long"]:
+		_check(not surface.prop_path("zeroad." + bridge).is_empty(), "The 0 A.D. bridge %s resolves to a bundled model" % bridge)
+	_check(surface.prop_path("zeroad.bridge_small").is_empty() and surface.prop_path("zeroad.../x").is_empty(), "Unknown or malformed 0 A.D. models resolve to nothing")
 	var prop_region := {"version":1,"heightmap_sha256":surface.environment.heightmap_sha256,"seed":surface.environment.seed,"objects":[],"props":[
 		{"id":"p1","model":"town.road","position":[0.0,6371000.0,0.0],"yaw":0.0,"scale_m":2.5},
 		{"id":"p2","model":"town.wall","position":[1000.0,6371000.0,0.0],"yaw":0.0,"scale_m":2.5},
