@@ -206,8 +206,14 @@ func _ready() -> void:
 	sun.shadow_bias = 0.004
 	sun.shadow_normal_bias = 0.05
 	add_child(sun)
+	var moon_light := DirectionalLight3D.new()
+	moon_light.light_energy = 0.0
+	moon_light.visible = false
+	moon_light.shadow_enabled = false
+	add_child(moon_light)
 	_sky = preload("res://scripts/planet_sky.gd").new()
 	_sky.sun = sun
+	_sky.moon = moon_light
 	add_child(_sky)
 
 	_camera = Camera3D.new()

@@ -15,15 +15,29 @@ func _check(condition: bool, message: String) -> void:
 
 func _metadata(sky: Node, seconds: float) -> Dictionary:
 	var direction: Vector3 = sky.solar_direction(seconds)
-	return {"version": 1, "unix_seconds": seconds, "direction": [direction.x, direction.y, direction.z], "sidereal_day_seconds": 86164.0905, "angular_radius_degrees": 0.2666}
+	var lunar: Dictionary = sky.lunar_state(seconds)
+	var moon_direction: Vector3 = lunar.direction
+	return {
+		"version": 1,
+		"unix_seconds": seconds,
+		"direction": [direction.x, direction.y, direction.z],
+		"sidereal_day_seconds": 86164.0905,
+		"angular_radius_degrees": 0.2666,
+		"moon_direction": [moon_direction.x, moon_direction.y, moon_direction.z],
+		"moon_angular_radius_degrees": lunar.angular_radius_degrees,
+		"moon_illumination": lunar.illumination,
+	}
 
 func _run() -> void:
 	var world := Node3D.new()
 	root.add_child(world)
 	var sun := DirectionalLight3D.new()
 	world.add_child(sun)
+	var moon_light := DirectionalLight3D.new()
+	world.add_child(moon_light)
 	var sky := SKY.new()
 	sky.sun = sun
+	sky.moon = moon_light
 	world.add_child(sky)
 	sky.set_process(false)
 	var noon := 946728000.0
@@ -32,6 +46,9 @@ func _run() -> void:
 	invalid.direction = [0, 0, 0]
 	_check(not sky.apply_solar(invalid), "Invalid solar direction is rejected")
 	invalid = _metadata(sky, noon)
+	invalid.moon_direction = [0, 0, 0]
+	_check(not sky.apply_solar(invalid), "Invalid moon direction is rejected")
+	invalid = _metadata(sky, noon)
 	invalid.unix_seconds = INF
 	_check(not sky.apply_solar(invalid), "Nonfinite server clock is rejected")
 	sky.set_altitude(120.0)
@@ -39,12 +56,22 @@ func _run() -> void:
 	sky._update_solar(noon)
 	_check(sky.sun_elevation_degrees > 60 and sky.daylight > 0.99, "Greenwich noon is daylight")
 	_check((-sun.basis.z).dot(-sky.sun_direction) > 0.9999, "Light rays and visible sun use the same direction")
+	_check(absf(sky.moon_direction.length() - 1.0) < 0.0001, "Moon direction is a unit vector")
+	var moon_radius: float = sky.lunar_state(noon).angular_radius_degrees
+	_check(moon_radius > 0.24 and moon_radius < 0.30, "Moon angular size matches the ephemeris")
+	var week: Dictionary = sky.lunar_state(noon + 7.0 * 86400.0)
+	_check(sky.moon_direction.dot(week.direction) < 0.5, "Moon travels across the sky in a week")
 	var day_energy: float = sky.environment.ambient_light_energy
 	sky._update_solar(noon + 43200.0)
 	_check(sky.sun_elevation_degrees < -60 and sky.daylight < 0.01 and sun.light_energy == 0, "Greenwich midnight has no sunlight")
-	_check(sky.environment.ambient_light_energy < day_energy * 0.15, "Night ambient illumination is dim")
-	_check(sky.environment.ambient_light_energy > day_energy * 0.08, "Moonlight keeps the surface readable at night")
+	_check(sky.environment.ambient_light_energy < day_energy * 0.25, "Night ambient illumination is dim")
+	_check(sky.environment.ambient_light_energy > day_energy * 0.05, "Starlight and moonlight keep the surface readable at night")
 	_check(sky.environment.ambient_light_color.b > sky.environment.ambient_light_color.r, "Night light is bluish")
+	if sky.moon_elevation_degrees > 5.0 and sky.moon_illumination > 0.2:
+		_check(moon_light.visible and moon_light.light_energy > 0.01, "Moon above the horizon lights the surface at night")
+		_check((-moon_light.basis.z).dot(-sky.moon_direction) > 0.9999, "Moonlight and visible moon use the same direction")
+	else:
+		_check(not moon_light.visible or moon_light.light_energy < 0.01, "Moon below the horizon or new adds no directional light")
 	sky.set_observer(Vector3.LEFT)
 	sky._update_solar(noon + 43200.0)
 	_check(sky.daylight > 0.99, "Opposite longitude is daytime at the same instant")
@@ -147,4 +174,13 @@ func _capture(world: Node3D, sky: Node, noon: float, hud: CanvasLayer) -> void:
 				var baked_pixel := camera.unproject_position(baked_direction * 10.0)
 				if Rect2(Vector2.ZERO, Vector2(dimensions)).has_point(baked_pixel):
 					_check(image.get_pixel(int(baked_pixel.x), int(baked_pixel.y)).get_luminance() < 0.95, "Baked duplicate sun is removed at " + str(dimensions))
+			if phase == "night" and sky.moon_elevation_degrees > 10.0 and sky.moon_illumination > 0.15:
+				camera.look_at(sky.moon_direction, Vector3.RIGHT)
+				await process_frame
+				await process_frame
+				await RenderingServer.frame_post_draw
+				var moon_image := root.get_texture().get_image()
+				moon_image.save_png("/tmp/ishtaria-moon-%dx%d.png" % [dimensions.x, dimensions.y])
+				var moon_center: Color = moon_image.get_pixel(dimensions.x / 2, dimensions.y / 2)
+				_check(moon_center.get_luminance() > 0.15, "Visible lunar disc renders at night at " + str(dimensions))
 		_check(means[0] > means[2] * 2.0 and means[0] > 0.1, "Native day and night differ at " + str(dimensions))

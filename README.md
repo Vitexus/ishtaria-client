@@ -286,15 +286,18 @@ Sun position uses sidereal rotation, orbital motion and axial tilt, with local
 horizons defined by the camera's planet-fixed position. Mean solar days last
 24 real hours; latitude and season determine day length and polar day/night.
 The visible solar disc and directional lighting share one direction. Its
-approximately half-degree diameter changes with orbital distance. Twilight,
-warm low-angle sunlight, dark night ambient light and fog follow solar elevation;
-the orbital view keeps a dark night side. Horizon dip follows observer altitude,
-with approximate near-horizon refraction. Kenney skies remain the backgrounds;
-their baked solar/lunar discs are masked in dynamic mode without modifying the
-original assets.
+approximately half-degree diameter changes with orbital distance. The same
+`solar` document carries the moon's direction, angular radius and illuminated
+fraction; the client draws a phased lunar disc and a dim directional moonlight
+when the moon is above the night horizon. Twilight, warm low-angle sunlight,
+dark night ambient light and fog follow solar elevation, with moonlight lifting
+the night floor; the orbital view keeps a dark night side. Horizon dip follows
+observer altitude, with approximate near-horizon refraction. Kenney skies remain
+the backgrounds; their baked solar/lunar discs are masked in dynamic mode
+without modifying the original assets.
 
-This uses a low-order solar ephemeris and stylized atmospheric colors, not full
-atmospheric scattering, lunar physics, eclipses or seasonal weather simulation.
+This uses a low-order solar and lunar ephemeris and stylized atmospheric colors,
+not full atmospheric scattering, eclipses or seasonal weather simulation.
 
 The HUD shows local solar time and an hours/minutes countdown to sunrise at
 night or sunset during the day. It follows the server clock and observer

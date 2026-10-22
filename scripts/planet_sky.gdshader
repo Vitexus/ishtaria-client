@@ -7,9 +7,13 @@ uniform float surface_energy = 1.0;
 uniform sampler2D night_panorama : source_color, filter_linear, repeat_enable;
 uniform bool solar_enabled = false;
 uniform vec3 sun_direction = vec3(1.0, 0.0, 0.0);
+uniform vec3 moon_direction = vec3(-1.0, 0.0, 0.0);
 uniform vec3 local_up = vec3(0.0, 1.0, 0.0);
 uniform vec4 sun_color : source_color = vec4(1.0, 0.95, 0.85, 1.0);
+uniform vec4 moon_color : source_color = vec4(0.82, 0.86, 0.95, 1.0);
 uniform float sun_radius = 0.00465;
+uniform float moon_radius = 0.0045;
+uniform float moon_illumination = 0.5;
 uniform float sun_elevation = 90.0;
 uniform float daylight = 1.0;
 uniform float sidereal_angle = 0.0;
@@ -49,5 +53,17 @@ void sky() {
 		float visibility = mix(1.0, step(-sin(horizon_dip), dot(direction, local_up)), surface_blend);
 		float halo = exp(-separation * separation / (sun_radius * sun_radius * 16.0)) * 0.08;
 		COLOR += sun_color.rgb * (disc * 8.0 + halo) * visibility;
+		// Lunar disc: reconstruct a sphere normal on the disc and shade by the sun, so the
+		// terminator follows illumination. Dim the moon in daylight so it does not compete.
+		vec3 apparent_moon = normalize(moon_direction);
+		float moon_separation = length(direction - apparent_moon);
+		float moon_disc = 1.0 - smoothstep(moon_radius * 0.95, moon_radius * 1.05, moon_separation);
+		vec3 moon_offset = direction - apparent_moon * dot(direction, apparent_moon);
+		vec3 moon_normal = normalize(apparent_moon + moon_offset / max(moon_radius, 0.0001));
+		float lit = smoothstep(-0.08, 0.12, dot(moon_normal, normalize(sun_direction)));
+		float phase = mix(0.04, 1.0, clamp(moon_illumination, 0.0, 1.0));
+		float moon_glow = exp(-moon_separation * moon_separation / (moon_radius * moon_radius * 36.0)) * 0.035;
+		float moon_visibility = visibility * mix(1.0, 0.22, daylight);
+		COLOR += moon_color.rgb * (moon_disc * (0.35 + 1.4 * lit * phase) + moon_glow * phase) * moon_visibility;
 	}
 }

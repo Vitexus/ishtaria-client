@@ -2,10 +2,13 @@ extends Node
 
 const SURFACE_SKIES := ["day", "morning", "night", "alien", "space"]
 const SPACE_SKIES := ["band", "dark", "day", "galaxy", "nebula"]
-## Share of the daytime ambient light left at night (moon and starlight), tinted blue,
-## so that the surface stays readable without breaking the dark sky.
-const NIGHT_AMBIENT := 0.12
+## Share of the daytime ambient light left at night from starlight alone, tinted blue.
+## Moonlight above the horizon adds on top through `moon` and this floor.
+const NIGHT_AMBIENT := 0.08
 const NIGHT_AMBIENT_COLOR := Color(0.42, 0.52, 0.86)
+const MOON_AMBIENT := 0.10
+const MOON_LIGHT_COLOR := Color(0.72, 0.78, 0.92)
+const MOON_LIGHT_ENERGY := 0.22
 ## Depth fog of the local view in kilometres: clear within the walking area, fully hazy at the detail rim.
 const AERIAL_BEGIN_KM := 0.25
 const AERIAL_END_KM := 2.4
@@ -19,6 +22,7 @@ const DEFAULTS := {
 }
 
 var sun: DirectionalLight3D
+var moon: DirectionalLight3D
 var environment: Environment
 var material: ShaderMaterial
 var surface_blend := 0.0
@@ -27,7 +31,10 @@ var _settings: Dictionary = {}
 var light_shafts := false
 var _local_view := false
 var sun_direction := Vector3.RIGHT
+var moon_direction := Vector3.LEFT
 var sun_elevation_degrees := 90.0
+var moon_elevation_degrees := -90.0
+var moon_illumination := 0.0
 var daylight := 1.0
 var _solar: Dictionary = {}
 var _sync_ticks := 0
@@ -92,11 +99,13 @@ func apply_atmosphere(data: Variant) -> bool:
 func apply_solar(data: Variant) -> bool:
 	if not data is Dictionary or data.get("version") != 1:
 		return false
-	for key in ["unix_seconds", "sidereal_day_seconds", "angular_radius_degrees"]:
+	for key in ["unix_seconds", "sidereal_day_seconds", "angular_radius_degrees", "moon_angular_radius_degrees", "moon_illumination"]:
 		var value: Variant = data.get(key)
 		if not (value is float or value is int) or not is_finite(float(value)):
 			return false
 	if data.unix_seconds < 0 or data.unix_seconds > 7258118400 or absf(data.sidereal_day_seconds - 86164.0905) > 0.001 or data.angular_radius_degrees < 0.26 or data.angular_radius_degrees > 0.28:
+		return false
+	if data.moon_angular_radius_degrees < 0.24 or data.moon_angular_radius_degrees > 0.30 or data.moon_illumination < 0.0 or data.moon_illumination > 1.0:
 		return false
 	var values: Variant = data.get("direction")
 	if not values is Array or values.size() != 3:
@@ -107,10 +116,25 @@ func apply_solar(data: Variant) -> bool:
 	var direction := Vector3(values[0], values[1], values[2])
 	if absf(direction.length() - 1.0) > 0.0001 or direction.distance_to(solar_direction(data.unix_seconds)) > 0.0001:
 		return false
+	var moon_values: Variant = data.get("moon_direction")
+	if not moon_values is Array or moon_values.size() != 3:
+		return false
+	for value: Variant in moon_values:
+		if not (value is float or value is int) or not is_finite(float(value)):
+			return false
+	var moon_dir := Vector3(moon_values[0], moon_values[1], moon_values[2])
+	var expected_moon: Dictionary = lunar_state(data.unix_seconds)
+	if absf(moon_dir.length() - 1.0) > 0.0001 or moon_dir.distance_to(expected_moon.direction) > 0.0001:
+		return false
+	if absf(data.moon_angular_radius_degrees - expected_moon.angular_radius_degrees) > 0.0001:
+		return false
+	if absf(data.moon_illumination - expected_moon.illumination) > 0.0001:
+		return false
 	_solar = data.duplicate(true)
 	_sync_ticks = Time.get_ticks_msec()
 	material.set_shader_parameter("solar_enabled", true)
 	material.set_shader_parameter("sun_radius", deg_to_rad(data.angular_radius_degrees))
+	material.set_shader_parameter("moon_radius", deg_to_rad(data.moon_angular_radius_degrees))
 	_update_solar(data.unix_seconds)
 	return true
 
@@ -125,6 +149,9 @@ func clear_solar() -> void:
 		sun.light_color = _color(_settings.sun_color)
 		sun.light_energy = _settings.sun_energy
 		sun.rotation_degrees = Vector3(-35, 40, 0)
+	if is_instance_valid(moon):
+		moon.light_energy = 0.0
+		moon.visible = false
 	environment.ambient_light_energy = _settings.ambient_energy
 
 func solar_direction(seconds: float) -> Vector3:
@@ -136,6 +163,34 @@ func solar_direction(seconds: float) -> Vector3:
 	var declination := asin(sin(obliquity) * sin(longitude))
 	var sidereal := deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days, 360.0))
 	return Vector3(cos(declination) * cos(ascension - sidereal), sin(declination), -cos(declination) * sin(ascension - sidereal))
+
+## Moon centre direction, angular radius in degrees and lit fraction (0 = new, 1 = full).
+func lunar_state(seconds: float) -> Dictionary:
+	var days := seconds / 86400.0 + 2440587.5 - 2451545.0
+	var obliquity := deg_to_rad(23.439 - 0.0000004 * days)
+	var sidereal := deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days, 360.0))
+	var mean_longitude := deg_to_rad(fposmod(218.316 + 13.176396 * days, 360.0))
+	var mean_anomaly := deg_to_rad(fposmod(134.963 + 13.064993 * days, 360.0))
+	var argument := deg_to_rad(fposmod(93.272 + 13.229350 * days, 360.0))
+	var lambda := mean_longitude + deg_to_rad(6.289) * sin(mean_anomaly)
+	var beta := deg_to_rad(5.128) * sin(argument)
+	var distance_km := 385001.0 - 20905.0 * cos(mean_anomaly)
+	var cos_beta := cos(beta)
+	var sin_beta := sin(beta)
+	var x := cos_beta * cos(lambda)
+	var y := cos_beta * sin(lambda) * cos(obliquity) - sin_beta * sin(obliquity)
+	var z := cos_beta * sin(lambda) * sin(obliquity) + sin_beta * cos(obliquity)
+	var ascension := atan2(y, x)
+	var declination := atan2(z, sqrt(x * x + y * y))
+	var local := ascension - sidereal
+	var direction := Vector3(cos(declination) * cos(local), sin(declination), -cos(declination) * sin(local))
+	var sun_dir := solar_direction(seconds)
+	var elongation := acos(clampf(sun_dir.dot(direction), -1.0, 1.0))
+	return {
+		"direction": direction,
+		"angular_radius_degrees": rad_to_deg(asin(1737.4 / distance_km)),
+		"illumination": (1.0 - cos(elongation)) * 0.5,
+	}
 
 func clock_state() -> Dictionary:
 	if _solar.is_empty():
@@ -180,9 +235,17 @@ func _process(_delta: float) -> void:
 
 func _update_solar(seconds: float) -> void:
 	sun_direction = solar_direction(seconds)
+	var lunar: Dictionary = lunar_state(seconds)
+	moon_direction = lunar.direction
+	moon_illumination = lunar.illumination
 	sun_elevation_degrees = rad_to_deg(asin(clampf(_observer.dot(sun_direction), -1.0, 1.0)))
+	moon_elevation_degrees = rad_to_deg(asin(clampf(_observer.dot(moon_direction), -1.0, 1.0)))
 	daylight = smoothstep(-6.0, 6.0, sun_elevation_degrees)
+	var moonlight := smoothstep(-0.833, 8.0, moon_elevation_degrees) * moon_illumination * (1.0 - daylight)
 	material.set_shader_parameter("sun_direction", sun_direction)
+	material.set_shader_parameter("moon_direction", moon_direction)
+	material.set_shader_parameter("moon_illumination", moon_illumination)
+	material.set_shader_parameter("moon_radius", deg_to_rad(lunar.angular_radius_degrees))
 	material.set_shader_parameter("daylight", daylight)
 	material.set_shader_parameter("sun_elevation", sun_elevation_degrees)
 	var anomaly := deg_to_rad(fposmod(357.528 + 0.9856003 * (seconds / 86400.0 + 2440587.5 - 2451545.0), 360.0))
@@ -192,7 +255,8 @@ func _update_solar(seconds: float) -> void:
 	var warmth := smoothstep(0.0, 15.0, sun_elevation_degrees)
 	var color := Color(1.0, 0.38, 0.12).lerp(_color(_settings.sun_color), warmth)
 	material.set_shader_parameter("sun_color", color)
-	environment.ambient_light_energy = _settings.ambient_energy * lerpf(0.012, lerpf(NIGHT_AMBIENT, 1.0, daylight), surface_blend)
+	var night_floor := NIGHT_AMBIENT + MOON_AMBIENT * moonlight
+	environment.ambient_light_energy = _settings.ambient_energy * lerpf(0.012, lerpf(night_floor, 1.0, daylight), surface_blend)
 	environment.ambient_light_color = NIGHT_AMBIENT_COLOR.lerp(_color(_settings.ambient_color), daylight)
 	environment.fog_light_color = Color(0.02, 0.03, 0.06).lerp(_color(_settings.fog_color), daylight)
 	if is_instance_valid(sun):
@@ -200,6 +264,12 @@ func _update_solar(seconds: float) -> void:
 		sun.basis = Basis.looking_at(-sun_direction, reference)
 		sun.light_color = _color(_settings.sun_color).lerp(color, surface_blend)
 		sun.light_energy = _settings.sun_energy * lerpf(1.0, smoothstep(-0.833, 1.0, sun_elevation_degrees), surface_blend)
+	if is_instance_valid(moon):
+		var moon_up := Vector3.UP if absf(moon_direction.y) < 0.99 else Vector3.RIGHT
+		moon.basis = Basis.looking_at(-moon_direction, moon_up)
+		moon.light_color = MOON_LIGHT_COLOR
+		moon.light_energy = MOON_LIGHT_ENERGY * moonlight * surface_blend
+		moon.visible = moon.light_energy > 0.001
 
 func _color(values: Array) -> Color:
 	return Color(values[0], values[1], values[2])
