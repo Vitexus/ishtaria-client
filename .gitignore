@@ -8,3 +8,4 @@
 /debian/debhelper-build-stamp
 debian/web-templates/*.zip
 /tools/__pycache__/
+/debian/ishtaria-client-web/
