@@ -3,6 +3,8 @@ extends CanvasLayer
 ## answer. It only shows what the server sent; choosing sends the choice back.
 
 signal choice_made(npc_id: String, seq: int, choice: int)
+## The character holds found goods; open a trade with their pack.
+signal trade_requested(npc_id: String)
 signal closed
 ## The player asks the character to tell about itself.
 signal about_requested(npc_id: String)
@@ -169,6 +171,13 @@ func _fill_node(reply: Dictionary) -> void:
 		about.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		about.pressed.connect(_ask_about)
 		choices_box.add_child(about)
+	if reply.get("can_trade") == true:
+		var trade := Button.new()
+		trade.name = "Trade"
+		trade.text = tr("Trade")
+		trade.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		trade.pressed.connect(_ask_trade)
+		choices_box.add_child(trade)
 	if reply.node.choices.is_empty():
 		var leave := Button.new()
 		leave.text = tr("Leave")
@@ -185,6 +194,11 @@ func _ask_about() -> void:
 		return
 	_about_pending = true
 	about_requested.emit(_npc_id)
+
+func _ask_trade() -> void:
+	if _npc_id.is_empty():
+		return
+	trade_requested.emit(_npc_id)
 
 ## The knowledge card of the character: its picture, a short text and the way to the article. Shown instead of the
 ## conversation; only while the conversation it was asked in is still the open one.

@@ -167,12 +167,13 @@ ANIMALS: dict[str, tuple[str, str, str, str]] = {
 
 
 def yup(v: np.ndarray) -> np.ndarray:
-    return np.stack([v[..., 0], v[..., 2], -v[..., 1]], axis=-1)
+    # Compiled PMD/PSA data is already Y-up (the engine converts the Z-up .dae sources): identity.
+    return v
 
 
 def yup_quat(q: np.ndarray) -> np.ndarray:
-    # q = (x, y, z, w) in Z-up; map with the same C as positions.
-    return np.stack([q[..., 0], q[..., 2], -q[..., 1], q[..., 3]], axis=-1)
+    # q = (x, y, z, w) already Y-up, like the positions.
+    return q
 
 
 def quat_to_mat(q: np.ndarray) -> np.ndarray:

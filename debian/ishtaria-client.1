@@ -1,0 +1,82 @@
+.TH ISHTARIA-CLIENT 1 "2026" "ishtaria-client" "Ishtaria"
+.SH NAME
+ishtaria-client \- client of the Ishtaria virtual planet
+.SH SYNOPSIS
+.B ishtaria-client
+[\fB\-\-\fR \fB\-\-server=\fIURL\fR]
+.SH DESCRIPTION
+Godot 4 client of Ishtaria, a persistent, federated, Earth-sized virtual
+planet. Shows an orbiting planet preview, then approaches the server-owned
+player location on the surface with a third-person character. The server is
+authoritative for game state; the client sends intentions and renders the
+acknowledged results.
+.PP
+On startup the client connects to a world server. The server address is chosen
+in this order (highest priority first):
+.IP 1. 4
+The \fB\-\-server\fR user argument after \fB\-\-\fR, for example
+\fBishtaria-client \-\- \-\-server=https://world.example\fR.
+.IP 2. 4
+The \fBISHTARIA_SERVER_URL\fR environment variable (desktop).
+.IP 3. 4
+On the browser build, the \fB?server=\fR page parameter, then
+\fBwindow.ISHTARIA_SERVER_URL\fR from \fBishtaria-config.js\fR.
+.IP 4. 4
+The saved address in Godot's \fBuser://client.cfg\fR.
+.IP 5. 4
+The default \fBhttp://127.0.0.1:7400\fR.
+.PP
+The connection panel accepts a server address at runtime; the last submitted
+valid address is saved and restored on startup. Bare addresses such as
+\fB127.0.0.1:7400\fR use HTTP; HTTPS, IPv6 and reverse-proxy base paths are
+also supported. Remote accounts require HTTPS; plain HTTP is permitted only
+for \fBlocalhost\fR, \fB127.0.0.1\fR and \fB::1\fR.
+.SH OPTIONS
+.TP
+.BR \-\-server= URL
+Connect to the given world server URL on startup. Overrides the environment
+variable, the saved address and the default. The URL is normalized (a bare
+host gets \fBhttp://\fR, a trailing slash is removed); invalid addresses are
+ignored and the next source is used. Also accepted as \fB\-\-server\fR
+\fIURL\fR (two arguments). Pass after \fB\-\-\fR so the engine does not
+interpret it.
+.SH ENVIRONMENT
+.TP
+.B ISHTARIA_SERVER_URL
+Default world server URL on desktop. Overridden by the \fB\-\-server\fR
+command-line argument.
+.TP
+.B ISHTARIA_PLAYER_TEST_URL
+Test-only server URL for the character creation test. Never point it at a
+live game server.
+.TP
+.B ISHTARIA_TEST_SERVER
+World server URL for the world-view screenshot test.
+.TP
+.B ISHTARIA_ENVIRONMENT_TEST_URL
+Optional read-only server URL for the environment test.
+.TP
+.B ISHTARIA_SLIDE_CAPTURE
+Path to a captured server movement trajectory replayed by the controls test.
+.SH FILES
+.TP
+.B user://client.cfg
+Saved server address, language, sound and player preferences. Passwords and
+session tokens are never written here.
+.SH EXAMPLES
+.TP
+.B ishtaria-client
+Start with the saved or default server (\fBhttp://127.0.0.1:7400\fR).
+.TP
+.B ishtaria-client \-\- \-\-server=https://world.example
+Start connected to a remote world over HTTPS.
+.TP
+.B ISHTARIA_SERVER_URL=http://192.168.1.10:7400 ishtaria-client
+Start connected to a LAN server without changing the saved preference.
+.SH SEE ALSO
+.BR ishtaria-admin (1),
+.BR ishtaria-server (1)
+.PP
+The \fBishtaria-client-web\fR package serves the same client as static files
+for a browser; the page takes the server from \fB?server=\fR or
+\fBishtaria-config.js\fR.

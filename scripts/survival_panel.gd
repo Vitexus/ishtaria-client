@@ -16,6 +16,8 @@ signal unequip_requested
 signal unequip_offhand_requested
 ## Take off armour: `body` or `hands`.
 signal unequip_slot_requested(slot: String)
+## Drop an unequipped inventory stack onto the ground at the character's feet.
+signal drop_requested(item_id: String)
 
 const ITEM_ICONS := preload("res://scripts/item_icons.gd")
 const GRAVES := "res://assets/kenney/graveyard-kit/"
@@ -268,6 +270,20 @@ func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
 		)
 		row.add_child(hold)
 		_buttons.append(hold)
+	# Equipped pieces stay in the pack until released; only loose inventory can be thrown away.
+	if grave_id.is_empty() and not in_hand and id != "gold":
+		var drop := Button.new()
+		drop.name = "Drop"
+		drop.text = tr("Drop")
+		drop.custom_minimum_size = Vector2(72, 44)
+		drop.disabled = _busy or not _alive()
+		drop.tooltip_text = tr("Drop on the ground")
+		drop.pressed.connect(func() -> void:
+			set_feedback("")
+			drop_requested.emit(id)
+		)
+		row.add_child(drop)
+		_buttons.append(drop)
 	if not grave_id.is_empty() or calories > 0:
 		var button := Button.new()
 		button.name = "Take" if not grave_id.is_empty() else "Eat"

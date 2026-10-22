@@ -5,6 +5,7 @@ extends CanvasLayer
 
 signal buy_requested(item_id: String, quantity: int)
 signal sell_requested(item_id: String, quantity: int)
+signal repair_requested(item_id: String)
 ## The whole offer of the player: `[{item_id, quantity}]`.
 signal offer_requested(items: Array)
 signal accept_requested
@@ -208,27 +209,44 @@ func _render_shop() -> void:
 	title.text = _merchant_name
 	var gold := str(_profile.get("stats", {}).get("gold", "0"))
 	summary.text = tr("Gold: %s") % gold + "  ·  " + tr("Sold today: %s / %s") % [_goods.get("sold_today", "0"), _goods.get("daily_limit", "0")]
-	_heading(tr("Buy"))
-	for good: Dictionary in _goods.get("sells", []):
-		var id: String = good.item_id
-		_row(id, "%s — %s %s" % [tr(good.name), good.price, tr("gold")], [
-			{"name": "Buy1", "text": tr("Buy 1"), "action": func() -> void: buy_requested.emit(id, 1)},
-			{"name": "Buy5", "text": tr("Buy 5"), "action": func() -> void: buy_requested.emit(id, 5)},
-		])
-	_heading(tr("Sell"))
-	var any := false
-	for good: Dictionary in _goods.get("buys", []):
-		var id: String = good.item_id
-		var owned := _quantity_of(id)
-		if owned <= 0:
-			continue
-		any = true
-		_row(id, "%s x %s — %s %s" % [tr(good.name), owned, good.price, tr("gold")], [
-			{"name": "Sell1", "text": tr("Sell 1"), "action": func() -> void: sell_requested.emit(id, 1)},
-			{"name": "SellAll", "text": tr("Sell all"), "action": func() -> void: sell_requested.emit(id, mini(owned, 1000))},
-		])
-	if not any:
-		_heading(tr("You have nothing this merchant buys."))
+	var repairs: Array = _goods.get("repairs", [])
+	if not repairs.is_empty() or (_goods.get("sells", []).is_empty() and _goods.get("buys", []).is_empty()):
+		_heading(tr("Repair"))
+		var any_repair := false
+		for offer: Dictionary in repairs:
+			any_repair = true
+			var id: String = offer.item_id
+			_row(id, "%s — %s/%s — %s %s" % [tr(offer.name), int(offer.durability), int(offer.max_durability), offer.price, tr("gold")], [
+				{"name": "Repair", "text": tr("Repair"), "action": func() -> void: repair_requested.emit(id)},
+			])
+		if not any_repair:
+			_heading(tr("Nothing needs repair."))
+	if not _goods.get("sells", []).is_empty():
+		_heading(tr("Buy"))
+		for good: Dictionary in _goods.get("sells", []):
+			var id: String = good.item_id
+			var stock := str(good.get("quantity", ""))
+			var label := "%s x %s — %s %s" % [tr(good.name), stock, good.price, tr("gold")] if stock.is_valid_int() else "%s — %s %s" % [tr(good.name), good.price, tr("gold")]
+			var max_buy := mini(5, int(stock)) if stock.is_valid_int() else 5
+			var buttons: Array = [{"name": "Buy1", "text": tr("Buy 1"), "action": func() -> void: buy_requested.emit(id, 1)}]
+			if max_buy >= 5:
+				buttons.append({"name": "Buy5", "text": tr("Buy 5"), "action": func() -> void: buy_requested.emit(id, 5)})
+			_row(id, label, buttons)
+	if not _goods.get("buys", []).is_empty():
+		_heading(tr("Sell"))
+		var any := false
+		for good: Dictionary in _goods.get("buys", []):
+			var id: String = good.item_id
+			var owned := _quantity_of(id)
+			if owned <= 0:
+				continue
+			any = true
+			_row(id, "%s x %s — %s %s" % [tr(good.name), owned, good.price, tr("gold")], [
+				{"name": "Sell1", "text": tr("Sell 1"), "action": func() -> void: sell_requested.emit(id, 1)},
+				{"name": "SellAll", "text": tr("Sell all"), "action": func() -> void: sell_requested.emit(id, mini(owned, 1000))},
+			])
+		if not any:
+			_heading(tr("You have nothing this merchant buys."))
 
 func _render_exchange() -> void:
 	title.text = tr("Trade with %s") % _view.get("with", "")

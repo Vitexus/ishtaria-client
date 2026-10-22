@@ -121,6 +121,8 @@ static func valid_reply(data: Variant) -> bool:
 		return false
 	if data.get("about") != null and not data.about is bool:
 		return false
+	if data.get("can_trade") != null and not data.can_trade is bool:
+		return false
 	if data.get("music") != null:
 		if not data.music is Dictionary or not valid_media_url(data.music.get("url")) or not data.music.get("title_key") is String or not data.music.get("loop") is bool:
 			return false

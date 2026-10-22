@@ -3808,7 +3808,7 @@
         "beach"
       ],
       "weight": 2.0,
-      "scale_m": 0.75,
+      "scale_m": 0.22,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3818,7 +3818,7 @@
       "scene": "res://assets/zeroad/fauna/goat.glb",
       "biomes": [],
       "weight": 2.0,
-      "scale_m": 0.75,
+      "scale_m": 0.26,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3828,7 +3828,7 @@
       "scene": "res://assets/zeroad/fauna/sheep.glb",
       "biomes": [],
       "weight": 2.0,
-      "scale_m": 0.75,
+      "scale_m": 0.35,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3838,7 +3838,7 @@
       "scene": "res://assets/zeroad/fauna/cow.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.7,
+      "scale_m": 0.42,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3848,7 +3848,7 @@
       "scene": "res://assets/zeroad/fauna/bull.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.7,
+      "scale_m": 0.46,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3858,7 +3858,7 @@
       "scene": "res://assets/zeroad/fauna/donkey.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.7,
+      "scale_m": 0.34,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3868,7 +3868,7 @@
       "scene": "res://assets/zeroad/fauna/pig.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.75,
+      "scale_m": 0.49,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3878,7 +3878,7 @@
       "scene": "res://assets/zeroad/fauna/chicken.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.55,
+      "scale_m": 0.22,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -3891,7 +3891,7 @@
         "grassland"
       ],
       "weight": 1.0,
-      "scale_m": 0.75,
+      "scale_m": 0.27,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -3904,7 +3904,7 @@
         "mountain"
       ],
       "weight": 1.0,
-      "scale_m": 0.75,
+      "scale_m": 0.31,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -3917,7 +3917,7 @@
         "grassland"
       ],
       "weight": 0.5,
-      "scale_m": 0.65,
+      "scale_m": 0.37,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3930,7 +3930,7 @@
         "grassland"
       ],
       "weight": 0.5,
-      "scale_m": 0.65,
+      "scale_m": 0.34,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3943,7 +3943,7 @@
         "grassland"
       ],
       "weight": 1.0,
-      "scale_m": 0.75,
+      "scale_m": 0.32,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -3955,7 +3955,7 @@
         "forest"
       ],
       "weight": 1.0,
-      "scale_m": 0.75,
+      "scale_m": 0.40,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -3965,7 +3965,7 @@
       "scene": "res://assets/zeroad/fauna/crocodile.glb",
       "biomes": [],
       "weight": 0.5,
-      "scale_m": 0.7,
+      "scale_m": 0.19,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3977,7 +3977,7 @@
         "beach"
       ],
       "weight": 1.0,
-      "scale_m": 0.7,
+      "scale_m": 0.31,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3989,7 +3989,7 @@
         "grassland"
       ],
       "weight": 0.5,
-      "scale_m": 0.7,
+      "scale_m": 0.29,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -3999,7 +3999,7 @@
       "scene": "res://assets/zeroad/fauna/zebu.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.7,
+      "scale_m": 0.35,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle"
@@ -4009,7 +4009,7 @@
       "scene": "res://assets/zeroad/fauna/mastiff.glb",
       "biomes": [],
       "weight": 1.0,
-      "scale_m": 0.65,
+      "scale_m": 0.34,
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle"
@@ -4022,7 +4022,7 @@
         "mountain"
       ],
       "weight": 1.0,
-      "scale_m": 0.45,
+      "scale_m": 0.54,
       "max_slope": 0.5,
       "fauna": true,
       "flying": true,
@@ -4038,7 +4038,7 @@
         "forest"
       ],
       "weight": 1.0,
-      "scale_m": 0.4,
+      "scale_m": 0.68,
       "max_slope": 0.5,
       "fauna": true,
       "flying": true,
@@ -4052,7 +4052,7 @@
         "beach"
       ],
       "weight": 1.0,
-      "scale_m": 0.4,
+      "scale_m": 0.69,
       "max_slope": 0.5,
       "fauna": true,
       "flying": true,

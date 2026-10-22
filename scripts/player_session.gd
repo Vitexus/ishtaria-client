@@ -1,6 +1,8 @@
 extends Node
 
 signal profile_changed(profile: Dictionary)
+## An item was dropped or picked up from the ground; refresh nearby piles.
+signal ground_changed
 signal failed(message: String)
 signal busy_changed(busy: bool)
 signal obituary_received(obituary: Dictionary)
@@ -112,6 +114,16 @@ func grave(id: String) -> void:
 func loot(id: String, item_id: String) -> void:
 	if not busy and not _token.is_empty() and id.is_valid_int():
 		_send("/graves/" + id + "/loot", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": "1"}))
+
+## Drops one piece of an unequipped inventory item at the character's feet.
+func drop_item(item_id: String) -> void:
+	if not busy and not _token.is_empty() and not item_id.is_empty() and item_id.length() <= 64:
+		_send("/players/me/drop", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": 1}))
+
+## Picks up a pile lying on the ground nearby.
+func pickup_ground(id: int) -> void:
+	if not busy and not _token.is_empty() and id > 0:
+		_send("/ground/%s/pickup" % id, HTTPClient.METHOD_POST)
 
 func harvest(object_id: String) -> void:
 	if not busy and not _token.is_empty() and not object_id.is_empty() and object_id.length() <= 100:
@@ -341,6 +353,14 @@ static func action_error(code: int, text: String) -> String:
 			return "Missing ingredients"
 		"station missing":
 			return "Stand next to the station this needs"
+		"cannot drop an equipped item":
+			return "Unequip it first"
+		"not enough to drop", "item not found":
+			return "Nothing to drop"
+		"nothing to pick up":
+			return "Nothing to pick up"
+		"drop worn gear one piece at a time":
+			return "Drop one piece at a time"
 		"too fast":
 			return ""
 	return "Too many actions" if code == 429 else "Item action unavailable"
@@ -529,7 +549,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		failed.emit("Player is dead")
 		return
 	if code < 200 or code >= 300:
-		if path in ["/players/me/harvest", "/players/me/butcher", "/players/me/milk", "/players/me/craft", "/players/me/block", "/players/me/sit", "/players/me/stand", "/story/npc/strike"] or path.begins_with("/players/me/equip"):
+		if path in ["/players/me/harvest", "/players/me/butcher", "/players/me/milk", "/players/me/craft", "/players/me/block", "/players/me/sit", "/players/me/stand", "/players/me/drop", "/story/npc/strike"] or path.begins_with("/players/me/equip") or path.begins_with("/ground/"):
 			var message := action_error(code, body.get_string_from_utf8())
 			if not message.is_empty():
 				failed.emit(message)
@@ -543,7 +563,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		if path == "/players/me/drink":
 			failed.emit(drink_error(code, body.get_string_from_utf8()))
 			return
-		if path == "/players/me/eat" or path.ends_with("/loot"):
+		if path == "/players/me/eat" or (path.ends_with("/loot") and path.begins_with("/graves/")):
 			failed.emit("Player is dead" if code == 409 and path == "/players/me/eat" else ("Grave is out of reach" if code == 403 else "Item action unavailable"))
 			refresh()
 			return
@@ -646,11 +666,13 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		milked.emit(milk_reply)
 	elif path == "/players/me/craft":
 		crafted.emit()
+	if path == "/players/me/drop" or (path.begins_with("/ground/") and path.ends_with("/pickup")):
+		ground_changed.emit()
 	var position: Variant = profile.get("position")
 	if position is Dictionary and position.get("sequence") is String and position.sequence.is_valid_int():
 		_move_sequence = maxi(_move_sequence, int(position.sequence))
 	_movement_available = true
-	if path.ends_with("/loot"):
+	if path.begins_with("/graves/") and path.ends_with("/loot"):
 		grave(path.split("/")[2])
 	if not _token.is_empty():
 		_timer.start()

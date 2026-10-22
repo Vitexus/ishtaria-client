@@ -8,12 +8,16 @@ const ASSETS := "res://assets/kenney/ui-adventure/PNG/Default/"
 const ICONS := "res://assets/kenney/game-icons/"
 const RPG := "res://assets/kenney/ui-rpg/PNG/"
 const BORDER := "res://assets/kenney/fantasy-ui-borders/PNG/Default/Border/panel-border-000.png"
+const ITEM_ICONS := preload("res://scripts/item_icons.gd")
 const METERS := {"health": ["Health", "red"], "stamina": ["Stamina", "green"], "food": ["Food", "white"], "water": ["Water", "blue"], "mana": ["Mana", "blue"]}
+## Left hand = offhand (shield), right hand = dominant hand (tool / weapon).
+const HAND_SLOTS := {"offhand": "left", "hand": "right"}
 
 var sound_enabled := true
 var sky: Node
 var clock_label: Label
 var _clock_elapsed := 1.0
+var _blink_elapsed := 0.0
 var panel: PanelContainer
 var grid: GridContainer
 var meters: Dictionary = {}
@@ -31,6 +35,8 @@ var _frame: NinePatchRect
 var _labels: Dictionary = {}
 var _values: Dictionary = {}
 var _player: Dictionary = {}
+## `{slot: {panel, icon, label, broken}}` for the bottom-corner equipment display.
+var _hands: Dictionary = {}
 
 func _ready() -> void:
 	layer = 2
@@ -191,9 +197,41 @@ func _ready() -> void:
 	xp_fill.modulate_color = Color(1.0, 0.83, 0.35)
 	xp_bar.add_theme_stylebox_override("fill", xp_fill)
 	experience_row.add_child(xp_bar)
+	for slot: String in HAND_SLOTS:
+		_hands[slot] = _make_hand_slot(slot)
 	get_viewport().size_changed.connect(_resize)
 	_resize()
 	clear_player()
+
+## A framed icon in a screen corner for the item held in that hand.
+func _make_hand_slot(slot: String) -> Dictionary:
+	var holder := PanelContainer.new()
+	holder.name = "Hand_" + slot
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := _texture_style(RPG + "panelInset_blue.png", 8.0)
+	style.modulate_color = Color(0.22, 0.28, 0.29, 0.92)
+	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
+		style.set_content_margin(side, 6.0)
+	holder.add_theme_stylebox_override("panel", style)
+	add_child(holder)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 2)
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	holder.add_child(column)
+	var icon := TextureRect.new()
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.custom_minimum_size = Vector2(48, 48)
+	icon.modulate = Color(1, 1, 1, 0.35)
+	column.add_child(icon)
+	var label := Label.new()
+	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.86))
+	label.text = "—"
+	column.add_child(label)
+	return {"panel": holder, "icon": icon, "label": label, "broken": false}
 
 func _style(filename: String, border: float) -> StyleBoxTexture:
 	return _texture_style(ASSETS + filename, border)
@@ -206,13 +244,26 @@ func _texture_style(path: String, border: float) -> StyleBoxTexture:
 	return style
 
 func _resize() -> void:
-	var width := get_viewport().get_visible_rect().size.x
+	var screen := get_viewport().get_visible_rect().size
+	var width := screen.x
 	var margin := maxf(8.0, (width - 920.0) / 2.0)
 	panel.offset_left = margin
 	panel.offset_right = -margin
 	grid.columns = 5 if width >= 640.0 else 2
 	panel.offset_top = -maxf(96.0, panel.get_combined_minimum_size().y)
 	_sync_frame.call_deferred()
+	var slot_size := Vector2(64, 78) if width >= 640.0 else Vector2(52, 68)
+	var gap := 10.0
+	var hud_top := screen.y + panel.offset_top
+	for slot: String in _hands:
+		var holder: PanelContainer = _hands[slot].panel
+		holder.custom_minimum_size = slot_size
+		holder.size = slot_size
+		var y := mini(hud_top - slot_size.y - 4.0, screen.y - slot_size.y - gap)
+		if HAND_SLOTS[slot] == "left":
+			holder.position = Vector2(gap, y)
+		else:
+			holder.position = Vector2(screen.x - slot_size.x - gap, y)
 
 func _sync_frame() -> void:
 	_frame.position = panel.position
@@ -229,6 +280,15 @@ func _process(delta: float) -> void:
 	if _clock_elapsed >= 1.0:
 		_clock_elapsed = 0.0
 		_update_clock()
+	_blink_elapsed += delta
+	var pulse := 0.45 + 0.55 * absf(sin(_blink_elapsed * TAU * 1.6))
+	for slot: String in _hands:
+		var entry: Dictionary = _hands[slot]
+		if entry.broken and entry.icon.texture != null:
+			entry.icon.modulate.a = pulse
+			entry.panel.modulate = Color(1.0, 0.55 + 0.35 * pulse, 0.45, 1.0)
+		else:
+			entry.panel.modulate = Color.WHITE
 
 func _update_clock() -> void:
 	var state: Dictionary = sky.clock_state() if is_instance_valid(sky) else {}
@@ -258,6 +318,7 @@ func clear_player() -> void:
 		meters[key].value = 0.0
 		meters[key].modulate.a = 0.45
 		_values[key].text = "-"
+	_update_hands()
 	_update_labels()
 
 func set_player(profile: Dictionary) -> bool:
@@ -340,4 +401,50 @@ func _update_labels() -> void:
 		xp_bar.value = 0.0
 	gold_label.text = tr("Gold %s") % (_player.stats.gold if not _player.is_empty() else "-")
 	gold_label.tooltip_text = gold_label.text
+	_update_hands()
 	_resize.call_deferred()
+
+## Fills the corner slots from `equipment.hand` / `equipment.offhand` and inventory durability.
+func _update_hands() -> void:
+	var equipment: Dictionary = _player.get("equipment", {}) if not _player.is_empty() else {}
+	var inventory: Array = _player.get("inventory", {}).get("items", []) if not _player.is_empty() else []
+	for slot: String in HAND_SLOTS:
+		var entry: Dictionary = _hands[slot]
+		var item_id: Variant = equipment.get(slot)
+		var held: Dictionary = {}
+		if item_id is String and not item_id.is_empty():
+			for item: Variant in inventory:
+				if item is Dictionary and item.get("item_id") == item_id:
+					held = item
+					break
+		var icon: TextureRect = entry.icon
+		var label: Label = entry.label
+		if held.is_empty():
+			icon.texture = null
+			icon.modulate = Color(1, 1, 1, 0.35)
+			label.text = "—"
+			label.tooltip_text = tr("Left hand" if slot == "offhand" else "Right hand")
+			entry.panel.tooltip_text = label.tooltip_text
+			entry.broken = false
+			continue
+		var id: String = held.item_id
+		icon.texture = ITEM_ICONS.texture(id)
+		icon.modulate = Color.WHITE
+		var name_text := tr(held.get("name", id))
+		var durability: Variant = held.get("durability")
+		var max_durability: Variant = held.get("max_durability")
+		# Blink while the piece is nearly spent; at 0 HP the server destroys it.
+		var worn := false
+		if (durability is float or durability is int) and (max_durability is float or max_durability is int) and max_durability > 0:
+			worn = float(durability) / float(max_durability) <= 0.2
+			label.text = "%s/%s" % [int(durability), int(max_durability)]
+			label.tooltip_text = "%s\n%s" % [name_text, tr("Durability %s / %s") % [int(durability), int(max_durability)]]
+			if worn:
+				label.tooltip_text += "\n" + tr("Worn — repair at a blacksmith")
+		else:
+			label.text = name_text
+			label.tooltip_text = name_text
+		entry.panel.tooltip_text = label.tooltip_text
+		entry.broken = worn
+		if not worn:
+			icon.modulate.a = 1.0

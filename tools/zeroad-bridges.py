@@ -19,12 +19,12 @@ import zipfile
 import numpy as np
 from PIL import Image
 
-# name: (compiled mesh, texture, whether the mesh is Z-up like the sources (the rope bridge is already Y-up), width factor)
+# name: (compiled mesh, texture, whether the mesh needs a Z-up to Y-up turn (compiled PMDs are already Y-up, so all False), width factor)
 # The rope bridge is 4 units wide and 70 long: made for a gorge. The world generator scales a bridge uniformly to
 # the river it crosses (6 to 36 m), so its width is doubled to keep a footpath wide enough on the short ones.
 PARTS = {
-    "bridge_edge_wooden": ("art/meshes/props/special/bridge_edge_wooden.dae.cached.pmd", "art/textures/skins/props/bridge_edge_wooden.png.cached.dds", True, 1.0),
-    "bridge_edge_hele": ("art/meshes/props/special/bridge_edge_hele.dae.cached.pmd", "art/textures/skins/structural/hele_struct_b.png.cached.dds", True, 1.0),
+    "bridge_edge_wooden": ("art/meshes/props/special/bridge_edge_wooden.dae.cached.pmd", "art/textures/skins/props/bridge_edge_wooden.png.cached.dds", False, 1.0),
+    "bridge_edge_hele": ("art/meshes/props/special/bridge_edge_hele.dae.cached.pmd", "art/textures/skins/structural/hele_struct_b.png.cached.dds", False, 1.0),
     "broken_rope_bridge_long": ("art/meshes/props/special/broken_rope_bridge_long.dae.cached.pmd", "art/textures/skins/structural/iber_siege_ram.dds.cached.dds", False, 2.2),
 }
 

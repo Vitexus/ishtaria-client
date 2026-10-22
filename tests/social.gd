@@ -94,6 +94,12 @@ func _init() -> void:
 	var audio := preload("res://scripts/interface_audio.gd")
 	var fanfare: AudioStreamWAV = audio.make_fanfare()
 	_check(fanfare.data.size() > 1000 and fanfare.get_length() > 1.0, "fanfare exists")
+	var spell: AudioStreamWAV = audio.make_spell()
+	_check(spell.data.size() > 400 and spell.get_length() > 0.3 and spell.get_length() < 1.0, "spell chime exists")
+	var warning: AudioStreamWAV = audio.make_warning()
+	_check(warning.data.size() > 200 and warning.get_length() > 0.15 and warning.get_length() < 0.6, "warning cue exists")
+	var crack: AudioStreamWAV = audio.make_break()
+	_check(crack.data.size() > 200 and crack.get_length() > 0.15 and crack.get_length() < 0.6, "break cue exists")
 
 	print("Social client checks %s" % ("failed" if failures > 0 else "passed"))
 	quit(1 if failures > 0 else 0)

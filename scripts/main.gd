@@ -283,6 +283,8 @@ func _ready() -> void:
 	_survival.unequip_requested.connect(_session.unequip)
 	_survival.unequip_offhand_requested.connect(_session.unequip.bind("offhand"))
 	_survival.unequip_slot_requested.connect(_session.unequip)
+	_survival.drop_requested.connect(_session.drop_item)
+	_session.ground_changed.connect(_environment.refresh_objects)
 	_session.blocked.connect(_on_blocked)
 	_crafting = preload("res://scripts/crafting_panel.gd").new()
 	_crafting.craft_requested.connect(_session.craft.bind(1))
@@ -339,6 +341,7 @@ func _ready() -> void:
 	add_child(_trade_panel)
 	_trade_panel.buy_requested.connect(_trading.buy)
 	_trade_panel.sell_requested.connect(_trading.sell)
+	_trade_panel.repair_requested.connect(_trading.repair)
 	_trade_panel.offer_requested.connect(_trading.offer)
 	_trade_panel.accept_requested.connect(_trading.accept)
 	_trade_panel.cancel_requested.connect(_trading.cancel)
@@ -407,6 +410,7 @@ func _ready() -> void:
 	add_child(_dialogue)
 	_dialogue.choice_made.connect(_on_dialogue_choice)
 	_dialogue.about_requested.connect(_story.fetch_about)
+	_dialogue.trade_requested.connect(_on_npc_trade)
 	_story.about_ready.connect(_dialogue.show_about)
 	_dialogue.closed.connect(_on_dialogue_closed)
 	_dialogue.speaking_changed.connect(_environment.set_npc_talking)
@@ -478,6 +482,10 @@ func _ready() -> void:
 		)
 		if not page_server.is_empty() and not _normalize_server_url(page_server).is_empty():
 			_server_url = _normalize_server_url(page_server)
+	# An explicit command-line `--server=URL` (after `--`) wins over every other source.
+	var argument_url := server_url_from_arguments()
+	if not argument_url.is_empty():
+		_server_url = argument_url
 	_server_input.text = _server_url
 	_reconnect = Timer.new()
 	_reconnect.wait_time = 5.0
@@ -891,6 +899,28 @@ func _set_feedback(message: String) -> void:
 	_feedback_key = message
 	_update_translations()
 
+## The `--server=URL` (or `--server URL`) user argument, an empty string when absent. User arguments follow `--` on the
+## command line; the value is normalized the same way as every other source.
+static func server_url_from_arguments() -> String:
+	var args := OS.get_cmdline_user_args()
+	var index := 0
+	while index < args.size():
+		var arg := args[index]
+		if arg == "--server" and index + 1 < args.size():
+			var normalized := _normalize_server_url(args[index + 1])
+			if not normalized.is_empty():
+				return normalized
+			index += 2
+			continue
+		if arg.begins_with("--server="):
+			var normalized := _normalize_server_url(arg.trim_prefix("--server="))
+			if not normalized.is_empty():
+				return normalized
+		index += 1
+		continue
+		index += 1
+	return ""
+
 ## The server address the page of the web client asks for (`?server=`): an absolute address as it is, a path (`/server`) on the origin
 ## of the page, anything else (empty, a scheme other than http or https, a protocol-relative `//host`) nothing.
 static func web_server_address(parameter: String, origin: String) -> String:
@@ -903,7 +933,7 @@ static func web_server_address(parameter: String, origin: String) -> String:
 		return value
 	return ""
 
-func _normalize_server_url(address: String) -> String:
+static func _normalize_server_url(address: String) -> String:
 	var url := address.strip_edges().trim_suffix("/")
 	if url.is_empty():
 		return ""
@@ -1270,12 +1300,18 @@ func _item_name(id: String) -> String:
 			return tr(item.get("name", id))
 	return tr(id.capitalize().replace("_", " "))
 
+## Toast suffix when a piece wore out; plays the break cue and returns whether it broke
+## so callers can skip a competing confirmation click.
 func _wear_text(reply: Dictionary, id: String) -> String:
 	var wear: Variant = reply.get("wear")
 	if wear is Dictionary and wear.broken:
-		_audio.play("error")
+		_audio.play("break")
 		return "  ·  " + tr("%s broke!") % _item_name(id)
 	return ""
+
+func _wear_broke(reply: Dictionary) -> bool:
+	var wear: Variant = reply.get("wear")
+	return wear is Dictionary and wear.broken
 
 ## The left mouse button acts with the item in the dominant hand: a swing of the axe or sword,
 ## a kick of the pickaxe. Disk combat clips (Box/Kick/Sweep) also work bare-handed on wildlife.
@@ -1292,6 +1328,7 @@ func _primary_action() -> void:
 	var bare_strike: bool = (not (hand is String)) and _controls.has_combat_clips()
 	if (not (hand is String)) and not bare_strike:
 		_toast.show_toast(tr("Nothing in hand"), 1.2)
+		_audio.play("warning")
 		return
 	_controls.swing()
 	if hand is String and hand == "fishing_rod":
@@ -1310,6 +1347,7 @@ func _primary_action() -> void:
 				return
 	if bare_strike or hand == "sword":
 		_toast.show_toast(tr("Nothing to hit"), 1.0)
+		_audio.play("warning")
 		return
 	_harvest_nearby()
 
@@ -1336,6 +1374,7 @@ func _work_with_tool() -> void:
 func _secondary_action_started() -> void:
 	if not _player_profile.get("equipment", {}).get("offhand") is String:
 		_toast.show_toast(tr("No shield in hand"), 1.2)
+		_audio.play("warning")
 		return
 	_blocking = true
 	_block_renew = 0.0
@@ -1345,7 +1384,7 @@ func _on_blocked(reply: Dictionary) -> void:
 	var wear: Variant = reply.get("wear")
 	if wear is Dictionary and wear.broken:
 		_blocking = false
-		_audio.play("error")
+		_audio.play("break")
 		_toast.show_toast(tr("%s broke!") % _item_name(str(offhand)), 2.0)
 	elif wear is Dictionary:
 		_audio.play("click")
@@ -1355,6 +1394,12 @@ func _on_blocked(reply: Dictionary) -> void:
 func _interact() -> void:
 	if _player_metres != Vector3.ZERO and not _story.is_running():
 		_harvest_nearby()
+		return
+	# Loose packs on the ground come before crops and gathering.
+	var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0) if _player_metres != Vector3.ZERO else {}
+	if not pile.is_empty():
+		_session.pickup_ground(int(pile.id))
+		_audio.play("confirmation")
 		return
 	var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _player_metres != Vector3.ZERO else {}
 	if npc.is_empty():
@@ -1376,6 +1421,18 @@ func _on_dialogue_choice(npc_id: String, seq: int, choice: int) -> void:
 	# Server injects apology as choice index 65000 on hostile NPCs.
 	_pending_apology = choice == 65000
 	_story.choose(npc_id, seq, choice)
+
+## An NPC that scooped ground loot offers trade from the dialogue panel.
+func _on_npc_trade(npc_id: String) -> void:
+	if not _trading.is_running():
+		return
+	_dialogue.close()
+	var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M * 2.0) if _player_metres != Vector3.ZERO else {}
+	if npc.get("id") == npc_id and npc.get("name_key") is String:
+		_merchant_name = str(_story.text(npc.name_key))
+	else:
+		_merchant_name = tr("Trade")
+	_trading.open_found(npc_id)
 
 func _on_dialogue_changed(reply: Dictionary) -> void:
 	_dialogue.show_reply(reply)
@@ -1570,6 +1627,7 @@ func _pickup_nearby() -> void:
 	var thing := _own_thing_nearby()
 	if thing.is_empty():
 		_toast.show_toast(tr("Nothing of yours is within reach"), 1.2)
+		_audio.play("warning")
 		return
 	_placed.pickup(int(thing.id))
 
@@ -1587,6 +1645,11 @@ func _place_item(item_id: String, plant: bool) -> void:
 		_placed.place(item_id, at, _controls.yaw)
 
 func _on_placed_done(kind: String, reply: Dictionary) -> void:
+	var wear_note := ""
+	var broke := false
+	if kind == "fish":
+		wear_note = _wear_text(reply, "fishing_rod")
+		broke = _wear_broke(reply)
 	match kind:
 		"place":
 			var snare: bool = reply.get("object") is Dictionary and reply.object.get("kind") == "snare"
@@ -1599,8 +1662,9 @@ func _on_placed_done(kind: String, reply: Dictionary) -> void:
 				parts.append("%s x %s" % [tr(item.name), item.quantity])
 			_toast.show_toast((tr("Harvested: %s") if kind == "harvest" else tr("Picked up: %s")) % ", ".join(parts))
 		"fish":
-			_toast.show_toast(tr("You caught a fish!") if reply.caught else tr("Nothing bites"), 1.5)
-	_audio.play("confirmation" if kind != "fish" or reply.caught else "click")
+			_toast.show_toast((tr("You caught a fish!") if reply.caught else tr("Nothing bites")) + wear_note, 1.5)
+	if not broke:
+		_audio.play("confirmation" if kind != "fish" or reply.caught else "click")
 	_session.refresh()
 
 func _on_spells_loaded(known: Dictionary) -> void:
@@ -1609,7 +1673,7 @@ func _on_spells_loaded(known: Dictionary) -> void:
 
 func _on_spell_learned(spell_id: String) -> void:
 	_toast.show_toast(tr("You learned a new spell!"), 3.0)
-	_audio.play("fanfare")
+	_audio.play("spell")
 	_session.refresh()
 
 ## Casts a known spell; a bolt is aimed at the nearest animal within its range.
@@ -1623,6 +1687,7 @@ func _cast_spell(spell_id: String) -> void:
 			var animal: Dictionary = _environment.nearest_animal(_player_metres, float(spell.range_m))
 			if animal.is_empty():
 				_toast.show_toast(tr("No target in range"), 1.2)
+				_audio.play("warning")
 				return
 			_survival.hide()
 			_crafting.hide()
@@ -1659,7 +1724,7 @@ func _on_cast_done(reply: Dictionary) -> void:
 			text = tr("Hit %s / %s") % [int(strike.hits), int(strike.hits_required)]
 	_toast.show_toast(text, 1.8)
 	_spell_effect(str(reply.effect))
-	_audio.play("confirmation")
+	_audio.play("spell")
 	if reply.get("solar") is Dictionary and _sky.apply_solar(reply.solar):
 		_toast.show_toast(tr("Dawn breaks" if reply.effect == "day" else "Night falls"), 2.4)
 	_session.refresh()
@@ -1696,7 +1761,7 @@ func _spell_effect(effect: String) -> void:
 
 func _on_placed_failed(message: String) -> void:
 	_toast.show_toast(tr(message), 1.5)
-	_audio.play("error")
+	_audio.play("warning")
 
 func _update_prompt() -> void:
 	var text := ""
@@ -1736,16 +1801,20 @@ func _on_harvested(reply: Dictionary) -> void:
 	var counter: Variant = reply.get("counter")
 	if counter is Dictionary:
 		_on_bitten(reply, counter)
+	var wear_note := _wear_text(reply, str(reply.get("tool", reply.get("weapon", ""))))
+	var broke := _wear_broke(reply)
 	if reply.state == "depleted":
 		var parts: Array[String] = []
 		for item: Dictionary in reply.items:
 			parts.append("%s x %s" % [tr(item.name), item.quantity])
-		_toast.show_toast(tr("Harvested: %s") % ", ".join(parts) + _xp_text(reply) + _wear_text(reply, str(reply.get("tool", reply.get("weapon", "")))))
-		_audio.play("confirmation")
+		_toast.show_toast(tr("Harvested: %s") % ", ".join(parts) + _xp_text(reply) + wear_note)
+		if not broke:
+			_audio.play("confirmation")
 		_environment.refresh_objects()
 	else:
-		_toast.show_toast(tr("Hit %s / %s") % [int(reply.hits), int(reply.hits_required)] + _xp_text(reply) + _wear_text(reply, str(reply.get("tool", reply.get("weapon", "")))), 1.2)
-		_audio.play("click")
+		_toast.show_toast(tr("Hit %s / %s") % [int(reply.hits), int(reply.hits_required)] + _xp_text(reply) + wear_note, 1.2)
+		if not broke:
+			_audio.play("click")
 
 ## A blow against a story NPC: red health bar, lasting hostility, optional counter-blow.
 func _on_npc_struck(reply: Dictionary) -> void:
@@ -1772,12 +1841,14 @@ func _on_bitten(reply: Dictionary, counter: Dictionary) -> void:
 		text += "  ·  " + tr("Blocked")
 	if int(counter.defense) > 0:
 		text += "  ·  " + tr("Armour %s%%") % int(counter.defense)
+	var armour_broke := false
 	for wear: Variant in counter.wear:
 		if wear is Dictionary and wear.get("broken") == true:
 			text += "  ·  " + tr("Armour piece broke")
+			armour_broke = true
 			break
 	_toast.show_toast(text, 2.5)
-	_audio.play("error")
+	_audio.play("break" if armour_broke else "error")
 
 func _xp_text(reply: Dictionary) -> String:
 	var xp: Variant = reply.get("xp")

@@ -30,6 +30,8 @@ make editor
 `make` defaults to `run`. Without `SERVER_URL`, the client uses its saved
 address or `ISHTARIA_SERVER_URL`. Override the engine with `GODOT`, for example
 `make GODOT=tools/godot/godot`, and pass extra engine options with `GODOT_ARGS`.
+User arguments go after `--` in `GODOT_ARGS`, for example
+`make run GODOT_ARGS="-- --server=http://127.0.0.1:7400"`.
 `make help` lists the available targets. From the parent directory, use
 `make -C ishtaria-client`.
 
@@ -106,6 +108,17 @@ HTTPS, IPv6 and reverse-proxy base paths are also supported. The last submitted
 valid address is saved in Godot's `user://client.cfg` and restored on startup.
 `ISHTARIA_SERVER_URL` overrides the startup address without changing the saved
 preference. The default is `http://127.0.0.1:7400`.
+
+The server address can also be given on the command line, which wins over every
+other source:
+
+```sh
+ishtaria-client -- --server=https://world.example
+ishtaria-client -- --server https://world.example
+```
+
+Pass the argument after `--` so the Godot engine does not interpret it. See
+`ishtaria-client(1)` for the full list of environment variables.
 
 The client requests `/world` and refreshes the identity every five seconds,
 retrying failed connections. Disconnect cancels pending requests and retries;
@@ -539,10 +552,16 @@ to a friend (history is not kept anywhere; lines fade after a few seconds). Esc 
 
 ## Trading
 
-`E` at a merchant (every town has a trader at the plaza) opens the shop: buy food and basic gear, sell raw materials and
-hunting spoils; the merchant pays at most 400 gold a day to one character. `/trade name` in the chat line starts an exchange with a
-player within 10 m (or shows the one they started): each side puts items and gold on the table with the `+1` / `+10` buttons, both
-press *Accept*, and the server swaps everything at once. Changing an offer withdraws the acceptances. Used (worn) items cannot be traded.
+`E` at a merchant (every town has a trader at the plaza) opens the shop: buy food and basic gear (better tiers cost more and
+last longer), sell raw materials and hunting spoils; the merchant pays at most 400 gold a day to one character. Finds that
+wayfarers have already sold to a trader appear as limited stock at a higher price until they are bought. `/trade name` in
+the chat line starts an exchange with a player within 10 m (or shows the one they started): each side puts items and gold
+on the table with the `+1` / `+10` buttons, both press *Accept*, and the server swaps everything at once. Changing an offer
+withdraws the acceptances. Used (worn) items cannot be traded.
+
+Inventory marks what is held or worn; **Unequip** frees a piece before **Drop** can throw it on the ground. Piles stay
+until you pick them up or an NPC pockets them. Talking to a character that holds finds offers **Trade** at a lower price
+than the market — worth doing on the road between towns before a wayfarer reaches the trader.
 
 ## Building, farming and fishing
 

@@ -15,6 +15,8 @@ var server_url := ""
 var _token := ""
 var _generation := 0
 var _npc_id := ""
+## `shop` (catalog merchant) or `found` (NPC inventory of scooped ground loot).
+var _shop_kind := "shop"
 var _timer: Timer
 var _polling := false
 var _open := false
@@ -34,6 +36,7 @@ func stop() -> void:
 	_generation += 1
 	_token = ""
 	_npc_id = ""
+	_shop_kind = "shop"
 	_open = false
 	_polling = false
 	if is_instance_valid(_timer):
@@ -50,6 +53,14 @@ static func valid_npc_id(id: Variant) -> bool:
 static func valid_good(good: Variant) -> bool:
 	return good is Dictionary and good.get("item_id") is String and good.item_id.length() <= 64 and good.get("name") is String and good.get("price") is String and good.price.is_valid_int() and int(good.price) > 0
 
+static func valid_repair(offer: Variant) -> bool:
+	if not valid_good(offer):
+		return false
+	for key in ["durability", "max_durability"]:
+		if not (offer.get(key) is float or offer.get(key) is int) or offer[key] < 0 or offer[key] > 10000:
+			return false
+	return offer.max_durability > 0 and offer.durability < offer.max_durability
+
 static func valid_goods(data: Variant) -> bool:
 	if not data is Dictionary or not data.get("sells") is Array or not data.get("buys") is Array or data.sells.size() > 100 or data.buys.size() > 100:
 		return false
@@ -57,26 +68,54 @@ static func valid_goods(data: Variant) -> bool:
 		for good: Variant in data[key]:
 			if not valid_good(good):
 				return false
+	var repairs: Variant = data.get("repairs", [])
+	if repairs != null:
+		if not repairs is Array or repairs.size() > 64:
+			return false
+		for offer: Variant in repairs:
+			if not valid_repair(offer):
+				return false
 	return data.get("daily_limit") is String and data.daily_limit.is_valid_int() and data.get("sold_today") is String and data.sold_today.is_valid_int()
 
 func open_shop(npc_id: String) -> void:
 	if valid_npc_id(npc_id):
 		_npc_id = npc_id
+		_shop_kind = "shop"
 		_send("/shops/" + npc_id, HTTPClient.METHOD_GET, "", _on_goods)
+
+## Goods an NPC found on the ground and keeps in their pack.
+func open_found(npc_id: String) -> void:
+	if valid_npc_id(npc_id):
+		_npc_id = npc_id
+		_shop_kind = "found"
+		_send("/npcs/" + npc_id.uri_encode() + "/found", HTTPClient.METHOD_GET, "", _on_goods)
 
 func buy(item_id: String, quantity: int) -> void:
 	_deal("buy", item_id, quantity)
 
 func sell(item_id: String, quantity: int) -> void:
+	if _shop_kind == "found":
+		return
 	_deal("sell", item_id, quantity)
+
+func repair(item_id: String) -> void:
+	if _shop_kind == "found" or _npc_id.is_empty() or item_id.is_empty() or item_id.length() > 64:
+		return
+	_send("/shops/%s/repair" % _npc_id, HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}), _after_deal)
 
 func _deal(kind: String, item_id: String, quantity: int) -> void:
 	if _npc_id.is_empty() or item_id.is_empty() or item_id.length() > 64 or quantity < 1 or quantity > 1000:
+		return
+	if _shop_kind == "found":
+		if kind != "buy":
+			return
+		_send("/npcs/%s/found/buy" % _npc_id.uri_encode(), HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
 		return
 	_send("/shops/%s/%s" % [_npc_id, kind], HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
 
 func close_shop() -> void:
 	_npc_id = ""
+	_shop_kind = "shop"
 
 func _on_goods(result: int, code: int, reply: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
@@ -93,21 +132,30 @@ func _after_deal(result: int, code: int, reply: PackedByteArray) -> void:
 		return
 	changed.emit()
 	if not _npc_id.is_empty():
-		open_shop(_npc_id)
+		if _shop_kind == "found":
+			open_found(_npc_id)
+		else:
+			open_shop(_npc_id)
 
 ## Message key for a refused shop action; fixed keys, never the server text.
 static func shop_error_key(code: int, text: String) -> String:
 	match text.strip_edges():
-		"merchant is out of reach":
+		"merchant is out of reach", "character is out of reach":
 			return "The merchant is out of reach"
 		"not enough to pay":
 			return "Not enough gold or items"
+		"not enough stock":
+			return "Nothing left to buy"
 		"the merchant pays no more today":
 			return "The merchant pays no more today"
 		"inventory is full", "stack is full":
 			return "Inventory is full"
-		"the merchant does not sell this", "the merchant does not buy this":
+		"the merchant does not sell this", "the merchant does not buy this", "the merchant does not repair this":
 			return "The merchant does not trade this"
+		"nothing to repair", "this cannot be repaired":
+			return "Nothing to repair"
+		"already in good repair":
+			return "Already in good repair"
 		"invalid quantity":
 			return "Invalid quantity"
 	return "Too many actions" if code == 429 else "Trade unavailable"

@@ -94,6 +94,9 @@ var lamps: Node3D
 ## Things that characters built or planted: {"node", "entry"} for each.
 var placed: Node3D
 var _placed_entries: Array[Dictionary] = []
+## Items dropped on the ground nearby (server `loot` list).
+var loot: Node3D
+var _loot_entries: Array[Dictionary] = []
 var _prop_entries: Array = []
 var _lamp_positions: Array = []
 var _night := 0.0
@@ -203,6 +206,10 @@ func _ready() -> void:
 	placed = Node3D.new()
 	add_child(placed)
 	placed.top_level = true
+	loot = Node3D.new()
+	loot.name = "Loot"
+	add_child(loot)
+	loot.top_level = true
 
 func _process(delta: float) -> void:
 	_swim()
@@ -299,9 +306,10 @@ func clear_world() -> void:
 	_origin_metres.clear()
 	placements.clear()
 	_clear_placed()
+	_clear_loot()
 	for child in get_children():
 		# Nodes of the owner that live under the environment (such as the other players) stay.
-		if child != detail and child != grass and child != objects and child != memorials and child != portals and child != npcs and child != props and child != lamps and child != placed and not child.has_meta("persistent"):
+		if child != detail and child != grass and child != objects and child != memorials and child != portals and child != npcs and child != props and child != lamps and child != placed and child != loot and not child.has_meta("persistent"):
 			remove_child(child)
 			child.queue_free()
 	_clear_region()
@@ -473,6 +481,7 @@ func _clear_objects() -> void:
 	_memorial_entries.clear()
 	_clear_npcs()
 	_clear_props()
+	_clear_loot()
 	for child in memorials.get_children():
 		memorials.remove_child(child)
 		child.queue_free()
@@ -793,6 +802,7 @@ func apply_objects(data: Variant) -> bool:
 	apply_npcs(data.get("npcs", []))
 	apply_props(data.get("props", []))
 	apply_areas(data.get("areas", []))
+	apply_loot(data.get("loot", []))
 	if not apply_terrains(data.get("terrains", [])):
 		return false
 	objects_loaded = true
@@ -1878,6 +1888,62 @@ func _clear_placed() -> void:
 		placed.remove_child(child)
 		child.queue_free()
 
+## Loose packs lying on the ground. Drawn as floating item icons.
+func apply_loot(data: Variant) -> void:
+	_clear_loot()
+	if not data is Array or data.size() > 200:
+		return
+	var icons := preload("res://scripts/item_icons.gd")
+	for entry: Variant in data:
+		if not entry is Dictionary or not (entry.get("id") is float or entry.get("id") is int):
+			continue
+		if not entry.get("item_id") is String or not entry.get("name") is String:
+			continue
+		var pos_ok := true
+		for key in ["position_x", "position_y", "position_z"]:
+			if not (entry.get(key) is float or entry.get(key) is int) or not is_finite(float(entry[key])):
+				pos_ok = false
+				break
+		if not pos_ok:
+			continue
+		var metres := [float(entry.position_x), float(entry.position_y), float(entry.position_z)]
+		var point := Vector3(metres[0], metres[1], metres[2]) / 1000.0
+		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
+			continue
+		var marker := Node3D.new()
+		marker.name = "Loot%d" % int(entry.id)
+		marker.position = _render_position(metres) + point.normalized() * 0.0004
+		var sprite := Sprite3D.new()
+		sprite.texture = icons.texture(entry.item_id)
+		sprite.pixel_size = 0.004
+		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sprite.shaded = false
+		sprite.double_sided = true
+		sprite.position = Vector3(0, 0.35, 0)
+		marker.add_child(sprite)
+		loot.add_child(marker)
+		_loot_entries.append(entry.duplicate(true))
+
+func _clear_loot() -> void:
+	_loot_entries.clear()
+	if not is_instance_valid(loot):
+		return
+	for child in loot.get_children():
+		loot.remove_child(child)
+		child.queue_free()
+
+## The nearest dropped pile within reach of a position in metres.
+func nearest_loot(player_metres: Vector3, reach_m: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for entry: Dictionary in _loot_entries:
+		var at := Vector3(float(entry.position_x), float(entry.position_y), float(entry.position_z))
+		var distance := player_metres.distance_to(at)
+		if distance <= reach_m and distance < best_distance:
+			best = entry
+			best_distance = distance
+	return best
+
 ## The nearest thing that characters put into the world within reach of a position in metres.
 func nearest_placed(player_metres: Vector3, reach_m: float) -> Dictionary:
 	var best := {}
@@ -2426,6 +2492,11 @@ func _place_object(entry: Dictionary) -> void:
 	var point := Vector3(entry.position[0] / 1000.0, entry.position[1] / 1000.0, entry.position[2] / 1000.0)
 	placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
 	placement.scale = Vector3.ONE * entry.scale_m / 1000.0
+	# Vertical placement offset in metres (negative sinks into the ground); 0 A.D. trees
+	# have roots at Y=0 but their trunks start higher, so they appear to float without this.
+	var ground_offset: float = entry.get("ground_offset_m", 0.0)
+	if ground_offset != 0.0:
+		model.position.y = ground_offset / float(entry.scale_m)
 	if swimmer != null:
 		swimmer.add_child(model)
 		placement.add_child(swimmer)
