@@ -24,6 +24,8 @@ signal portal_received(portal: Dictionary)
 signal portal_closed
 
 const CATALOG := preload("res://scripts/character_catalog.gd")
+## After this many lost moves in a row the player is told once; walking keeps retrying.
+const MOVE_FAILURE_NOTICE := 5
 var server_url := ""
 var busy := false
 var _token := ""
@@ -33,6 +35,8 @@ var _timer: Timer
 var _move_request: HTTPRequest
 var _move_sequence := 0
 var _movement_available := true
+## Consecutive move requests lost to timeouts, rate limits or server errors.
+var _move_failures := 0
 
 func _ready() -> void:
 	_timer = Timer.new()
@@ -55,6 +59,7 @@ func configure(url: String) -> void:
 	_move_request = null
 	_move_sequence = 0
 	_movement_available = true
+	_move_failures = 0
 	_token = ""
 	server_url = url
 	_timer.stop()
@@ -458,9 +463,17 @@ func _move_received(result: int, code: int, _headers: PackedStringArray, body: P
 		failed.emit("Player is dead" if code == 410 else "Invalid credentials or expired session")
 		return
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
-		_movement_available = false
-		failed.emit("Movement unavailable")
+		# A missing endpoint really means walking is off. A timeout, 429 or brief proxy glitch must not
+		# lock the character in place (while drowning that is fatal): the next intent retries.
+		if code in [400, 404, 405, 422, 501]:
+			_movement_available = false
+			failed.emit("Movement unavailable")
+			return
+		_move_failures += 1
+		if _move_failures == MOVE_FAILURE_NOTICE:
+			failed.emit("Movement interrupted")
 		return
+	_move_failures = 0
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
 	if not data is Dictionary or not data.get("position") is Dictionary or not data.get("moving") is bool:
 		_movement_available = false
