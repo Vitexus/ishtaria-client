@@ -34,6 +34,15 @@ const RADIUS := 6371.0
 ## A swimmer floats with the feet this far (km) under the water surface, chest-deep; the paddling clip is slowed.
 const SWIM_DRAFT_KM := 0.0012
 const SWIM_SPEED_SCALE := 0.55
+## Metres per second of the pack characters' walking clip at speed 1 (it is a run).
+const WALK_CLIP_PACE := 4.0
+## How much faster than its own pace a walking clip may play.
+const MAX_WALK_SCALE := 3.5
+## Fallback when a datadisk Walk cannot be measured (same authored pace as story NPCs).
+const DISK_WALK_PACE := 1.0
+## Share of a walking cycle a foot stands on the ground, and the poses sampled to find the stride.
+const WALK_STANCE_SHARE := 0.6
+const WALK_PACE_SAMPLES := 24
 ## With the swimming clip the body lies on the water, hips 0.9 m above the feet: the back should just break the surface.
 const SWIM_CLIP_DRAFT_KM := 0.0009
 ## The camera looks over the shoulder of its character at the closest zoom and from the middle from this distance (metres, before the
@@ -61,6 +70,9 @@ var _animation: AnimationPlayer
 var _motion_until := 0
 var _last_position_ms := 0
 var _walk_speed := 1.0
+## Metres per second the walking clip shows at its own speed. The pack characters' "walk" is a run
+## made for the server's 4 m/s; a datadisk's own model is measured when it is put on (see `_bind_animation`).
+var _walk_pace := WALK_CLIP_PACE
 var _position_target := Vector3.ZERO
 var _ground_surface: Node
 var airborne := false
@@ -185,7 +197,7 @@ func start(character: String, point: Vector3, coordinates: Dictionary = {}) -> v
 		_character = character
 		avatar.scale = Vector3.ONE * 0.001
 		add_child(avatar)
-		_animation = avatar.get_node_or_null("CharacterAnimation")
+		_bind_animation()
 	avatar.position = point
 	_position_target = point
 	_anchor_metres = [coordinates.get("x", point.x * 1000.0), coordinates.get("y", point.y * 1000.0), coordinates.get("z", point.z * 1000.0)]
@@ -210,7 +222,7 @@ func reload_avatar() -> void:
 	avatar.queue_free()
 	avatar = fresh
 	add_child(avatar)
-	_animation = avatar.get_node_or_null("CharacterAnimation")
+	_bind_animation()
 
 ## Story handed the player another body: keep position and control, change the look.
 func swap_character(character: String) -> void:
@@ -230,7 +242,7 @@ func swap_character(character: String) -> void:
 		avatar.position = _position_target
 		avatar.basis = Basis.looking_at(-_forward, direction).scaled(Vector3.ONE * 0.001)
 		add_child(avatar)
-		_animation = avatar.get_node_or_null("CharacterAnimation")
+		_bind_animation()
 
 
 func stop() -> void:
@@ -315,12 +327,21 @@ func apply_position(data: Variant, is_moving: bool) -> bool:
 	_position_target = Vector3((float(data.x) - _anchor_metres[0]) / 1000.0, (float(data.y) - _anchor_metres[1]) / 1000.0, (float(data.z) - _anchor_metres[2]) / 1000.0) if origin != Vector3.ZERO else point
 	var now := Time.get_ticks_msec()
 	var travelled := _position_target.distance_to(previous) * 1000.0
-	moving = is_moving and travelled > 0.0001
-	if moving:
-		_walk_speed = clampf(travelled / maxf((now - _last_position_ms) / 1000.0, 0.04) / 4.0, 0.2, 1.5)
-		_motion_until = now + 350
+	# Keep walking through brief zero-travel acks so the clip finishes its cycle (otherwise it
+	# restarts every few frames and looks like jerks of a few centimetres).
+	if is_moving:
+		if travelled > 0.0001:
+			_walk_speed = clampf(
+				travelled / maxf((now - _last_position_ms) / 1000.0, 0.04) / _walk_pace,
+				0.35,
+				MAX_WALK_SCALE
+			)
+		moving = true
+		_motion_until = now + 400
+	else:
+		moving = false
 	_last_position_ms = now
-	_play_animation(moving and active and intent().length_squared() > 0.0001)
+	_play_animation(_wants_walk())
 	return true
 
 ## A swing of the tool or weapon. Disk models with combat clips play `box` / `kick` / `sweep`
@@ -426,12 +447,15 @@ func _end_glow() -> void:
 	_glow_surfaces.clear()
 	_glow_until = 0
 
+func _wants_walk() -> bool:
+	return active and intent().length_squared() > 0.0001 and (moving or Time.get_ticks_msec() < _motion_until)
+
 func _process(delta: float) -> void:
 	_update_glow()
 	if active and is_instance_valid(avatar):
 		avatar.position = avatar.position.lerp(_position_target, 1.0 - exp(-18.0 * delta))
 		_ground_avatar(_ground_surface)
-	_play_animation(active and moving and Time.get_ticks_msec() < _motion_until and intent().length_squared() > 0.0001)
+	_play_animation(_wants_walk())
 
 func _ground_avatar(surface: Node) -> void:
 	if airborne or on_object or not is_instance_valid(surface) or not is_instance_valid(avatar) or origin == Vector3.ZERO:
@@ -467,14 +491,21 @@ func play_death(cause := "") -> void:
 	_animation.speed_scale = 1.0
 	_animation.play(clip, 0.1)
 
+## Soft quest death: get up again after the funeral notice (health was restored on the server).
+func clear_death() -> void:
+	if not _dying:
+		return
+	_dying = false
+	_play_animation(moving)
+
 func _death_clip(cause: String) -> String:
 	var preferred: Array[String] = []
 	match cause:
-		"fall":
+		"fall", "falling_tree":
 			preferred = ["die", "die2", "dieleft"]
-		"creature":
+		"creature", "hostile_player":
 			preferred = ["dieleft", "die2", "die", "hit"]
-		"exhaustion", "dehydration":
+		"exhaustion", "dehydration", "starvation", "drowning":
 			preferred = ["die2", "die", "dieleft"]
 		_:
 			preferred = ["die", "die2", "dieleft"]
@@ -499,8 +530,55 @@ func set_swimming(value: bool) -> void:
 	_play_animation(moving)
 
 func set_sitting(value: bool) -> void:
+	# Every move ack reports sitting; re-entering idle here restarts Walk mid-cycle.
+	if value == sitting:
+		return
 	sitting = value
-	_play_animation(false)
+	_play_animation(false if value else _wants_walk())
+
+## Takes the avatar's player and, for a datadisk's model, how fast its walking clip walks: the feet
+## are followed through one cycle and the distance a foot slides back while it stands is the
+## ground the body covers. Played at this pace the feet keep their place on the ground; played as
+## a pack run at 4 m/s, a real walk made short incomplete steps while the figure slid along.
+func _bind_animation() -> void:
+	_animation = avatar.get_node_or_null("CharacterAnimation")
+	_walk_pace = WALK_CLIP_PACE
+	if not is_instance_valid(_animation):
+		return
+	if not (is_instance_valid(avatar) and avatar.has_meta("disk_model")):
+		return
+	_walk_pace = DISK_WALK_PACE
+	if not _animation.has_animation("walk"):
+		if _animation.has_animation("idle"):
+			_animation.play("idle")
+		return
+	var skeletons := avatar.find_children("*", "Skeleton3D", true, false)
+	if skeletons.is_empty():
+		_animation.play("idle" if _animation.has_animation("idle") else "walk")
+		return
+	var skeleton := skeletons[0] as Skeleton3D
+	var feet: Array[int] = []
+	for bone in skeleton.get_bone_count():
+		if skeleton.get_bone_name(bone).to_lower().contains("foot"):
+			feet.append(bone)
+	var clip := _animation.get_animation("walk")
+	var stride := 0.0
+	for foot in feet:
+		var low := Vector3.INF
+		var high := -Vector3.INF
+		for sample in WALK_PACE_SAMPLES:
+			_animation.play("walk")
+			_animation.seek(clip.length * float(sample) / float(WALK_PACE_SAMPLES), true)
+			var point := avatar.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(foot).origin
+			low = low.min(point)
+			high = high.max(point)
+		# Avatar space without its scale to kilometres: metres the server moves the body through
+		# (a disk model is drawn GLTF_UNITS_PER_METRE times its authored metres).
+		var reach := (high - low) * avatar.scale.x * 1000.0
+		stride = maxf(stride, maxf(reach.x, reach.z))
+	_animation.play("idle" if _animation.has_animation("idle") else "walk")
+	if stride > 0.1 and clip.length > 0.1:
+		_walk_pace = clampf(stride / (WALK_STANCE_SHARE * clip.length), 0.5, WALK_CLIP_PACE)
 
 func _has_clip(name: String) -> bool:
 	return is_instance_valid(_animation) and _animation.has_animation(name)

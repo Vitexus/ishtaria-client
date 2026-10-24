@@ -6,13 +6,14 @@ const RPG := "res://assets/kenney/ui-rpg/PNG/"
 
 # Minimap sizes: small mode (always visible corner) and big mode (full screen)
 const MINIMAP_SIZE_SMALL := 128
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 
 # Margin from edge for small mode
 const MARGIN := 16
 
 # Scale indicator
 const SCALE_INDICATOR_SIZE := 14
-const SCALE_INDICATOR_COLOR := Color(0.8, 0.8, 0.8)
+const SCALE_INDICATOR_COLOR := UiTheme.SAND
 ## Half zoom still shows ~400 m; big-map mode allows a much wider view so a city disk fits.
 const MIN_ZOOM := 0.5
 const MIN_ZOOM_BIG := 0.08
@@ -22,15 +23,24 @@ const ZOOM_STEP := 0.25
 # Colors with good contrast
 const PLAYER_COLOR := Color(1.0, 1.0, 1.0)
 const NORTH_COLOR := Color(1.0, 0.35, 0.3)
-const BACKGROUND_COLOR := Color(0.08, 0.1, 0.12, 0.85)
+## Dark fired clay, like the panels of the interface.
+const BACKGROUND_COLOR := Color(0.15, 0.1, 0.07, 0.9)
 const ROAD_COLOR := Color(0.62, 0.55, 0.42, 0.95)
 const BUILDING_COLOR := Color(0.55, 0.62, 0.60, 0.95)
 const WATER_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 const LEGEND_SWATCH := 12
-const NPC_COLOR := Color(1.0, 0.65, 0.0)
+## Characters the player may fight (struck NPCs, lasting hostility).
+const HOSTILE_COLOR := Color(0.95, 0.22, 0.18)
+## Escorted friends (green health bar on the character).
+const FRIENDLY_COLOR := Color(0.28, 0.88, 0.35)
+## Townsfolk, story NPCs and other players with no fight stance.
+const NEUTRAL_COLOR := Color(0.62, 0.62, 0.64)
+## Loose piles and the player's own placed things that can be picked up.
+const PICKUP_COLOR := Color(1.0, 1.0, 1.0)
 const PLACE_COLOR := Color(0.2, 0.8, 1.0)
 const OBJECT_COLOR := Color(0.4, 1.0, 0.4)
 const QUEST_COLOR := Color(1.0, 0.4, 0.8)
+const PICKUP_ICON_SIZE := 6
 const LABEL_COLOR := Color(1.0, 1.0, 1.0)
 const GOAL_COLOR := Color(1.0, 0.85, 0.3)
 const GOAL_CLOSER_COLOR := Color(0.45, 1.0, 0.5)
@@ -74,7 +84,7 @@ var _prop_overlay: PropOverlay
 var _legend: Control
 var _player_marker: Sprite2D
 var _north_marker: Sprite2D
-var _border: ColorRect
+var _border: NinePatchRect
 var _scale_bar: ColorRect
 var _scale_label: Label
 var _goal_overlay: GoalOverlay
@@ -114,8 +124,9 @@ func _apply_size() -> void:
 	_background.position = size / 2.0
 	_player_marker.position = size / 2.0
 	_north_marker.position = Vector2(size.x / 2.0, minf(size.y * 0.1, 24.0))
-	_border.position = Vector2(-2, -2)
-	_border.size = size + Vector2(4, 4)
+	# The gold frame overlaps the map's edge by a few pixels, like the HUD's.
+	_border.position = Vector2(-4, -4)
+	_border.size = size + Vector2(8, 8)
 	_legend.visible = _big_mode
 	_legend.position = Vector2(12.0, 12.0)
 	_update_scale_bar()
@@ -125,9 +136,10 @@ func _update_scale_bar() -> void:
 	var size := _get_size()
 	var length := 50.0 * _pixels_per_metre()
 	_scale_bar.size = Vector2(length, 3)
-	_scale_bar.position = Vector2(8, size.y - 10)
+	# Beside the corner knot of the frame.
+	_scale_bar.position = Vector2(18, size.y - 12)
 	_scale_label.text = "50 m"
-	_scale_label.position = Vector2(8, size.y - 28)
+	_scale_label.position = Vector2(18, size.y - 32)
 
 
 func _ready() -> void:
@@ -215,27 +227,41 @@ func _ready() -> void:
 	_scale_label.name = "ScaleLabel"
 	_scale_label.text = "100m"
 	_scale_label.self_modulate = SCALE_INDICATOR_COLOR
+	_scale_label.add_theme_font_size_override("font_size", 13)
+	_scale_label.add_theme_color_override("font_outline_color", UiTheme.CLAY_DARK)
+	_scale_label.add_theme_constant_override("outline_size", 4)
 	_scale_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_scale_label.position = Vector2(0, 2)
 	_minimap_panel.add_child(_scale_label)
 	
 	# Add border
-	_border = ColorRect.new()
+	_border = NinePatchRect.new()
 	_border.name = "Border"
-	_border.color = Color(0.2, 0.2, 0.2, 0.8)
-	_border.position = Vector2(-2, -2)
-	_border.show_behind_parent = true
+	# At its own pixel size: twice as large, the corner knots would cover a small map.
+	_border.texture = load(UiTheme.FRAME_TEXTURE)
+	for side in ["left", "right", "top", "bottom"]:
+		_border.set("patch_margin_" + side, 16)
+	_border.modulate = UiTheme.GOLD
+	_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_minimap_panel.add_child(_border)
 
-	# Legend of the big map: what the water, road and building colours mean.
+	# Legend of the big map: terrain colours and the character / pickup markers.
 	_legend = HBoxContainer.new()
 	_legend.name = "Legend"
 	_legend.add_theme_constant_override("separation", 8)
 	_legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for entry in [["water", "Water"], ["road", "Road"], ["building", "Building"]]:
+	for entry in [
+		["water", "Water", WATER_COLOR],
+		["road", "Road", ROAD_COLOR],
+		["building", "Building", BUILDING_COLOR],
+		["neutral", "Neutral", NEUTRAL_COLOR],
+		["friendly", "Friendly", FRIENDLY_COLOR],
+		["hostile", "Hostile", HOSTILE_COLOR],
+		["pickup", "Item", PICKUP_COLOR],
+	]:
 		var swatch := ColorRect.new()
 		swatch.custom_minimum_size = Vector2(LEGEND_SWATCH, LEGEND_SWATCH)
-		swatch.color = WATER_COLOR if entry[0] == "water" else (ROAD_COLOR if entry[0] == "road" else BUILDING_COLOR)
+		swatch.color = entry[2]
 		_legend.add_child(swatch)
 		var label := Label.new()
 		label.text = entry[1]
@@ -354,23 +380,24 @@ func _update_entity_markers() -> void:
 				entry["kind"] = kind
 				entry["name"] = name
 				entry["marker"].texture = _get_entity_icon_texture(kind)
-				entry["label"].texture = _get_letter_texture(name.substr(0, 1).to_upper())
+				if kind != "pickup" and not name.is_empty():
+					entry["label"].texture = _get_letter_texture(name.substr(0, 1).to_upper())
 			continue
 		
 		# Create new marker
 		var marker: Sprite2D = Sprite2D.new()
 		marker.name = "EntityIcon_" + entity_id
 		marker.texture = _get_entity_icon_texture(kind)
-		marker.z_index = 1
+		marker.z_index = 1 if kind != "pickup" else 0
 		_render_node.add_child(marker)
 		
-		# Create name label as a Sprite2D with pre-rendered text
+		# Create name label as a Sprite2D with pre-rendered text (pickups are dots only).
 		var label: Sprite2D = Sprite2D.new()
 		label.name = "EntityLabel_" + entity_id
 		var label_char: String = name.substr(0, 1).to_upper() if not name.is_empty() else "?"
 		label.texture = _get_letter_texture(label_char)
 		label.z_index = 2
-		label.visible = _zoom_level >= 0.75
+		label.visible = kind != "pickup" and _zoom_level >= 0.75
 		_render_node.add_child(label)
 		
 		_entity_markers[entity_id] = {
@@ -434,7 +461,7 @@ func _update_minimap() -> void:
 				label.visible = false
 				continue
 			marker.visible = true
-			label.visible = _zoom_level >= 0.75
+			label.visible = entry.get("kind", "") != "pickup" and _zoom_level >= 0.75
 			var point := centre + _to_map(relative_pos, basis) * scale_px
 			marker.position = point
 			label.position = point + Vector2(0, 10)
@@ -484,8 +511,14 @@ func _get_letter_texture(letter: String) -> Texture2D:
 
 func _get_kind_color(kind: String) -> Color:
 	match kind.to_lower():
-		"npc", "character":
-			return NPC_COLOR
+		"hostile":
+			return HOSTILE_COLOR
+		"friendly":
+			return FRIENDLY_COLOR
+		"neutral", "npc", "character":
+			return NEUTRAL_COLOR
+		"pickup":
+			return PICKUP_COLOR
 		"place", "landmark", "building":
 			return PLACE_COLOR
 		"quest":
@@ -822,22 +855,33 @@ func _create_letter_texture(letter: String, color: Color) -> Texture2D:
 
 
 func _create_entity_icon(kind: String, color: Color) -> Texture2D:
-	var size: int = ICON_SIZE
+	var kind_key := kind.to_lower()
+	var size: int = PICKUP_ICON_SIZE if kind_key == "pickup" else ICON_SIZE
 	var image: Image = Image.create(size, size, false, Image.FORMAT_RGBA8)
 	image.fill(Color.TRANSPARENT)
 	
 	# Add dark outline for better visibility
 	var outline_color: Color = Color(0.15, 0.15, 0.15, 0.8)
 	
-	match kind.to_lower():
-		"npc", "character":
-			# Diamond shape for NPCs with outline
+	match kind_key:
+		"hostile", "friendly", "neutral", "npc", "character":
+			# Diamond for characters; colour tells foe / friend / neutral.
 			for y in range(size):
 				for x in range(size):
 					var dist: float = sqrt(pow(x - size/2, 2) + pow(y - size/2, 2))
 					if dist <= size/2 - 0.5:
 						image.set_pixel(x, y, color)
 					elif dist <= size/2 + 0.5:
+						image.set_pixel(x, y, outline_color)
+			
+		"pickup":
+			# Small white dot for piles and pickable placed things.
+			for y in range(size):
+				for x in range(size):
+					var dist: float = sqrt(pow(x - size/2.0, 2) + pow(y - size/2.0, 2))
+					if dist <= size/2.0 - 0.5:
+						image.set_pixel(x, y, color)
+					elif dist <= size/2.0:
 						image.set_pixel(x, y, outline_color)
 			
 		"place", "building", "landmark":

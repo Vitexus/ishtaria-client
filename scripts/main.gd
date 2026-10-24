@@ -5,6 +5,8 @@ extends Node3D
 const PLANET_RADIUS := 6371.0 # scene units = km in this preview
 const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
 const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
 const MIN_SERVER_VERSION := "0.1.0"
 const APPROACH_SECONDS := 14.0
 ## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
@@ -20,6 +22,8 @@ const TALK_REACH_M := 4.5
 ## Animals walk about, so these are a little generous; the server checks the reach again.
 const ANIMAL_REACH_M := 4.0
 const MILK_REACH_M := 3.0
+## Server graves allow 3 m; stay a little under so the edge is not refused.
+const GRAVE_REACH_M := 2.8
 
 static func parse_version(text: String) -> Array[int]:
 	return preload("res://scripts/server_history.gd").parse_version(text)
@@ -77,6 +81,9 @@ var _remote_players: Node3D
 var _trading: Node
 var _placed: Node
 var _magic: Node
+var _achievements: Node
+var _achievements_panel: CanvasLayer
+var _achievement_toast: CanvasLayer
 var _love: Node
 var _love_overlay: Node3D
 var _known_spells: Array = []
@@ -89,6 +96,10 @@ var _dialogue: CanvasLayer
 var _dialogue_npc := ""
 ## Set when the player picks the injected apology choice (65000); cleared on the reply.
 var _pending_apology := false
+## Popup when the character dies permanently (memorial + new character).
+var _death_dialog: AcceptDialog
+## Soft death during a story quest: dialog confirms revive, not a new character.
+var _quest_soft_death := false
 var _quest_log: CanvasLayer
 var _quest_indicator: CanvasLayer
 var _tablet: CanvasLayer
@@ -97,6 +108,10 @@ var _minimap: CanvasLayer
 var _story_markers: Array = []
 var _quest_stages: Dictionary = {}
 var _quests_baseline := false
+## Quest with an excerpt waiting until the landing settle finishes (auto-start at the water-hole).
+var _pending_prologue: Dictionary = {}
+## True from the start of a space approach until the camera settle hands control to the player.
+var _landing_prologue := false
 ## A tool the player chose to use from the inventory that is still being put in hand.
 var _pending_tool := ""
 ## A drink was requested and its answer has not arrived yet.
@@ -129,6 +144,12 @@ var _terrain_material: ShaderMaterial
 var _terrain_request: HTTPRequest
 var _terrain_loaded := false
 var _connection_panel: PanelContainer
+var _connection_card: Control
+var _connection_commands: GridContainer
+var _connection_wordmark: Control
+var _connection_close: Button
+var _connection_title: Label
+var _connection_dividers: Array[Control] = []
 var _environment: Node3D
 var _environment_request: HTTPRequest
 var _world_metadata: Dictionary = {}
@@ -149,6 +170,9 @@ func _install_cursors() -> void:
 
 func _ready() -> void:
 	_install_cursors()
+	# One theme for every panel and window (scripts/ui/ui_theme.gd). The panels live on their own
+	# CanvasLayers, which stop theme inheritance, so it goes into the default theme they all fall back to.
+	ThemeDB.get_default_theme().merge_with(UiTheme.get_theme())
 	var planet := MeshInstance3D.new()
 	planet.name = "Planet"
 	var mesh := SphereMesh.new()
@@ -253,6 +277,7 @@ func _ready() -> void:
 	var saved_sound: Variant = settings.get_value("audio", "interface_sounds", true)
 	_audio.enabled = saved_sound if saved_sound is bool else true
 	add_child(_audio)
+	UiKit.audio = _audio
 	_hud = preload("res://scripts/player_hud.gd").new()
 	_hud.sky = _sky
 	_hud.sound_enabled = _audio.enabled
@@ -279,36 +304,32 @@ func _ready() -> void:
 	_toast = preload("res://scripts/action_toast.gd").new()
 	add_child(_toast)
 	_survival = preload("res://scripts/survival_panel.gd").new()
-	_survival.eat_requested.connect(_session.eat)
+	_survival.eat_requested.connect(_eat_item)
 	_survival.new_character_requested.connect(_new_character)
-	_survival.loot_requested.connect(_session.loot)
-	_survival.equip_requested.connect(_session.equip)
+	_survival.loot_requested.connect(_loot_item)
+	_survival.equip_requested.connect(_equip_item)
 	_survival.use_requested.connect(_use_tool)
 	_survival.place_requested.connect(_place_item.bind(false))
 	_survival.plant_requested.connect(_place_item.bind(true))
-	_survival.unequip_requested.connect(_session.unequip)
-	_survival.unequip_offhand_requested.connect(_session.unequip.bind("offhand"))
-	_survival.unequip_slot_requested.connect(_session.unequip)
-	_survival.drop_requested.connect(_session.drop_item)
+	_survival.unequip_requested.connect(func() -> void: _equip_slot("hand", true))
+	_survival.unequip_offhand_requested.connect(func() -> void: _equip_slot("offhand", true))
+	_survival.unequip_slot_requested.connect(func(slot: String) -> void: _equip_slot(slot, true))
+	_survival.drop_requested.connect(_drop_item)
 	_session.ground_changed.connect(_environment.refresh_objects)
 	_session.blocked.connect(_on_blocked)
 	_crafting = preload("res://scripts/crafting_panel.gd").new()
 	_crafting.craft_requested.connect(_session.craft.bind(1))
 	_crafting.recipes_requested.connect(_session.fetch_recipes)
 	_session.recipes_received.connect(_crafting.set_recipes)
-	_session.obituary_received.connect(func(notice: Dictionary) -> void:
-		var cause := ""
-		if notice.get("death_cause") is String:
-			cause = notice.death_cause
-		elif notice.get("cause") is String:
-			cause = notice.cause
-		_controls.play_death(cause)
-		_creator.password_input.clear()
-		_creator.hide()
-		_survival.show_obituary(notice)
-	)
+	_session.obituary_received.connect(_on_obituary)
+	_death_dialog = AcceptDialog.new()
+	_death_dialog.title = tr("You have died")
+	_death_dialog.ok_button_text = tr("Continue")
+	_death_dialog.dialog_hide_on_ok = true
+	_death_dialog.confirmed.connect(_on_death_dialog_confirmed)
+	add_child(_death_dialog)
 	_session.grave_changed.connect(_survival.set_grave)
-	_session.busy_changed.connect(_survival.set_busy)
+	_session.busy_changed.connect(_sync_action_busy)
 	_session.busy_changed.connect(_crafting.set_busy)
 	_session.failed.connect(_on_survival_or_craft_failed)
 	_portals = preload("res://scripts/portal_panel.gd").new()
@@ -334,7 +355,18 @@ func _ready() -> void:
 	_escape_menu.settings_requested.connect(_open_settings_from_menu)
 	_escape_menu.quit_requested.connect(func() -> void: get_tree().quit())
 	_escape_menu.friends_requested.connect(_open_friends)
+	_escape_menu.achievements_requested.connect(_open_achievements)
+	_escape_menu.main_menu_requested.connect(_go_to_main_menu)
 	add_child(_escape_menu)
+	_achievements = preload("res://scripts/achievements_client.gd").new()
+	add_child(_achievements)
+	_achievements_panel = preload("res://scripts/achievements_panel.gd").new()
+	add_child(_achievements_panel)
+	_achievement_toast = preload("res://scripts/achievement_toast.gd").new()
+	_achievement_toast.audio = _audio
+	add_child(_achievement_toast)
+	_achievements.loaded.connect(_achievements_panel.show_data)
+	_achievements.unlocked.connect(_achievement_toast.show_achievement)
 	_social = preload("res://scripts/social.gd").new()
 	add_child(_social)
 	_chat = preload("res://scripts/chat_feed.gd").new()
@@ -363,12 +395,14 @@ func _ready() -> void:
 	_placed.placed_loaded.connect(_environment.apply_placed)
 	_placed.done.connect(_on_placed_done)
 	_placed.failed.connect(_on_placed_failed)
+	_placed.busy_changed.connect(_sync_action_busy)
 	_magic = preload("res://scripts/magic_client.gd").new()
 	add_child(_magic)
 	_magic.spells_loaded.connect(_on_spells_loaded)
 	_magic.cast_done.connect(_on_cast_done)
 	_magic.learned.connect(_on_spell_learned)
 	_magic.failed.connect(_on_placed_failed)
+	_magic.busy_changed.connect(_sync_action_busy)
 	_love = preload("res://scripts/love_client.gd").new()
 	add_child(_love)
 	_love.won.connect(_on_love_won)
@@ -376,7 +410,7 @@ func _ready() -> void:
 	_love_overlay.top_level = true
 	_environment.add_child(_love_overlay)
 	_love_overlay.setup(_love, _environment)
-	_survival.learn_requested.connect(_magic.learn)
+	_survival.learn_requested.connect(_learn_scroll)
 	_survival.cast_requested.connect(_cast_spell)
 	_remote_players = preload("res://scripts/remote_players.gd").new()
 	_remote_players.environment = _environment
@@ -436,6 +470,10 @@ func _ready() -> void:
 	add_child(_quest_indicator)
 	_tablet = preload("res://scripts/tablet_panel.gd").new()
 	_tablet.story = _story
+	_tablet.voice_enabled = _audio.enabled
+	_tablet.set_voice_volume(float(saved_voice) if saved_voice is float or saved_voice is int else 1.0)
+	_control_settings.bind_tablet(_tablet)
+	_story.media_ready.connect(_tablet.media_ready)
 	_tablet.closed.connect(func() -> void:
 		if _controls.active and not _game_ui_open():
 			_controls.capture_mouse()
@@ -506,138 +544,205 @@ func _ready() -> void:
 		_creator.set_selection(saved_character)
 	_creator.hide()
 
+## The title screen and server window: the Ishtaria wordmark over a framed clay card in the middle
+## of the dimmed scene, so the planet keeps turning behind it. It scrolls when the window is short.
 func _build_connection_controls() -> void:
 	var layer := CanvasLayer.new()
+	# Above the HUD and the game panels, below the character creator and the ESC menu.
+	layer.layer = 6
 	add_child(layer)
 	var panel := PanelContainer.new()
 	_connection_panel = panel
+	panel.name = "ConnectionPanel"
 	layer.add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color(0.07, 0.08, 0.09, 0.95)
-	panel.add_theme_stylebox_override("panel", background)
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	panel.add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	margin.add_child(column)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	# Only the card takes the pointer: the HUD buttons around it stay usable, as before.
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var veil := UiKit.backdrop(0.6)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(veil)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(scroll)
+	var center := CenterContainer.new()
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(center)
+	var holder := VBoxContainer.new()
+	holder.add_theme_constant_override("separation", 6)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(holder)
+	var wordmark := load("res://assets/branding/wordmark.png") as Texture2D
+	if wordmark != null:
+		var title_image := TextureRect.new()
+		title_image.name = "Wordmark"
+		title_image.texture = wordmark
+		title_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		title_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		title_image.custom_minimum_size = Vector2(0, 64)
+		holder.add_child(title_image)
+		_connection_wordmark = title_image
+	var column := UiKit.framed_panel(holder, 10)
+	_connection_card = column.get_parent()
+
 	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 10)
 	column.add_child(title_row)
-	var title := Label.new()
-	title.text = "Ishtaria"
-	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 20)
 	var emblem := load("res://assets/branding/emblem.png") as Texture2D
 	if emblem != null:
 		var logo := TextureRect.new()
 		logo.texture = emblem
-		logo.custom_minimum_size = Vector2(40, 40)
+		logo.custom_minimum_size = Vector2(44, 44)
 		logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		title_row.add_child(logo)
+	var title := Label.new()
+	title.text = "Ishtaria"
+	title.theme_type_variation = &"HeaderLabel"
+	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 24)
 	title_row.add_child(title)
+	_connection_title = title
 	_language_label = Label.new()
 	_language_label.text = "Language"
+	_language_label.theme_type_variation = &"MutedLabel"
+	_language_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_row.add_child(_language_label)
 	_language_option = OptionButton.new()
 	_language_option.name = "Language"
 	_language_option.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	_language_option.custom_minimum_size = Vector2(128, 36)
+	_language_option.custom_minimum_size = Vector2(150, 40)
 	_language_option.add_icon_item(preload("res://assets/kenney/flag-pack/GB.png"), "English")
 	_language_option.add_icon_item(preload("res://assets/kenney/flag-pack/CZ.png"), "Čeština")
+	_language_option.add_theme_constant_override("icon_max_width", 30)
 	_language_option.select(1 if TranslationServer.get_locale() == "cs" else 0)
 	_language_option.item_selected.connect(_on_language_selected)
 	title_row.add_child(_language_option)
-	_flag_check = CheckBox.new()
-	_flag_check.name = "ShareFlag"
-	_flag_check.button_pressed = _share_flag
-	_flag_check.toggled.connect(_on_share_flag_toggled)
-	column.add_child(_flag_check)
+	_connection_close = UiKit.icon_button(preload("res://assets/kenney/game-icons/cross.png"), "back")
+	_connection_close.name = "CloseConnection"
+	_connection_close.pressed.connect(_toggle_connection_panel)
+	title_row.add_child(_connection_close)
+	_connection_dividers.append(UiKit.divider())
+	column.add_child(_connection_dividers[-1])
+
 	_status = Label.new()
 	_status.name = "ConnectionStatus"
+	_status.theme_type_variation = &"GoldLabel"
 	_status.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_status.text = "Disconnected"
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size.y = 24
 	column.add_child(_status)
-	var address_row := HBoxContainer.new()
-	address_row.add_theme_constant_override("separation", 12)
-	column.add_child(address_row)
+
 	var address_label := Label.new()
 	_address_label = address_label
 	address_label.text = "Server"
-	address_row.add_child(address_label)
+	address_label.theme_type_variation = &"MutedLabel"
+	column.add_child(address_label)
 	_server_input = LineEdit.new()
 	_server_input.name = "ServerAddress"
 	_server_input.placeholder_text = DEFAULT_SERVER_URL
 	_server_input.tooltip_text = "Server URL"
 	_server_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_server_input.custom_minimum_size.y = 36
+	_server_input.custom_minimum_size.y = 40
 	_server_input.text_submitted.connect(_on_server_submitted)
-	address_row.add_child(_server_input)
+	column.add_child(_server_input)
 	_history_list = ItemList.new()
 	_history_list.name = "ServerHistory"
 	_history_list.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	_history_list.custom_minimum_size.y = 64
+	_history_list.custom_minimum_size.y = 78
 	_history_list.max_text_lines = 1
 	_history_list.item_selected.connect(_on_history_selected)
 	_history_list.item_activated.connect(func(_index: int) -> void: _connect_server())
 	column.add_child(_history_list)
-	var history_commands := HBoxContainer.new()
-	history_commands.add_theme_constant_override("separation", 8)
+	var history_commands := HFlowContainer.new()
+	history_commands.add_theme_constant_override("h_separation", 8)
+	history_commands.add_theme_constant_override("v_separation", 4)
+	history_commands.alignment = FlowContainer.ALIGNMENT_END
 	column.add_child(history_commands)
-	_history_test_button = Button.new()
+	_history_test_button = UiKit.button("", &"GhostButton")
 	_history_test_button.name = "TestServers"
-	_history_test_button.custom_minimum_size = Vector2(104, 32)
 	_history_test_button.pressed.connect(_on_history_test_pressed)
 	history_commands.add_child(_history_test_button)
-	_history_forget_button = Button.new()
+	_history_forget_button = UiKit.button("", &"GhostButton")
 	_history_forget_button.name = "ForgetServer"
-	_history_forget_button.custom_minimum_size = Vector2(104, 32)
 	_history_forget_button.pressed.connect(_on_history_forget_pressed)
 	history_commands.add_child(_history_forget_button)
-	var commands := HBoxContainer.new()
-	commands.add_theme_constant_override("separation", 8)
-	column.add_child(commands)
-	var connect_button := Button.new()
+	_connection_dividers.append(UiKit.divider())
+	column.add_child(_connection_dividers[-1])
+
+	var connect_button := UiKit.button("Connect", &"PrimaryButton", "confirmation")
 	_connect_button = connect_button
 	connect_button.name = "Connect"
-	connect_button.text = "Connect"
-	connect_button.custom_minimum_size = Vector2(104, 36)
+	connect_button.custom_minimum_size = Vector2(0, 50)
 	connect_button.pressed.connect(_connect_server)
-	commands.add_child(connect_button)
-	_disconnect_button = Button.new()
+	column.add_child(connect_button)
+	var commands := GridContainer.new()
+	_connection_commands = commands
+	commands.add_theme_constant_override("h_separation", 8)
+	commands.add_theme_constant_override("v_separation", 8)
+	column.add_child(commands)
+	_player_button = UiKit.button("Player")
+	_player_button.pressed.connect(_open_player)
+	_disconnect_button = UiKit.button("Disconnect", &"", "back")
 	_disconnect_button.name = "Disconnect"
-	_disconnect_button.text = "Disconnect"
-	_disconnect_button.custom_minimum_size = Vector2(104, 36)
 	_disconnect_button.disabled = true
 	_disconnect_button.pressed.connect(_on_disconnect_pressed)
-	commands.add_child(_disconnect_button)
-	_player_button = Button.new()
-	_player_button.text = "Player"
-	_player_button.custom_minimum_size = Vector2(104, 36)
-	_player_button.pressed.connect(_open_player)
-	commands.add_child(_player_button)
-	_sign_out_button = Button.new()
-	_sign_out_button.text = "Sign out"
+	_sign_out_button = UiKit.button("Sign out", &"", "back")
 	_sign_out_button.disabled = true
 	_sign_out_button.pressed.connect(_session.sign_out)
-	commands.add_child(_sign_out_button)
-	var controls_button := Button.new()
-	controls_button.text = "Controls"
+	var controls_button := UiKit.button("Controls")
 	controls_button.pressed.connect(_control_settings.open)
-	column.add_child(controls_button)
+	for button: Button in [_player_button, controls_button, _disconnect_button, _sign_out_button]:
+		button.custom_minimum_size.y = 40
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		commands.add_child(button)
+	_flag_check = CheckBox.new()
+	_flag_check.name = "ShareFlag"
+	_flag_check.button_pressed = _share_flag
+	_flag_check.toggled.connect(_on_share_flag_toggled)
+	column.add_child(_flag_check)
 	_feedback = Label.new()
 	_feedback.name = "ValidationError"
 	_feedback.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_feedback.custom_minimum_size.y = 24
-	_feedback.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5))
+	_feedback.add_theme_color_override("font_color", UiTheme.CARNELIAN.lightened(0.25))
 	column.add_child(_feedback)
+	get_viewport().size_changed.connect(_fit_connection_panel)
+	_fit_connection_panel()
 	_update_translations()
+
+## The card is 560 px wide and narrower on a small window; its four commands go in two columns
+## when four do not fit in one row. A low window (640x480) drops the wordmark, the dividers and
+## some padding so the whole card stays above the HUD without scrolling.
+func _fit_connection_panel() -> void:
+	if not is_instance_valid(_connection_card):
+		return
+	var screen := get_viewport().get_visible_rect().size
+	var compact := screen.y < 620.0
+	_connection_card.custom_minimum_size.x = clampf(screen.x - 32.0, 280.0, 560.0)
+	_connection_commands.columns = 4 if screen.x >= 600.0 else 2
+	# A narrow window keeps the name in the wordmark above the card only.
+	_language_label.visible = screen.x >= 480.0
+	_connection_title.visible = screen.x >= 480.0 or compact
+	_connection_close.visible = _connection_enabled
+	if is_instance_valid(_connection_wordmark):
+		_connection_wordmark.visible = not compact
+	for line in _connection_dividers:
+		line.visible = not compact
+	_connection_card.add_theme_stylebox_override("panel", UiTheme.framed_style(Color(UiTheme.CLAY, 0.94), UiTheme.GOLD, 14.0 if compact else 28.0))
+	_connection_card.get_child(0).add_theme_constant_override("separation", 5 if compact else 10)
+	_history_list.custom_minimum_size.y = 40 if compact else 78
+	_connect_button.custom_minimum_size.y = 40 if compact else 50
+	_feedback.custom_minimum_size.y = 0 if compact else 24
 
 func _on_language_selected(index: int) -> void:
 	if index < 0 or index > 1:
@@ -682,6 +787,8 @@ func _on_sound_toggled(enabled: bool) -> void:
 	_area_music.enabled = enabled
 	_dialogue.set_music_enabled(enabled)
 	_dialogue.set_voice_enabled(enabled)
+	if _tablet != null:
+		_tablet.set_voice_enabled(enabled)
 	_audio.play("click")
 	var settings := ConfigFile.new()
 	settings.load(_settings_path)
@@ -692,6 +799,17 @@ func _on_sound_toggled(enabled: bool) -> void:
 func _on_disconnect_pressed() -> void:
 	_audio.play("back")
 	_disconnect_server()
+
+## ESC menu: leave the world and open the connection screen to pick another server.
+func _go_to_main_menu() -> void:
+	_escape_menu.close()
+	_audio.play("back")
+	_controls.release_mouse()
+	_disconnect_server()
+	_connection_panel.show()
+	_fit_connection_panel()
+	UiKit.open_animated(_connection_card)
+	_history.probe_all()
 
 func _open_player() -> void:
 	if _connected_world.is_empty():
@@ -744,6 +862,8 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_trading.stop()
 		_placed.stop()
 		_magic.stop()
+		_achievements.stop()
+		_achievements_panel.hide()
 		if is_instance_valid(_love):
 			_love.stop()
 		_trade_panel.hide()
@@ -756,6 +876,8 @@ func _on_player_profile(profile: Dictionary) -> void:
 			_tablet.hide()
 		_quest_stages = {}
 		_quests_baseline = false
+		_pending_prologue = {}
+		_landing_prologue = false
 		_chat.clear()
 		_friends.hide()
 		if signed_out and not _connected_world.is_empty() and not _session.server_url.is_empty():
@@ -806,11 +928,16 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_placed.start(_session.server_url, _session.token())
 	if not _magic.is_running() and not _session.token().is_empty():
 		_magic.start(_session.server_url, _session.token())
+	if not _achievements.is_running() and not _session.token().is_empty():
+		_achievements.start(_session.server_url, _session.token())
 	if is_instance_valid(_love) and not _love.is_running() and not _session.token().is_empty():
 		_love.start(_session.server_url, _session.token())
 	if not _remote_players.is_running() and not _session.token().is_empty():
 		_remote_players.start(_session.server_url, _session.token(), str(profile.get("username", "")))
 	if not _story.is_running() and not _session.token().is_empty():
+		# Auto-start quests arrive on the first poll; hold the tablet until landing settle.
+		if was_empty or identity_changed:
+			_landing_prologue = true
 		_story.start_session(_session.server_url, _session.token())
 	if playable_changed:
 		_apply_story_playable(profile)
@@ -830,9 +957,11 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_surface_direction = Vector3.ZERO
 		_approach_elapsed = 0.0
 		_settle_elapsed = -1.0
+		_landing_prologue = false
 		_sky.set_altitude(PLANET_RADIUS * 2000.0)
 		_connection_panel.show()
 		_set_feedback("Player position unavailable")
+		_flush_pending_prologue()
 	else:
 		_connection_panel.hide()
 		_set_feedback("")
@@ -875,6 +1004,7 @@ func _update_translations() -> void:
 	_flag_check.text = tr("Show my flag to other players")
 	_flag_check.tooltip_text = tr("Only a picture next to your name; the game is translated by your own language choice.")
 	_address_label.text = tr("Server")
+	_connection_close.tooltip_text = tr("Close")
 	_connect_button.text = tr("Connect")
 	_disconnect_button.text = tr("Disconnect")
 	_player_button.text = tr("Player")
@@ -1001,6 +1131,8 @@ func _connect_server(save_address := true) -> void:
 func _toggle_connection_panel() -> void:
 	_connection_panel.visible = not _connection_panel.visible
 	if _connection_panel.visible:
+		_fit_connection_panel()
+		UiKit.open_animated(_connection_card)
 		_history.probe_all()
 	else:
 		_history.cancel()
@@ -1291,6 +1423,7 @@ func _start_approach(position: Variant) -> bool:
 	_approach_rotation = Quaternion(_approach_start.normalized(), _surface_direction)
 	_approach_elapsed = 0.0
 	_settle_elapsed = -1.0
+	_landing_prologue = true
 	_environment.show_region(_surface_direction)
 	if not _player_profile.is_empty():
 		_controls.start(_player_profile.character, Vector3(position.x / 1000.0, position.y / 1000.0, position.z / 1000.0), position)
@@ -1340,25 +1473,28 @@ func _primary_action() -> void:
 	if hand is String and hand == "fishing_rod":
 		_placed.fish()
 		return
-	if _player_metres != Vector3.ZERO and _environment.nearest_harvestable(_player_metres, HARVEST_REACH_M).is_empty():
+	# Bare hands, sword or axe: story NPCs first (red hostility bar), then wildlife.
+	# Harvestables must not block this — the water-hole is full of trees and game.
+	var can_strike: bool = bare_strike or hand == "sword" or hand == "axe"
+	if _player_metres != Vector3.ZERO and can_strike:
+		var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M)
+		if not npc.is_empty():
+			_session.strike_npc(str(npc.id))
+			return
 		var animal: Dictionary = _environment.nearest_animal(_player_metres, ANIMAL_REACH_M)
 		if not animal.is_empty():
 			_session.butcher(animal.id)
 			return
-		# Bare hands or a sword can also strike story NPCs (lasting hostility).
 		if bare_strike or hand == "sword":
-			var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M)
-			if not npc.is_empty():
-				_session.strike_npc(str(npc.id))
-				return
-	if bare_strike or hand == "sword":
-		_toast.show_toast(tr("Nothing to hit"), 1.0)
-		_audio.play("warning")
-		return
+			_toast.show_toast(tr("Nothing to hit"), 1.0)
+			_audio.play("warning")
+			return
+		# Axe with nothing to hit: fall through to harvest / drink.
 	_harvest_nearby()
 
 ## "Use" in the inventory: put the tool in hand if it is not, then work with it on whatever is in reach.
 func _use_tool(item_id: String) -> void:
+	_survival.cancel_pending()
 	_survival.hide()
 	_crafting.hide()
 	_controls.capture_mouse()
@@ -1395,17 +1531,22 @@ func _on_blocked(reply: Dictionary) -> void:
 	elif wear is Dictionary:
 		_audio.play("click")
 
-## E talks to a character within reach, otherwise gathers from the nearest tree or rock and,
-## with nothing to gather, drinks from fresh water within reach (the server decides).
+## E picks up a dropped pile, opens a memorial, talks to a character, harvests a crop, or gathers / drinks.
 func _interact() -> void:
-	if _player_metres != Vector3.ZERO and not _story.is_running():
-		_harvest_nearby()
-		return
-	# Loose packs on the ground come before crops and gathering.
+	# Loose packs on the ground come before crops, gathering and dialogue.
 	var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0) if _player_metres != Vector3.ZERO else {}
 	if not pile.is_empty():
 		_session.pickup_ground(int(pile.id))
 		_audio.play("confirmation")
+		return
+	var memorial: Dictionary = _environment.nearest_memorial(_player_metres, GRAVE_REACH_M) if _player_metres != Vector3.ZERO else {}
+	if not memorial.is_empty():
+		_controls.release_mouse()
+		_session.grave(str(memorial.id))
+		_audio.play("click")
+		return
+	if _player_metres != Vector3.ZERO and not _story.is_running():
+		_harvest_nearby()
 		return
 	var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _player_metres != Vector3.ZERO else {}
 	if npc.is_empty():
@@ -1456,6 +1597,7 @@ func _on_dialogue_changed(reply: Dictionary) -> void:
 	elif _pending_apology:
 		_pending_apology = false
 		_environment.set_npc_health(str(reply.npc_id), 100, 100, "friend")
+		_refresh_minimap_entities()
 		_toast.show_toast(tr("They accept your apology"), 2.5)
 		_audio.play("confirmation")
 		_environment.refresh_objects()
@@ -1480,7 +1622,8 @@ func _play_flourish(npc_id: String, steps: Array) -> void:
 		delay += 0.85
 
 ## A new quest or a new stage: a short note on screen; the log shows the details.
-## A brand-new quest with an excerpt opens the clay tablet prologue.
+## A brand-new quest with an excerpt opens the clay tablet prologue (including auto-start
+## on the first poll after sign-in; the server only attaches excerpt at the start stage).
 ## Final immortality stages open a clay-tablet epilog (win or epic loss).
 func _on_quests_changed(quests: Array) -> void:
 	_quest_log.set_quests(quests)
@@ -1490,10 +1633,8 @@ func _on_quests_changed(quests: Array) -> void:
 	for quest: Dictionary in quests:
 		var known: bool = _quest_stages.has(quest.quest)
 		var previous: Variant = _quest_stages.get(quest.quest)
-		if not first_report and not known and quest.get("excerpt") is Dictionary:
-			_tablet.present(quest)
-			_controls.release_mouse()
-			_audio.play("confirmation")
+		if not known and quest.get("excerpt") is Dictionary:
+			_offer_quest_prologue(quest)
 		elif not first_report and previous != quest.stage:
 			if quest.get("final", false) and _immortality_epilog_key(quest) != "":
 				_tablet.present_epilog(str(quest.title_key), _immortality_epilog_key(quest))
@@ -1503,6 +1644,28 @@ func _on_quests_changed(quests: Array) -> void:
 				_toast.show_toast(tr("Quest updated: %s") % _story.text(quest.title_key), 4.0)
 				_audio.play("confirmation")
 		_quest_stages[quest.quest] = quest.stage
+
+## Opens the clay tablet now, or after the approach settle if the player is still landing.
+func _offer_quest_prologue(quest: Dictionary) -> void:
+	if _landing_prologue and not _controls.active:
+		_pending_prologue = quest
+		return
+	_show_quest_prologue(quest)
+
+func _show_quest_prologue(quest: Dictionary) -> void:
+	if quest.is_empty() or _tablet == null:
+		return
+	_pending_prologue = {}
+	_landing_prologue = false
+	_tablet.present(quest)
+	_controls.release_mouse()
+	_audio.play("confirmation")
+
+func _flush_pending_prologue() -> void:
+	_landing_prologue = false
+	if _pending_prologue.is_empty():
+		return
+	_show_quest_prologue(_pending_prologue)
 
 func _immortality_epilog_key(quest: Dictionary) -> String:
 	var id := str(quest.get("quest", ""))
@@ -1546,10 +1709,10 @@ func _refresh_minimap_water() -> void:
 		_minimap.set_water_map(_environment.water_map)
 
 func _update_minimap_entities(markers: Array) -> void:
-	# Collect entities from NPCs and markers
+	# Collect entities from NPCs, other players, pickups and quest markers.
 	var entities: Array[Dictionary] = []
 	
-	# Add NPCs from environment
+	# Add NPCs from environment: red foe, green escorted friend, grey otherwise.
 	if _environment != null and _environment.get("_npc_entries") is Array:
 		var npcs: Array = _environment.get("_npc_entries")
 		for npc in npcs:
@@ -1558,13 +1721,62 @@ func _update_minimap_entities(markers: Array) -> void:
 				if position is Array and position.size() == 3:
 					var npc_name: String = _story.text(npc.get("name_key", "")) if _story != null else npc.get("name_key", "")
 					var npc_id: String = npc.get("id", "npc_" + str(entities.size()))
+					var health: Variant = npc.get("health")
+					var relation := str(health.get("relation", "")) if health is Dictionary else ""
+					var kind := "neutral"
+					if relation == "foe":
+						kind = "hostile"
+					elif relation == "friend":
+						kind = "friendly"
 					entities.append({
 						"id": npc_id,
 						"name": npc_name,
-						"kind": "npc",
+						"kind": kind,
 						"position": Vector3(float(position[0]), float(position[1]), float(position[2])),
 						"is_quest": false
 					})
+
+	# Other players nearby: no PvP, shown as neutral (grey) like townsfolk.
+	if _remote_players != null:
+		for player_name: Variant in _remote_players.names():
+			if not player_name is String:
+				continue
+			var at: Vector3 = _remote_players.position_of(player_name)
+			if at == Vector3.ZERO:
+				continue
+			entities.append({
+				"id": "player:" + player_name,
+				"name": player_name,
+				"kind": "neutral",
+				"position": at,
+				"is_quest": false
+			})
+
+	# Ground loot and the player's own placed things (snare, campfire, …) as white dots.
+	if _environment != null:
+		var own_name := str(_player_profile.get("username", ""))
+		for loot: Variant in _environment.get("_loot_entries"):
+			if not loot is Dictionary:
+				continue
+			entities.append({
+				"id": "loot:%s" % int(loot.id),
+				"name": "",
+				"kind": "pickup",
+				"position": Vector3(float(loot.position_x), float(loot.position_y), float(loot.position_z)),
+				"is_quest": false
+			})
+		for placed: Variant in _environment.get("_placed_entries"):
+			if not placed is Dictionary or not placed.get("position") is Array or placed.position.size() != 3:
+				continue
+			if own_name.is_empty() or str(placed.get("owner", "")) != own_name:
+				continue
+			entities.append({
+				"id": "placed:%s" % int(placed.id),
+				"name": "",
+				"kind": "pickup",
+				"position": Vector3(float(placed.position[0]), float(placed.position[1]), float(placed.position[2])),
+				"is_quest": false
+			})
 	
 	# Add story markers (quest places)
 	for marker in markers:
@@ -1630,6 +1842,12 @@ func _own_thing_nearby() -> Dictionary:
 	return thing
 
 func _pickup_nearby() -> void:
+	# G: dropped piles first, then the player's own placed things.
+	var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0) if _player_metres != Vector3.ZERO else {}
+	if not pile.is_empty():
+		_session.pickup_ground(int(pile.id))
+		_audio.play("confirmation")
+		return
 	var thing := _own_thing_nearby()
 	if thing.is_empty():
 		_toast.show_toast(tr("Nothing of yours is within reach"), 1.2)
@@ -1637,18 +1855,94 @@ func _pickup_nearby() -> void:
 		return
 	_placed.pickup(int(thing.id))
 
+## Equip / unequip from the inventory: refuse quietly no longer — busy requests get a toast.
+func _equip_item(item_id: String) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	_session.equip(item_id)
+	if not _session.busy:
+		_survival.cancel_pending()
+
+func _equip_slot(slot: String, unequip: bool) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	if unequip:
+		_session.unequip(slot)
+	if not _session.busy:
+		_survival.cancel_pending()
+
+## Eat / loot / drop: same busy guard as equip — a silent no-op looked like a broken Eat button.
+func _eat_item(item_id: String) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	_session.eat(item_id)
+	if not _session.busy:
+		_survival.cancel_pending()
+
+func _loot_item(grave_id: String, item_id: String) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	_session.loot(grave_id, item_id)
+	if not _session.busy:
+		_survival.cancel_pending()
+
+func _drop_item(item_id: String) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	_session.drop_item(item_id)
+	if not _session.busy:
+		_survival.cancel_pending()
+
+## Inventory / craft / place / magic: one combined waiting flag for button hourglasses.
+func _sync_action_busy(_value: bool = false) -> void:
+	var waiting: bool = _session.busy
+	if is_instance_valid(_placed) and _placed.busy:
+		waiting = true
+	if is_instance_valid(_magic) and _magic.busy:
+		waiting = true
+	_survival.set_busy(waiting)
+
 ## Puts a thing or a seed from the inventory down two metres in front of the character.
+## Keeps the inventory open with the Place button spinning until the server answers.
 func _place_item(item_id: String, plant: bool) -> void:
 	if _player_metres == Vector3.ZERO or not _controls.active:
+		_toast.show_toast(tr("Action unavailable"), 1.5)
+		_audio.play("warning")
+		_survival.cancel_pending()
 		return
-	_survival.hide()
-	_crafting.hide()
-	_controls.capture_mouse()
+	if not _placed.is_running():
+		_toast.show_toast(tr("Action unavailable"), 1.5)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	if _placed.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
 	var at: Vector3 = _player_metres + _controls.heading() * 2.0
-	if plant:
-		_placed.plant(item_id, at, _controls.yaw)
-	else:
-		_placed.place(item_id, at, _controls.yaw)
+	var sent: bool = _placed.plant(item_id, at, _controls.yaw) if plant else _placed.place(item_id, at, _controls.yaw)
+	if not sent:
+		_survival.cancel_pending()
+
+func _learn_scroll(item_id: String) -> void:
+	if not _magic.learn(item_id):
+		_survival.cancel_pending()
 
 func _on_placed_done(kind: String, reply: Dictionary) -> void:
 	var wear_note := ""
@@ -1658,9 +1952,15 @@ func _on_placed_done(kind: String, reply: Dictionary) -> void:
 		broke = _wear_broke(reply)
 	match kind:
 		"place":
+			_survival.hide()
+			_crafting.hide()
+			_controls.capture_mouse()
 			var snare: bool = reply.get("object") is Dictionary and reply.object.get("kind") == "snare"
 			_toast.show_toast(tr("Stand far from the snare and wait") if snare else tr("Placed"), 2.5 if snare else 1.5)
 		"plant":
+			_survival.hide()
+			_crafting.hide()
+			_controls.capture_mouse()
 			_toast.show_toast(tr("Planted"), 1.5)
 		"pickup", "harvest":
 			var parts: Array[String] = []
@@ -1685,6 +1985,7 @@ func _on_spell_learned(spell_id: String) -> void:
 ## Casts a known spell; a bolt is aimed at the nearest animal within its range.
 func _cast_spell(spell_id: String) -> void:
 	if _player_metres == Vector3.ZERO:
+		_survival.cancel_pending()
 		return
 	for spell: Dictionary in _known_spells:
 		if spell.id != spell_id:
@@ -1694,16 +1995,20 @@ func _cast_spell(spell_id: String) -> void:
 			if animal.is_empty():
 				_toast.show_toast(tr("No target in range"), 1.2)
 				_audio.play("warning")
+				_survival.cancel_pending()
 				return
 			_survival.hide()
 			_crafting.hide()
 			_controls.capture_mouse()
 			_cast_target = animal
-			_magic.cast(spell_id, str(animal.id))
+			if not _magic.cast(spell_id, str(animal.id)):
+				_survival.cancel_pending()
 		else:
 			_cast_target = {}
-			_magic.cast(spell_id)
+			if not _magic.cast(spell_id):
+				_survival.cancel_pending()
 		return
+	_survival.cancel_pending()
 
 ## The first nine known spells are cast with the number keys.
 func _cast_slot(index: int) -> void:
@@ -1768,6 +2073,8 @@ func _spell_effect(effect: String) -> void:
 func _on_placed_failed(message: String) -> void:
 	_toast.show_toast(tr(message), 1.5)
 	_audio.play("warning")
+	if is_instance_valid(_survival) and _survival.visible:
+		_survival.set_feedback(message)
 
 func _update_prompt() -> void:
 	var text := ""
@@ -1776,9 +2083,15 @@ func _update_prompt() -> void:
 		_toast.set_prompt(tr("You are swimming and drowning: get to the shore!"))
 		return
 	if _controls.active and not _game_ui_open() and _environment.objects_loaded and _player_metres != Vector3.ZERO:
+		var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0)
+		var memorial: Dictionary = _environment.nearest_memorial(_player_metres, GRAVE_REACH_M)
 		var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _story.is_running() else {}
 		var target: Dictionary = _environment.nearest_harvestable(_player_metres, HARVEST_REACH_M)
-		if not npc.is_empty():
+		if not pile.is_empty():
+			text = tr("E: Pick up %s") % tr(str(pile.name))
+		elif not memorial.is_empty():
+			text = tr("E: Examine grave of %s") % str(memorial.player_name)
+		elif not npc.is_empty():
 			text = tr("E: Talk to %s") % _story.text(npc.name_key)
 		elif not _ripe_crop_nearby().is_empty():
 			text = tr("E: Harvest crop")
@@ -1813,7 +2126,14 @@ func _on_harvested(reply: Dictionary) -> void:
 		var parts: Array[String] = []
 		for item: Dictionary in reply.items:
 			parts.append("%s x %s" % [tr(item.name), item.quantity])
-		_toast.show_toast(tr("Harvested: %s") % ", ".join(parts) + _xp_text(reply) + wear_note)
+		var text := tr("Harvested: %s") % ", ".join(parts)
+		var ground: Variant = reply.get("ground")
+		if ground is Array and not ground.is_empty():
+			var left: Array[String] = []
+			for item: Dictionary in ground:
+				left.append("%s x %s" % [tr(item.name), item.quantity])
+			text += " · " + tr("Left on the ground: %s") % ", ".join(left)
+		_toast.show_toast(text + _xp_text(reply) + wear_note)
 		if not broke:
 			_audio.play("confirmation")
 		_environment.refresh_objects()
@@ -1825,6 +2145,7 @@ func _on_harvested(reply: Dictionary) -> void:
 ## A blow against a story NPC: red health bar, lasting hostility, optional counter-blow.
 func _on_npc_struck(reply: Dictionary) -> void:
 	_environment.set_npc_health(str(reply.npc_id), int(reply.health), int(reply.max_health), "foe")
+	_refresh_minimap_entities()
 	var text := tr("They will remember this")
 	if reply.defeated:
 		text = tr("They stop fighting")
@@ -1855,6 +2176,22 @@ func _on_bitten(reply: Dictionary, counter: Dictionary) -> void:
 			break
 	_toast.show_toast(text, 2.5)
 	_audio.play("break" if armour_broke else "error")
+
+## A predator ambushed the hunter at the water-hole (no swing required).
+func _on_ambush_event(event: Dictionary) -> void:
+	var body: Variant = JSON.parse_string(str(event.get("body", "")))
+	var damage := int(body.get("damage", 0)) if body is Dictionary else 0
+	if damage <= 0:
+		return
+	if not _controls.play_combat("hit"):
+		_controls.play_combat("hit2")
+	var text := tr("A predator ambushes you: -%s health") % damage
+	if body is Dictionary and body.get("blocked") == true:
+		text += "  ·  " + tr("Blocked")
+	_toast.show_toast(text, 2.8)
+	_audio.play("error")
+	if is_instance_valid(_session):
+		_session.refresh()
 
 func _xp_text(reply: Dictionary) -> String:
 	var xp: Variant = reply.get("xp")
@@ -1915,7 +2252,9 @@ func _settle_into_view(delta: float) -> void:
 	if _settle_elapsed >= SETTLE_SECONDS:
 		_settle_elapsed = -1.0
 		_controls.active = true
-		_controls.capture_mouse()
+		_flush_pending_prologue()
+		if _tablet == null or not _tablet.visible:
+			_controls.capture_mouse()
 
 func _set_render_origin(origin: Vector3) -> void:
 	var adjustment: Vector3 = _controls.origin - origin
@@ -1929,12 +2268,18 @@ func _set_render_origin(origin: Vector3) -> void:
 	_environment.set_render_origin(_controls._anchor_metres if origin != Vector3.ZERO else [])
 
 func _game_ui_open() -> bool:
-	return _chat.is_typing() or _connection_panel.visible or _trade_panel.visible or _creator.visible or _survival.visible or _crafting.visible or _control_settings.visible or _portals.visible or _friends.visible or _escape_menu.visible or _dialogue.visible or _quest_log.visible or (_tablet != null and _tablet.visible)
+	return _chat.is_typing() or _connection_panel.visible or _trade_panel.visible or _creator.visible or _survival.visible or _crafting.visible or _control_settings.visible or _portals.visible or _friends.visible or _escape_menu.visible or _achievements_panel.visible or _dialogue.visible or _quest_log.visible or (_tablet != null and _tablet.visible)
 
 func _open_friends() -> void:
 	_escape_menu.close()
 	_controls.release_mouse()
 	_friends.open()
+
+func _open_achievements() -> void:
+	_escape_menu.close()
+	_controls.release_mouse()
+	_achievements.refresh()
+	_achievements_panel.open()
 
 func _on_goods_loaded(goods: Dictionary) -> void:
 	_trade_panel.show_goods(goods, _merchant_name)
@@ -1973,12 +2318,16 @@ func _on_friend_event(event: Dictionary) -> void:
 		_refresh_world()
 	elif event.kind == "snare":
 		_on_snare_event(event)
+	elif event.kind == "hurt":
+		_on_ambush_event(event)
 	elif event.kind == "escort":
 		_on_escort_event(event)
 	elif event.kind == "story":
 		_on_story_event(event)
 	elif event.kind == "love":
 		_on_love_event(event)
+	elif event.kind == "achievement":
+		_achievements.announce(event.subject)
 
 ## Love minigame: hearts / zones / humanization of Enkidu.
 func _on_love_event(event: Dictionary) -> void:
@@ -2004,14 +2353,76 @@ func _on_love_won() -> void:
 	if is_instance_valid(_story):
 		_story.load_quests()
 
+## Permanent death: memorial panel, death popup and a warning sound.
+func _on_obituary(notice: Dictionary) -> void:
+	var cause := ""
+	if notice.get("death_cause") is String:
+		cause = notice.death_cause
+	elif notice.get("cause") is String:
+		cause = notice.cause
+	_quest_soft_death = false
+	_controls.play_death(cause)
+	_creator.password_input.clear()
+	_creator.hide()
+	_survival.show_obituary(notice)
+	_environment.refresh_objects()
+	_audio.play("warning")
+	var name := str(notice.get("name", ""))
+	var body := tr("Your journey ends here, %s.") % name
+	body += _death_cause_line(cause)
+	_death_dialog.title = tr("You have died")
+	_death_dialog.dialog_text = body
+	_death_dialog.popup_centered(Vector2i(480, 200))
+	_controls.release_mouse()
+
+func _death_cause_line(cause: String) -> String:
+	match cause:
+		"hostile_player", "creature":
+			return "\n" + tr("You were slain in combat.")
+		"fall", "falling_tree":
+			return "\n" + tr("You fell to your death.")
+		"drowning":
+			return "\n" + tr("You drowned.")
+		"starvation", "exhaustion", "dehydration":
+			return "\n" + tr("Your strength failed you.")
+		_:
+			if cause.is_empty():
+				return ""
+			return "\n" + tr("Cause: %s") % tr(cause)
+
+func _on_death_dialog_confirmed() -> void:
+	if _quest_soft_death:
+		_quest_soft_death = false
+		_controls.clear_death()
+		if _controls.active and not _game_ui_open():
+			_controls.capture_mouse()
+		return
+	_survival.show()
+
 ## Story quest checkpoint: death or fail returns to the quest start / fail_restart place.
+## When `cause` is set (lion, fall, …), show the funeral notice first — soft-restart is not silent.
 func _on_story_event(event: Dictionary) -> void:
 	if str(event.subject) != "quest_restart":
 		return
-	_toast.show_toast(tr("The quest returns to its beginning — try again"), 4.5)
-	_audio.play("error")
+	var payload: Variant = JSON.parse_string(str(event.get("body", "")))
+	var cause := ""
+	if payload is Dictionary and payload.get("cause") is String:
+		cause = str(payload.cause)
 	_session.refresh()
 	_story.load_quests()
+	if cause.is_empty():
+		_toast.show_toast(tr("The quest returns to its beginning — try again"), 4.5)
+		_audio.play("error")
+		return
+	_quest_soft_death = true
+	_controls.play_death(cause)
+	_audio.play("warning")
+	var body := tr("You have died") + _death_cause_line(cause)
+	body += "\n\n" + tr("The quest returns to its beginning — try again")
+	_death_dialog.title = tr("You have died")
+	_death_dialog.dialog_text = body
+	_death_dialog.popup_centered(Vector2i(480, 220))
+	_controls.release_mouse()
 
 ## Escort Šamḫat: fierce animals threaten her; failure restarts the quest checkpoint.
 func _on_escort_event(event: Dictionary) -> void:
@@ -2134,6 +2545,8 @@ func _escape_pressed() -> void:
 		return # the settings dialog closes itself
 	if _escape_menu.visible:
 		_escape_menu.close()
+	elif _achievements_panel.visible:
+		_achievements_panel.close()
 	elif _survival.visible:
 		_survival.hide()
 	elif _crafting.visible:
@@ -2275,6 +2688,8 @@ func _process(delta: float) -> void:
 		if _prompt_elapsed >= 0.25:
 			_prompt_elapsed = 0.0
 			_update_prompt()
+			# Other players and walking NPCs move; keep their minimap dots in place.
+			_refresh_minimap_entities()
 		_move_elapsed += delta
 		if _move_elapsed >= 0.1:
 			_move_elapsed = 0.0

@@ -4,12 +4,15 @@ signal sound_toggled(enabled: bool)
 signal inventory_requested
 signal connection_requested
 
-const ASSETS := "res://assets/kenney/ui-adventure/PNG/Default/"
 const ICONS := "res://assets/kenney/game-icons/"
-const RPG := "res://assets/kenney/ui-rpg/PNG/"
-const BORDER := "res://assets/kenney/fantasy-ui-borders/PNG/Default/Border/panel-border-000.png"
 const ITEM_ICONS := preload("res://scripts/item_icons.gd")
-const METERS := {"health": ["Health", "red"], "stamina": ["Stamina", "green"], "food": ["Food", "white"], "water": ["Water", "blue"], "mana": ["Mana", "blue"]}
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const FramedStyleBox := preload("res://scripts/ui/framed_style_box.gd")
+## Label key and bar colour of each reserve.
+const METERS := {"health": ["Health", Color("d8463a")], "stamina": ["Stamina", Color("6cae3c")], "food": ["Food", Color("e0a032")], "water": ["Water", Color("3a86d8")], "mana": ["Mana", Color("9a5ae0")]}
+## A reserve at or below this blinks.
+const LOW_RESERVE := 20.0
 ## Left hand = offhand (shield), right hand = dominant hand (tool / weapon).
 const HAND_SLOTS := {"offhand": "left", "hand": "right"}
 
@@ -32,6 +35,8 @@ var inventory_button: Button
 var connection_button: Button
 var sound_checkbox: Button
 var _frame: NinePatchRect
+var _panel_style: StyleBox
+var _header: HBoxContainer
 var _labels: Dictionary = {}
 var _values: Dictionary = {}
 var _player: Dictionary = {}
@@ -48,170 +53,188 @@ func _ready() -> void:
 	panel.offset_bottom = -8.0
 	panel.offset_top = -96.0
 	panel.theme = Theme.new()
-	panel.theme.default_font_size = 11
-	var style := _texture_style(RPG + "panelInset_blue.png", 10.0)
-	style.modulate_color = Color(0.24, 0.30, 0.31, 0.96)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 7.0)
+	panel.theme.default_font_size = 13
+	# Clay fill of the kit; the gold frame is a separate rectangle on top (`_frame`) so it can
+	# be drawn over the content's edge without taking the pointer.
+	var style := FramedStyleBox.new(load(UiTheme.FILL_TEXTURE), Color(UiTheme.CLAY, 0.93), null, Color.WHITE, 16, 2)
+	style.content_margin_top = 14.0
+	style.content_margin_bottom = 12.0
 	panel.add_theme_stylebox_override("panel", style)
+	_panel_style = style
 	_frame = NinePatchRect.new()
-	_frame.texture = load(BORDER)
-	_frame.patch_margin_left = 16
-	_frame.patch_margin_right = 16
-	_frame.patch_margin_top = 16
-	_frame.patch_margin_bottom = 16
-	_frame.modulate = Color(0.72, 0.65, 0.44, 0.65)
+	_frame.modulate = UiTheme.GOLD
 	_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_frame)
 	panel.resized.connect(_sync_frame)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 4)
+	column.add_theme_constant_override("separation", 6)
 	panel.add_child(column)
+
+	# Header: level badge, name, gold, commands.
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 6)
+	_header = header
+	header.add_theme_constant_override("separation", 10)
 	column.add_child(header)
+	level_label = Label.new()
+	level_label.name = "Level"
+	level_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	level_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	level_label.add_theme_font_override("font", UiTheme.font(true))
+	level_label.add_theme_font_size_override("font_size", 13)
+	level_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	var badge := UiTheme.flat_style(UiTheme.LAPIS, UiTheme.GOLD, 1, 10, 10.0)
+	badge.content_margin_top = 2.0
+	badge.content_margin_bottom = 2.0
+	level_label.add_theme_stylebox_override("normal", badge)
+	header.add_child(level_label)
 	player_name = Label.new()
 	player_name.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	player_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	player_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	player_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	player_name.add_theme_font_size_override("font_size", 13)
+	player_name.add_theme_font_override("font", UiTheme.font(false))
+	player_name.add_theme_font_size_override("font_size", 16)
+	player_name.add_theme_color_override("font_color", UiTheme.GOLD)
+	player_name.add_theme_color_override("font_outline_color", UiTheme.CLAY_DARK)
+	player_name.add_theme_constant_override("outline_size", 4)
 	header.add_child(player_name)
-	level_label = Label.new()
-	level_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	level_label.add_theme_color_override("font_color", Color(0.86, 0.78, 0.56))
-	header.add_child(level_label)
-	inventory_button = Button.new()
+	var purse := HBoxContainer.new()
+	purse.add_theme_constant_override("separation", 4)
+	header.add_child(purse)
+	var coin := TextureRect.new()
+	coin.texture = ITEM_ICONS.texture("gold")
+	coin.custom_minimum_size = Vector2(24, 24)
+	coin.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	coin.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	purse.add_child(coin)
+	gold_label = Label.new()
+	gold_label.name = "Gold"
+	gold_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	gold_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	gold_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	gold_label.add_theme_font_size_override("font_size", 15)
+	gold_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	purse.add_child(gold_label)
+	inventory_button = UiKit.icon_button(load(ICONS + "basket.png"), "click", 28)
 	inventory_button.name = "Inventory"
-	inventory_button.icon = load(ICONS + "basket.png")
-	inventory_button.expand_icon = true
 	inventory_button.pressed.connect(func() -> void: inventory_requested.emit())
 	header.add_child(inventory_button)
-	connection_button = Button.new()
+	connection_button = UiKit.icon_button(load(ICONS + "gear.png"), "click", 28)
 	connection_button.name = "ConnectionSettings"
-	connection_button.icon = load(ICONS + "gear.png")
-	connection_button.expand_icon = true
 	connection_button.pressed.connect(func() -> void: connection_requested.emit())
 	header.add_child(connection_button)
-	sound_checkbox = Button.new()
+	sound_checkbox = UiKit.icon_button(load(ICONS + "audioOn.png"), "click", 28)
 	sound_checkbox.name = "InterfaceSounds"
 	sound_checkbox.toggle_mode = true
 	sound_checkbox.button_pressed = sound_enabled
 	sound_checkbox.toggled.connect(_on_sound_toggled)
 	header.add_child(sound_checkbox)
-	for button in [inventory_button, connection_button, sound_checkbox]:
-		button.expand_icon = true
-		button.add_theme_constant_override("icon_max_width", 13)
-		button.custom_minimum_size = Vector2(22, 22)
-		for state in ["normal", "hover", "pressed", "hover_pressed"]:
-			var surface := _texture_style(RPG + ("buttonSquare_grey_pressed.png" if state in ["pressed", "hover_pressed"] else "buttonSquare_grey.png"), 8.0)
-			surface.modulate_color = Color(0.40, 0.45, 0.46) if state in ["hover", "hover_pressed"] else Color(0.28, 0.32, 0.33)
-			for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-				surface.set_content_margin(side, 5.0)
-			button.add_theme_stylebox_override(state, surface)
+	for button: Button in [inventory_button, connection_button, sound_checkbox]:
+		# The ghost style shows no plate until hovered; here a quiet clay plate stays visible.
+		button.add_theme_stylebox_override("normal", UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.7), Color(UiTheme.GOLD_DIM, 0.8), 1, 3, 4.0))
+		button.add_theme_stylebox_override("pressed", UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.7), Color(UiTheme.GOLD_DIM, 0.8), 1, 3, 4.0))
+
+	# The five reserves.
 	grid = GridContainer.new()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 4)
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 6)
 	column.add_child(grid)
 	for key in METERS:
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 1)
+		cell.add_theme_constant_override("separation", 2)
 		grid.add_child(cell)
 		var heading := HBoxContainer.new()
 		cell.add_child(heading)
 		var label := Label.new()
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.add_theme_font_override("font", UiTheme.font(true))
+		label.add_theme_font_size_override("font_size", 11)
+		label.add_theme_color_override("font_color", UiTheme.SAND_MUTED)
 		heading.add_child(label)
 		_labels[key] = label
 		var value := Label.new()
 		value.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-		value.custom_minimum_size.x = 40.0
+		value.custom_minimum_size.x = 28.0
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		value.add_theme_font_size_override("font_size", 12)
+		value.add_theme_color_override("font_color", UiTheme.SAND)
 		heading.add_child(value)
 		_values[key] = value
 		var meter := ProgressBar.new()
-		meter.custom_minimum_size = Vector2(70.0, 7.0)
+		meter.name = "Meter_" + key
+		meter.custom_minimum_size = Vector2(60.0, 10.0)
 		meter.show_percentage = false
-		meter.add_theme_stylebox_override("background", _style("progress_transparent.png", 4.0))
-		var fill := _style("progress_%s.png" % METERS[key][1], 4.0)
-		if key == "food":
-			fill.modulate_color = Color(0.95, 0.73, 0.3)
-		elif key == "mana":
-			fill.modulate_color = Color(0.72, 0.45, 1.0)
-		meter.add_theme_stylebox_override("fill", fill)
+		meter.add_theme_stylebox_override("background", _bar_background())
+		meter.add_theme_stylebox_override("fill", _bar_fill(METERS[key][1]))
 		cell.add_child(meter)
 		meters[key] = meter
-	var footer := HBoxContainer.new()
-	footer.add_theme_constant_override("separation", 10)
-	column.add_child(footer)
-	clock_label = Label.new()
-	clock_label.name = "SolarClock"
-	clock_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	clock_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	clock_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	clock_label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.86))
-	footer.add_child(clock_label)
-	var progression := VBoxContainer.new()
-	progression.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	progression.add_theme_constant_override("separation", 1)
-	footer.add_child(progression)
-	var experience_row := HBoxContainer.new()
-	experience_row.add_theme_constant_override("separation", 8)
-	progression.add_child(experience_row)
-	experience_label = Label.new()
-	experience_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	experience_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	experience_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	experience_row.add_child(experience_label)
-	var stats_row := HBoxContainer.new()
-	stats_row.add_theme_constant_override("separation", 10)
-	progression.add_child(stats_row)
-	age_label = Label.new()
-	age_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	age_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	age_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stats_row.add_child(age_label)
-	score_label = Label.new()
-	score_label.name = "Score"
-	score_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	score_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	stats_row.add_child(score_label)
-	gold_label = Label.new()
-	gold_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	gold_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	stats_row.add_child(gold_label)
-	for label in [age_label, experience_label, score_label, gold_label]:
-		label.add_theme_font_size_override("font_size", 11)
-	for label in [age_label, experience_label]:
-		label.add_theme_color_override("font_color", Color(0.65, 0.73, 0.73))
-	score_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.62))
-	gold_label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.35))
+
+	# Experience across the whole width, then the small figures and the solar clock.
 	xp_bar = ProgressBar.new()
 	xp_bar.name = "ExperienceBar"
 	xp_bar.custom_minimum_size = Vector2(100.0, 5.0)
 	xp_bar.show_percentage = false
-	xp_bar.add_theme_stylebox_override("background", _style("progress_transparent.png", 4.0))
-	var xp_fill := _style("progress_white.png", 4.0)
-	xp_fill.modulate_color = Color(1.0, 0.83, 0.35)
-	xp_bar.add_theme_stylebox_override("fill", xp_fill)
-	experience_row.add_child(xp_bar)
+	xp_bar.add_theme_stylebox_override("background", _bar_background())
+	xp_bar.add_theme_stylebox_override("fill", _bar_fill(UiTheme.GOLD))
+	column.add_child(xp_bar)
+	var footer := HFlowContainer.new()
+	footer.add_theme_constant_override("h_separation", 16)
+	footer.add_theme_constant_override("v_separation", 2)
+	column.add_child(footer)
+	experience_label = Label.new()
+	experience_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	footer.add_child(experience_label)
+	score_label = Label.new()
+	score_label.name = "Score"
+	score_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	footer.add_child(score_label)
+	age_label = Label.new()
+	age_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	footer.add_child(age_label)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
+	clock_label = Label.new()
+	clock_label.name = "SolarClock"
+	clock_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	footer.add_child(clock_label)
+	for label in [experience_label, score_label, age_label, clock_label]:
+		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_color_override("font_color", UiTheme.SAND_MUTED)
+	score_label.add_theme_color_override("font_color", UiTheme.GOLD)
+	clock_label.add_theme_color_override("font_color", UiTheme.SAND)
 	for slot: String in HAND_SLOTS:
 		_hands[slot] = _make_hand_slot(slot)
 	get_viewport().size_changed.connect(_resize)
 	_resize()
 	clear_player()
 
+## The dark groove of a bar.
+func _bar_background() -> StyleBoxFlat:
+	var style := UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.95), Color(UiTheme.GOLD_DIM, 0.7), 1, 3, 0.0)
+	style.content_margin_top = 0.0
+	style.content_margin_bottom = 0.0
+	return style
+
+## The coloured part of a bar, with a lighter top edge so it reads as glazed.
+func _bar_fill(color: Color) -> StyleBoxFlat:
+	var style := UiTheme.flat_style(color, color.lightened(0.45), 0, 3, 0.0)
+	style.border_width_top = 2
+	style.content_margin_top = 0.0
+	style.content_margin_bottom = 0.0
+	return style
+
 ## A framed icon in a screen corner for the item held in that hand.
 func _make_hand_slot(slot: String) -> Dictionary:
 	var holder := PanelContainer.new()
 	holder.name = "Hand_" + slot
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := _texture_style(RPG + "panelInset_blue.png", 8.0)
-	style.modulate_color = Color(0.22, 0.28, 0.29, 0.92)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 6.0)
+	var style := UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.88), UiTheme.GOLD, 2, 4, 6.0)
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 6
 	holder.add_theme_stylebox_override("panel", style)
 	add_child(holder)
 	var column := VBoxContainer.new()
@@ -221,27 +244,18 @@ func _make_hand_slot(slot: String) -> Dictionary:
 	var icon := TextureRect.new()
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(48, 48)
+	icon.custom_minimum_size = Vector2(44, 44)
 	icon.modulate = Color(1, 1, 1, 0.35)
 	column.add_child(icon)
 	var label := Label.new()
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.add_theme_font_size_override("font_size", 10)
-	label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.86))
+	label.add_theme_color_override("font_color", UiTheme.SAND)
 	label.text = "—"
 	column.add_child(label)
 	return {"panel": holder, "icon": icon, "label": label, "broken": false}
-
-func _style(filename: String, border: float) -> StyleBoxTexture:
-	return _texture_style(ASSETS + filename, border)
-
-func _texture_style(path: String, border: float) -> StyleBoxTexture:
-	var style := StyleBoxTexture.new()
-	style.texture = load(path)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_texture_margin(side, border)
-	return style
 
 func _resize() -> void:
 	var screen := get_viewport().get_visible_rect().size
@@ -249,26 +263,40 @@ func _resize() -> void:
 	var margin := maxf(8.0, (width - 920.0) / 2.0)
 	panel.offset_left = margin
 	panel.offset_right = -margin
-	grid.columns = 5 if width >= 640.0 else 2
+	grid.columns = 5 if width >= 640.0 else 3
+	# The frame of the menus at twice its pixels; a narrow screen has no room for its corner
+	# knots and gets it at its own size.
+	var scale := 2 if width >= 640.0 else 1
+	_frame.texture = FramedStyleBox.scaled(load(UiTheme.FRAME_TEXTURE), scale)
+	for side in ["left", "right", "top", "bottom"]:
+		_frame.set("patch_margin_" + side, 16 * scale)
+	_panel_style.content_margin_left = 34.0 if scale == 2 else 18.0
+	_panel_style.content_margin_right = _panel_style.content_margin_left
+	_header.add_theme_constant_override("separation", 10 if width >= 640.0 else 5)
 	panel.offset_top = -maxf(96.0, panel.get_combined_minimum_size().y)
 	_sync_frame.call_deferred()
-	var slot_size := Vector2(64, 78) if width >= 640.0 else Vector2(52, 68)
-	var gap := 10.0
-	var hud_top := screen.y + panel.offset_top
-	for slot: String in _hands:
-		var holder: PanelContainer = _hands[slot].panel
-		holder.custom_minimum_size = slot_size
-		holder.size = slot_size
-		var y := mini(hud_top - slot_size.y - 4.0, screen.y - slot_size.y - gap)
-		if HAND_SLOTS[slot] == "left":
-			holder.position = Vector2(gap, y)
-		else:
-			holder.position = Vector2(screen.x - slot_size.x - gap, y)
+	# The whole gold amount when it fits; on a narrow screen it is cut and the tooltip keeps it.
+	var font := gold_label.get_theme_font("font")
+	var text_width := font.get_string_size(gold_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, gold_label.get_theme_font_size("font_size")).x
+	gold_label.custom_minimum_size.x = minf(ceilf(text_width) + 2.0, 240.0 if width >= 640.0 else 70.0)
 
+## The frame and the hand slots follow the panel once its size is known.
 func _sync_frame() -> void:
 	_frame.position = panel.position
 	_frame.size = panel.size
 	_frame.visible = panel.visible
+	var screen := get_viewport().get_visible_rect().size
+	var slot_size := Vector2(68, 80) if screen.x >= 640.0 else Vector2(56, 70)
+	var gap := 10.0
+	for slot: String in _hands:
+		var holder: PanelContainer = _hands[slot].panel
+		holder.custom_minimum_size = slot_size
+		holder.size = slot_size
+		var y := minf(panel.position.y - slot_size.y - 6.0, screen.y - slot_size.y - gap)
+		if HAND_SLOTS[slot] == "left":
+			holder.position = Vector2(gap, y)
+		else:
+			holder.position = Vector2(screen.x - slot_size.x - gap, y)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_instance_valid(grid):
@@ -282,6 +310,10 @@ func _process(delta: float) -> void:
 		_update_clock()
 	_blink_elapsed += delta
 	var pulse := 0.45 + 0.55 * absf(sin(_blink_elapsed * TAU * 1.6))
+	for key in meters:
+		var low: bool = not _player.is_empty() and _player.stats.has(key) and meters[key].value <= LOW_RESERVE
+		meters[key].self_modulate = Color(1.0 + 0.6 * pulse, 1.0, 1.0) if low else Color.WHITE
+		_values[key].add_theme_color_override("font_color", UiTheme.CARNELIAN.lerp(UiTheme.SAND, 1.0 - pulse) if low else UiTheme.SAND)
 	for slot: String in _hands:
 		var entry: Dictionary = _hands[slot]
 		if entry.broken and entry.icon.texture != null:
@@ -363,7 +395,7 @@ func set_player(profile: Dictionary) -> bool:
 		var shown: float = float(stats.get(key, 0))
 		meters[key].value = shown
 		meters[key].modulate.a = 1.0 if stats.has(key) else 0.45
-		_values[key].text = "%s/100" % int(shown) if stats.has(key) else "-"
+		_values[key].text = str(int(shown)) if stats.has(key) else "-"
 	_update_labels()
 	return true
 
@@ -419,6 +451,7 @@ func _update_hands() -> void:
 					break
 		var icon: TextureRect = entry.icon
 		var label: Label = entry.label
+		entry.panel.self_modulate = Color(1, 1, 1, 0.55 if held.is_empty() else 1.0)
 		if held.is_empty():
 			icon.texture = null
 			icon.modulate = Color(1, 1, 1, 0.35)

@@ -30,6 +30,20 @@ func _run() -> void:
 			else:
 				animals += 1
 				_check(not entry.has("swim_radius_m") and not "ocean" in entry.biomes, "%s stands on land" % entry.id)
+	# 0 A.D. lions and camel face -Z; face_z=+1 made them moonwalk along wander routes.
+	for id in ["zeroad.lion", "zeroad.lioness", "zeroad.camel"]:
+		var animal: Variant = null
+		for entry: Dictionary in environment.catalog:
+			if entry.id == id:
+				animal = entry
+				break
+		_check(animal != null and int(animal.face_z) == -1, "%s faces -Z so the walk clip matches the route" % id)
+	var camel: Variant = null
+	for entry: Dictionary in environment.catalog:
+		if entry.id == "zeroad.camel":
+			camel = entry
+			break
+	_check(camel != null and is_equal_approx(float(camel.scale_m), 0.93), "camel is about three times the prior undersized catalog scale")
 	_check(animals == 24 and fish == 35, "24 animals and 35 fish in the catalog, found %d and %d" % [animals, fish])
 	_check(environment.catalog.size() == 259, "the plant and rock catalog includes ED waterfowl")
 	_check(environment._models.has("animal.duck") and environment._models.has("animal.goose"), "duck and goose are loadable scenes")

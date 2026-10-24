@@ -2,6 +2,8 @@ extends CanvasLayer
 ## The active quest in the top left corner of the screen: its name and a reminder of the key that opens the
 ## quest log. The active quest is the most recently changed one that is not finished; with none the corner is empty.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+
 const MARGIN := 12.0
 
 var story: Node
@@ -20,24 +22,21 @@ func _ready() -> void:
 	panel.name = "Indicator"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.position = Vector2(MARGIN, MARGIN)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.12, 0.8)
-	style.border_color = Color(0.75, 0.6, 0.3)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_border_width(side, 2)
-		style.set_content_margin(side, 8)
+	var style := UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.82), Color(UiTheme.GOLD, 0.85), 1, 3, 10.0)
+	style.border_width_left = 3
 	panel.add_theme_stylebox_override("panel", style)
 	add_child(panel)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 2)
 	panel.add_child(column)
-	heading = _label(12, Color(0.7, 0.7, 0.72))
+	heading = _label(12, UiTheme.GOLD_DIM.lightened(0.3))
+	heading.add_theme_font_override("font", UiTheme.font(true))
 	column.add_child(heading)
-	title = _label(16, Color(1.0, 0.85, 0.5))
+	title = _label(16, UiTheme.GOLD_BRIGHT)
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.custom_minimum_size = Vector2(220, 0)
 	column.add_child(title)
-	hint = _label(12, Color(0.8, 0.8, 0.82))
+	hint = _label(12, UiTheme.SAND)
 	column.add_child(hint)
 	if story != null and story.has_signal("strings_changed"):
 		story.strings_changed.connect(_refresh)

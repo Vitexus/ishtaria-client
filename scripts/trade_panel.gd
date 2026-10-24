@@ -3,6 +3,9 @@ extends CanvasLayer
 ## (each puts items on the table, both accept). It only shows what the server says and sends
 ## the player's intentions; prices, limits and the swap itself are the server's.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+
 signal buy_requested(item_id: String, quantity: int)
 signal sell_requested(item_id: String, quantity: int)
 signal repair_requested(item_id: String)
@@ -30,17 +33,10 @@ var _feedback_key := ""
 
 func _ready() -> void:
 	layer = 4
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.7)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	add_child(UiKit.backdrop(0.78))
 	panel = PanelContainer.new()
 	add_child(panel)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.12, 0.13, 0.14)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 12)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.theme_type_variation = &"FramePanel"
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	panel.add_child(column)
@@ -48,11 +44,14 @@ func _ready() -> void:
 	column.add_child(header)
 	title = Label.new()
 	title.name = "Title"
+	title.theme_type_variation = &"HeaderLabel"
 	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 20)
 	header.add_child(title)
 	var close := Button.new()
+	close.theme_type_variation = &"GhostButton"
+	UiKit.hook_sounds(close, "back")
 	close.name = "Close"
 	close.text = tr("Close")
 	close.pressed.connect(close_window)
@@ -71,6 +70,7 @@ func _ready() -> void:
 	list.add_theme_constant_override("separation", 6)
 	scroll.add_child(list)
 	accept_button = Button.new()
+	accept_button.theme_type_variation = &"PrimaryButton"
 	accept_button.name = "Accept"
 	accept_button.custom_minimum_size.y = 40
 	accept_button.pressed.connect(func() -> void:
@@ -162,15 +162,13 @@ func _heading(text: String) -> void:
 	var label := Label.new()
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	label.text = text
-	label.add_theme_color_override("font_color", Color(1.0, 0.83, 0.35))
-	label.add_theme_font_size_override("font_size", 17)
+	label.theme_type_variation = &"HeaderLabel"
+	label.add_theme_font_size_override("font_size", 15)
 	list.add_child(label)
 
 func _row(item_id: String, text: String, buttons: Array) -> void:
-	var row := HBoxContainer.new()
+	var row := UiKit.card(list)
 	row.name = "Row_" + item_id
-	row.add_theme_constant_override("separation", 8)
-	list.add_child(row)
 	var picture := ITEM_ICONS.texture(item_id)
 	var icon := TextureRect.new()
 	icon.texture = picture
@@ -194,6 +192,7 @@ func _row(item_id: String, text: String, buttons: Array) -> void:
 			entry.action.call()
 		)
 		row.add_child(button)
+	UiKit.center_buttons(row)
 
 func _render() -> void:
 	if not is_instance_valid(list):

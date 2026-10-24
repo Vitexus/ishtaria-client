@@ -1,5 +1,13 @@
 extends CanvasLayer
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+
+## The spinner stays at least this long, so an answer from a near server is still seen.
+const MIN_PENDING_MS := 400
+## Past the request timeout of the session (8 s), a spinner without an answer stops anyway.
+const MAX_PENDING_MS := 10000
+
 signal eat_requested(item_id: String)
 signal new_character_requested
 signal loot_requested(id: String, item_id: String)
@@ -37,33 +45,35 @@ var _grave: Dictionary = {}
 var _busy := false
 var _feedback_key := ""
 var _buttons: Array[Button] = []
+## The button whose request is on its way (it spins), and when it was sent.
+var _pending_key := ""
+var _pending_since := 0
+## Whether the panel is narrower than 520 px, so the rows put their buttons under the item.
+var _narrow := false
 
 func _ready() -> void:
 	layer = 4
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.7)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	add_child(UiKit.backdrop(0.78))
 	panel = PanelContainer.new()
 	add_child(panel)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.12, 0.13, 0.14)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 12)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.theme_type_variation = &"FramePanel"
 	var column := VBoxContainer.new()
 	panel.add_child(column)
 	var header := HBoxContainer.new()
 	column.add_child(header)
 	summary = Label.new()
+	summary.theme_type_variation = &"HeaderLabel"
 	summary.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	header.add_child(summary)
 	var close := Button.new()
+	close.theme_type_variation = &"GhostButton"
+	UiKit.hook_sounds(close, "back")
 	close.text = "Close"
 	close.pressed.connect(hide)
 	header.add_child(close)
+	column.add_child(UiKit.divider())
 	content = VBoxContainer.new()
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(content)
@@ -93,11 +103,17 @@ func _resize() -> void:
 	var dimensions := Vector2(minf(760, screen.x - 24), minf(680, screen.y - 24))
 	panel.position = (screen - dimensions) / 2
 	panel.size = dimensions
+	if _narrow != (dimensions.x < 520.0):
+		_narrow = dimensions.x < 520.0
+		_render.call_deferred()
 
 func open() -> void:
 	_grave = {}
 	_obituary = {}
+	var was_open := visible
 	show()
+	if not was_open:
+		UiKit.open_animated(panel)
 	_render()
 
 ## The spells the character knows: `{mana, mana_max, spells: [{id, name, mana, effect, ready_in_ms ...}]}`.
@@ -113,25 +129,23 @@ func _spells_list() -> void:
 	if spells.is_empty():
 		return
 	var heading := _label(inventory_list, tr("Spells") + "  ·  " + tr("Mana") + " %s / %s" % [_spells.get("mana", 0), _spells.get("mana_max", 100)])
-	heading.add_theme_font_size_override("font_size", 20)
+	heading.theme_type_variation = &"HeaderLabel"
+	heading.add_theme_font_size_override("font_size", 17)
 	var number := 0
 	for spell: Dictionary in spells:
 		number += 1
-		var row := HBoxContainer.new()
-		row.name = "Spell_" + spell.id
-		inventory_list.add_child(row)
+		var row := _card(inventory_list)
+		# The column holds the row and, on a narrow panel, the line of buttons under it.
+		row.get_parent().name = "Spell_" + spell.id
 		_label(row, "%s  ·  %s %s  ·  %s" % [tr(spell.name), spell.mana, tr("mana"), tr("key %s") % number if number <= 9 else ""])
 		var button := Button.new()
 		button.name = "Cast"
 		button.text = tr("Cast")
-		button.custom_minimum_size = Vector2(72, 44)
+		button.custom_minimum_size = Vector2(72, 40)
 		button.disabled = _busy or not _alive() or int(_spells.get("mana", 0)) < int(spell.mana)
-		button.pressed.connect(func() -> void:
-			set_feedback("")
-			cast_requested.emit(spell.id)
-		)
 		row.add_child(button)
-		_buttons.append(button)
+		_action(button, "Cast:" + String(spell.id), func() -> void: cast_requested.emit(spell.id))
+		_center_buttons(row)
 
 func set_profile(profile: Dictionary) -> void:
 	_profile = profile.duplicate(true)
@@ -143,9 +157,63 @@ func set_profile(profile: Dictionary) -> void:
 
 func set_busy(value: bool) -> void:
 	_busy = value
+	_disable_actions()
+	# The answer is in: keep the hourglass a moment so a near server still shows it, then restore.
+	if not value and not _pending_key.is_empty():
+		var left := MIN_PENDING_MS - (Time.get_ticks_msec() - _pending_since)
+		if left > 0:
+			await get_tree().create_timer(left / 1000.0).timeout
+		_finish_pending()
+
+## Local refusal before a request left (wrong state, already busy elsewhere): drop the hourglass.
+func cancel_pending() -> void:
+	_finish_pending()
+	_busy = false
+	_disable_actions()
+
+## Registers an action button: hourglass and disable at once; stay that way until `set_busy(false)`
+## (server answered) or `cancel_pending()` (the click never became a request).
+func _action(button: Button, key: String, act: Callable) -> void:
+	_buttons.append(button)
+	button.set_meta("pending_key", key)
+	button.pressed.connect(func() -> void:
+		set_feedback("")
+		# One in-flight action at a time: busy flag, hourglass, or a pending key still clearing.
+		if _busy or not _pending_key.is_empty() or button.has_node("PendingSpinner"):
+			return
+		_pending_key = key
+		_pending_since = Time.get_ticks_msec()
+		# Optimistic busy so a second click cannot start another request before the client marks busy.
+		_busy = true
+		UiKit.set_pending(button, true)
+		_disable_actions()
+		act.call()
+		var sent := _pending_since
+		get_tree().create_timer(MAX_PENDING_MS / 1000.0).timeout.connect(func() -> void:
+			if _pending_key == key and _pending_since == sent:
+				_finish_pending()
+				_busy = false
+				_disable_actions()
+		)
+	)
+	# A list drawn again while the answer is awaited keeps the spinner on its button.
+	if key == _pending_key:
+		UiKit.set_pending(button, true)
+
+func _disable_actions() -> void:
 	for button in _buttons:
-		if is_instance_valid(button):
-			button.disabled = value or not _alive()
+		if not is_instance_valid(button):
+			continue
+		# Pending key locks every action until the hourglass is cleared (also during MIN_PENDING).
+		button.disabled = _busy or not _pending_key.is_empty() or not _alive() or button.has_node("PendingSpinner")
+
+func _finish_pending() -> void:
+	var key := _pending_key
+	_pending_key = ""
+	for button in _buttons:
+		if is_instance_valid(button) and button.get_meta("pending_key", "") == key:
+			UiKit.set_pending(button, false)
+			button.disabled = _busy or not _alive()
 
 func set_feedback(message: String) -> void:
 	_feedback_key = message
@@ -181,18 +249,31 @@ func _label(list: Node, text: String) -> Label:
 	list.add_child(label)
 	return label
 
+## A row of the list on a dark clay card; returns the row the contents go into.
+func _card(list: VBoxContainer, highlighted := false) -> HBoxContainer:
+	return UiKit.card(list, highlighted)
+
 func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
-	var row := HBoxContainer.new()
-	list.add_child(row)
 	var id: String = item.get("item_id", "")
+	var in_hand_now: bool = id in _profile.get("equipment", {}).values()
+	var row := _card(list, grave_id.is_empty() and in_hand_now)
 	var picture := ITEM_ICONS.texture(id)
-	if picture != null:
-		var icon := TextureRect.new()
-		icon.texture = picture
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.custom_minimum_size = Vector2(48, 48)
-		row.add_child(icon)
+	if picture == null:
+		# Missing bake: clay tile so the row still has a picture.
+		var image := Image.create(44, 44, false, Image.FORMAT_RGBA8)
+		image.fill(Color(0.72, 0.55, 0.32, 0.95))
+		picture = ImageTexture.create_from_image(image)
+	# The icon sits in a sunken slot, like a bag's pocket.
+	var slot := PanelContainer.new()
+	slot.add_theme_stylebox_override("panel", UiTheme.flat_style(Color(0, 0, 0, 0.35), Color(UiTheme.GOLD_DIM, 0.6), 1, 3, 3.0))
+	slot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(slot)
+	var icon := TextureRect.new()
+	icon.texture = picture
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.custom_minimum_size = Vector2(44, 44)
+	slot.add_child(icon)
 	var name_text := tr(item.get("name", id)) + " x " + str(item.get("quantity", "0"))
 	var calories: int = int(item.get("calories", 0))
 	if calories > 0:
@@ -208,56 +289,47 @@ func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
 		name_text += "\n" + tr("Durability %s / %s") % [int(item.durability), int(item.get("max_durability", item.durability))]
 	if in_hand:
 		name_text += "\n" + tr("Worn" if item.get("category") == "armor" else "In hand")
-	_label(row, name_text)
+	var description := _label(row, name_text)
+	description.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if grave_id.is_empty() and item.get("category") == "tool":
 		var use := Button.new()
 		use.name = "Use"
 		use.text = tr("Use")
-		use.custom_minimum_size = Vector2(72, 44)
+		use.custom_minimum_size = Vector2(72, 40)
 		use.disabled = _busy or not _alive()
-		use.pressed.connect(func() -> void:
-			set_feedback("")
-			use_requested.emit(id)
-		)
 		row.add_child(use)
-		_buttons.append(use)
+		_action(use, "Use:" + id, func() -> void: use_requested.emit(id))
 	if grave_id.is_empty() and id.begins_with("scroll_"):
 		var read := Button.new()
 		read.name = "Learn"
 		read.text = tr("Read")
-		read.custom_minimum_size = Vector2(72, 44)
+		read.custom_minimum_size = Vector2(72, 40)
 		read.disabled = _busy or not _alive()
-		read.pressed.connect(func() -> void:
-			set_feedback("")
-			learn_requested.emit(id)
-		)
 		row.add_child(read)
-		_buttons.append(read)
+		_action(read, "Learn:" + id, func() -> void: learn_requested.emit(id))
 	var placeable: bool = grave_id.is_empty() and item.get("category") == "placeable"
 	var seed: bool = grave_id.is_empty() and id.begins_with("seed_")
 	if placeable or seed:
 		var put := Button.new()
 		put.name = "Plant" if seed else "Place"
 		put.text = tr("Plant" if seed else "Place")
-		put.custom_minimum_size = Vector2(72, 44)
+		put.custom_minimum_size = Vector2(72, 40)
 		put.disabled = _busy or not _alive()
-		put.pressed.connect(func() -> void:
-			set_feedback("")
+		row.add_child(put)
+		_action(put, "Place:" + id, func() -> void:
 			if seed:
 				plant_requested.emit(id)
 			else:
 				place_requested.emit(id)
 		)
-		row.add_child(put)
-		_buttons.append(put)
 	if equippable:
 		var hold := Button.new()
 		hold.name = "Unequip" if in_hand else "Equip"
 		hold.text = tr("Unequip" if in_hand else "Equip")
-		hold.custom_minimum_size = Vector2(88, 44)
+		hold.custom_minimum_size = Vector2(88, 40)
 		hold.disabled = _busy or not _alive()
-		hold.pressed.connect(func() -> void:
-			set_feedback("")
+		row.add_child(hold)
+		_action(hold, "Equip:" + id, func() -> void:
 			if in_hand:
 				if not worn_slot.is_empty():
 					unequip_slot_requested.emit(worn_slot)
@@ -268,37 +340,48 @@ func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
 			else:
 				equip_requested.emit(id)
 		)
-		row.add_child(hold)
-		_buttons.append(hold)
 	# Equipped pieces stay in the pack until released; only loose inventory can be thrown away.
 	if grave_id.is_empty() and not in_hand and id != "gold":
 		var drop := Button.new()
+		# Quiet, so it is not taken for the main action of the row.
+		drop.theme_type_variation = &"GhostButton"
 		drop.name = "Drop"
 		drop.text = tr("Drop")
-		drop.custom_minimum_size = Vector2(72, 44)
+		drop.custom_minimum_size = Vector2(72, 40)
 		drop.disabled = _busy or not _alive()
 		drop.tooltip_text = tr("Drop on the ground")
-		drop.pressed.connect(func() -> void:
-			set_feedback("")
-			drop_requested.emit(id)
-		)
 		row.add_child(drop)
-		_buttons.append(drop)
+		_action(drop, "Drop:" + id, func() -> void: drop_requested.emit(id))
 	if not grave_id.is_empty() or calories > 0:
 		var button := Button.new()
 		button.name = "Take" if not grave_id.is_empty() else "Eat"
 		button.text = tr("Take" if not grave_id.is_empty() else "Eat")
-		button.custom_minimum_size = Vector2(72, 44)
+		button.custom_minimum_size = Vector2(72, 40)
 		button.disabled = _busy or not _alive()
-		button.pressed.connect(func() -> void:
-			set_feedback("")
+		row.add_child(button)
+		var eat_key := "Eat:" + id + grave_id
+		_action(button, eat_key, func() -> void:
 			if grave_id.is_empty():
 				eat_requested.emit(id)
 			else:
 				loot_requested.emit(grave_id, id)
 		)
-		row.add_child(button)
-		_buttons.append(button)
+	_center_buttons(row)
+
+## Buttons keep their height and sit in the middle of a taller card; on a narrow panel they go on
+## a line of their own under the item, so its description keeps the width.
+func _center_buttons(row: HBoxContainer) -> void:
+	var actions := row
+	if _narrow:
+		actions = HBoxContainer.new()
+		actions.alignment = BoxContainer.ALIGNMENT_END
+		actions.add_theme_constant_override("separation", 8)
+		row.get_parent().add_child(actions)
+	UiKit.center_buttons(row)
+	if actions != row:
+		for child in row.get_children():
+			if child is Button:
+				child.reparent(actions)
 
 ## The armour slot (`body` or `hands`) in which the item is worn, or an empty string.
 func _worn_slot(item_id: String) -> String:
@@ -342,7 +425,8 @@ func _render() -> void:
 		var notice: Dictionary = _grave.get("obituary", _obituary)
 		var name_label := _label(grave_list, notice.get("name", ""))
 		name_label.name = "MemorialName"
-		name_label.add_theme_font_size_override("font_size", 28)
+		name_label.theme_type_variation = &"TitleLabel"
+		name_label.add_theme_font_size_override("font_size", 30)
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_preview(_grave.get("kind", "headstone"))
 		for entry in [["Born: %s", "born_at"], ["Lived days: %s", "lived_days"], ["Lifetime wealth: %s gold", "lifetime_gold"], ["Friends: %s", "friends_count"]]:
@@ -356,7 +440,8 @@ func _render() -> void:
 		var create := Button.new()
 		create.name = "NewCharacter"
 		create.text = "New character"
-		create.custom_minimum_size.y = 44
+		create.theme_type_variation = &"PrimaryButton"
+		create.custom_minimum_size.y = 48
 		create.pressed.connect(func() -> void: hide(); new_character_requested.emit())
 		grave_list.add_child(create)
 	elif not _grave.is_empty():

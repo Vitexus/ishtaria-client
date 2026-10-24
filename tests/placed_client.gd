@@ -18,7 +18,7 @@ func _init() -> void:
 	crop.model = "food.carrot"
 	crop.crop = {"growth": 0.5, "ripe": false}
 	_check(client.valid_thing(crop), "a crop")
-	for broken in [{"id": 0}, {"kind": 5}, {"position": [1, 2]}, {"position": [INF, 0, 0]}, {"yaw": "x"}, {"owner": 7}, {"crop": {"growth": 2, "ripe": false}}, {"crop": {"growth": 0.5, "ripe": 1}}, {"model": "x".repeat(80)}]:
+	for broken in [{"id": 0}, {"kind": 5}, {"position": [1, 2]}, {"position": [INF, 0, 0]}, {"yaw": "x"}, {"owner": 7}, {"crop": {"growth": 2, "ripe": false}}, {"crop": {"growth": 0.5, "ripe": 1}}, {"model": "x".repeat(161)}]:
 		var copy := thing.duplicate(true)
 		copy.merge(broken, true)
 		_check(not client.valid_thing(copy), "malformed thing %s" % broken)
@@ -68,13 +68,31 @@ func _init() -> void:
 		{"item_id": "campfire", "name": "Campfire", "quantity": "1", "category": "placeable", "calories": 0},
 		{"item_id": "seed_carrot", "name": "Carrot seeds", "quantity": "2", "category": "raw_material", "calories": 0},
 		{"item_id": "stone", "name": "Stone", "quantity": "2", "category": "raw_material", "calories": 0}]}})
-	var campfire_button: Node = panel.inventory_list.find_child("Place", true, false)
-	var seed_button: Node = panel.inventory_list.find_child("Plant", true, false)
+	var campfire_button: Button = panel.inventory_list.find_child("Place", true, false) as Button
+	var seed_button: Button = panel.inventory_list.find_child("Plant", true, false) as Button
 	_check(campfire_button != null and seed_button != null, "place and plant buttons exist")
 	if campfire_button != null and seed_button != null:
 		campfire_button.pressed.emit()
+		_check(placed == ["campfire"], "the place button sends the item")
+		# Until the server answers, Place shows the hourglass and cannot be pressed again.
+		_check(campfire_button.has_node("PendingSpinner") and campfire_button.disabled and campfire_button.text.is_empty(), "place waits with a spinner")
+		_check(seed_button.disabled, "other inventory actions stay locked while place waits")
+		# A second press must not queue another place request.
+		campfire_button.pressed.emit()
+		_check(placed == ["campfire"], "a second press while pending is ignored")
+		# Server still working: busy stays true and the spinner remains.
+		panel.set_busy(true)
+		_check(campfire_button.has_node("PendingSpinner"), "busy from the client keeps the spinner")
+		# Answer arrived: spinner stays the minimum moment, then the button returns.
+		panel.set_busy(false)
+		_check(campfire_button.has_node("PendingSpinner"), "the spinner stays a moment even for a quick answer")
+		await create_timer(panel.MIN_PENDING_MS / 1000.0 + 0.1).timeout
+		_check(not campfire_button.has_node("PendingSpinner") and campfire_button.text == tr("Place") and not campfire_button.disabled, "the answer brings Place back")
+		# Local refusal clears the hourglass at once (no server round-trip).
 		seed_button.pressed.emit()
-		_check(placed == ["campfire"] and planted == ["seed_carrot"], "the buttons send the item")
+		_check(planted == ["seed_carrot"] and seed_button.has_node("PendingSpinner"), "plant starts pending")
+		panel.cancel_pending()
+		_check(not seed_button.has_node("PendingSpinner") and not seed_button.disabled, "cancel_pending drops the hourglass")
 	_check(panel.inventory_list.find_children("Place", "Button", true, false).size() == 1, "plain materials have no place button")
 
 	# Icons of the new foods exist.

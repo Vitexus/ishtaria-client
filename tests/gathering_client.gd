@@ -1,6 +1,7 @@
 extends SceneTree
 
 const SESSION := preload("res://scripts/player_session.gd")
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const ICONS := preload("res://scripts/item_icons.gd")
 
 var _failures := 0
@@ -66,7 +67,7 @@ func _run() -> void:
 		_check(ICONS.texture(id) != null, "baked icon for RPG item " + id)
 		_check(FileAccess.file_exists("res://assets/quaternius/ultimate-rpg-items/Models/%s.glb" % id), "bundled model for " + id)
 	_check(ICONS.texture("gold") != null and ICONS.texture("sword") != null, "gold and the sword have icons")
-	_check(ICONS.texture("suitcase") == null, "items without a model show no icon")
+	_check(ICONS.texture("no_such_item_xyz") == null, "items without a model show no icon")
 
 	# Scenery with harvest information; only trees and rocks can be harvested.
 	var environment := preload("res://scripts/surface_environment.gd").new()
@@ -100,13 +101,37 @@ func _run() -> void:
 	if craft_button != null:
 		craft_button.pressed.emit()
 	_check(requested == ["chop_oak_log"], "pressing craft requests the recipe")
+	# Until the server answers, the pressed button spins and cannot be pressed again.
+	_check(craft_button.has_node("PendingSpinner") and craft_button.disabled and craft_button.text.is_empty(), "the pressed button waits with a spinner")
+	crafting.set_busy(true)
+	crafting.set_profile(crafting._profile)
+	var redrawn: Button = crafting.find_child("Recipe_chop_oak_log", true, false).find_child("Craft", true, false)
+	_check(redrawn.has_node("PendingSpinner"), "a list drawn again keeps the spinner")
+	crafting.set_busy(false)
+	crafting.set_feedback("Crafted")
+	_check(redrawn.has_node("PendingSpinner"), "the spinner stays a moment even for a quick answer")
+	await create_timer(crafting.MIN_PENDING_MS / 1000.0 + 0.1).timeout
+	_check(not redrawn.has_node("PendingSpinner") and redrawn.text == "Craft" and not redrawn.disabled, "the answer brings the button back")
+	var card := redrawn.get_parent().get_parent().get_parent() as Control
+	_check(card.modulate != Color.WHITE, "the crafted recipe lights up")
+	crafting.set_feedback("Not enough materials")
+	_check(crafting.feedback.get_theme_color("font_color") != UiTheme.GOLD_BRIGHT, "a refusal is not shown as a success")
+	# The list was drawn again above; the icon check below looks at the current row.
+	recipe_row = crafting.find_child("Recipe_chop_oak_log", true, false)
 	crafting.queue_free()
 	# Tools and weapons can be put in hand; the one in hand can be taken out.
 	var panel := preload("res://scripts/survival_panel.gd").new()
 	root.add_child(panel)
 	var hand_events := []
-	panel.equip_requested.connect(func(id: String) -> void: hand_events.append(["equip", id]))
-	panel.unequip_requested.connect(func() -> void: hand_events.append(["unequip"]))
+	# No live session here: clear the hourglass after each intention, as main does on a local refuse.
+	panel.equip_requested.connect(func(id: String) -> void:
+		hand_events.append(["equip", id])
+		panel.cancel_pending()
+	)
+	panel.unequip_requested.connect(func() -> void:
+		hand_events.append(["unequip"])
+		panel.cancel_pending()
+	)
 	panel.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "equipment": {"hand": "axe"}, "inventory": {"used": 3, "capacity": 100, "items": [
 		{"item_id": "apple", "name": "Apple", "quantity": "3", "calories": 95, "category": "food"},
 		{"item_id": "axe", "name": "Axe", "quantity": "1", "calories": 0, "category": "tool"},
@@ -118,7 +143,10 @@ func _run() -> void:
 	_check(hand_events == [["equip", "pickaxe"], ["unequip"]], "equip intentions: %s" % [hand_events])
 	# Every tool also has a Use button (not food); it names the tool to use.
 	var uses := []
-	panel.use_requested.connect(func(id: String) -> void: uses.append(id))
+	panel.use_requested.connect(func(id: String) -> void:
+		uses.append(id)
+		panel.cancel_pending()
+	)
 	var use_buttons := panel.find_children("Use", "Button", true, false)
 	_check(use_buttons.size() == 2, "the axe and the pickaxe can be used, the apple cannot: %d" % use_buttons.size())
 	for button: Button in use_buttons:
@@ -130,7 +158,10 @@ func _run() -> void:
 
 	# A shield goes in the other hand, and worn items show their durability.
 	var offhand_events := []
-	panel.unequip_offhand_requested.connect(func() -> void: offhand_events.append("offhand"))
+	panel.unequip_offhand_requested.connect(func() -> void:
+		offhand_events.append("offhand")
+		panel.cancel_pending()
+	)
 	panel.set_profile({"life": {"alive": true}, "stats": {"gold": "0"}, "equipment": {"hand": "axe", "offhand": "shield_round"}, "inventory": {"used": 2, "capacity": 100, "items": [
 		{"item_id": "axe", "name": "Axe", "quantity": "1", "calories": 0, "category": "tool", "durability": 100, "max_durability": 120},
 		{"item_id": "shield_round", "name": "Shield Round", "quantity": "1", "calories": 0, "category": "shield", "durability": 149, "max_durability": 150}]}})

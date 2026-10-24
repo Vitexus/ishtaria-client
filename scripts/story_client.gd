@@ -11,7 +11,7 @@ signal failed(message: String)
 signal strings_changed
 ## The player's quests, each {quest, title_key, stage, text_key, final}; sent when they change.
 signal quests_changed(quests: Array)
-## Places the quests point to (empty until the player holds the aetherglass); sent when they change.
+## Places the quests point to (active guides always; unstarted need the aetherglass); sent when they change.
 signal markers_changed(markers: Array)
 ## A portrait (Texture2D) or a track (AudioStream) finished loading.
 signal media_ready(url: String, resource: Resource)
@@ -188,8 +188,9 @@ func load_strings() -> void:
 	_send("/story/strings", HTTPClient.METHOD_GET, "", _on_strings, MAX_STRINGS_BYTES)
 
 ## Asks for the quest log; the server also moves on quests that wait for the player to reach a place.
+## `lang` only selects the narrator voice for a new quest's tablet intro; it is never stored.
 func load_quests() -> void:
-	_send("/story/quests", HTTPClient.METHOD_GET, "", _on_quests)
+	_send("/story/quests?lang=" + _language(), HTTPClient.METHOD_GET, "", _on_quests)
 
 static func valid_quests(data: Variant) -> bool:
 	if not data is Array or data.size() > 64:
@@ -202,6 +203,8 @@ static func valid_quests(data: Variant) -> bool:
 			if not excerpt is Dictionary or not excerpt.get("paraphrase_key") is String:
 				return false
 			if excerpt.get("akkadian_key") != null and not excerpt.akkadian_key is String:
+				return false
+			if excerpt.get("voice") != null and not valid_media_url(excerpt.voice):
 				return false
 	return true
 

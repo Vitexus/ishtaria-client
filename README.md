@@ -491,6 +491,31 @@ and local preference persistence.
 
 License: MIT
 
+## Interface Look
+
+Every menu and window shares one theme in the colours of an Early Dynastic city: fired clay
+panels in gold frames, sand-coloured text, lapis lazuli for the hovered and chosen control and
+carnelian for warnings. `scripts/ui/ui_theme.gd` holds the palette, the fonts and the Godot
+`Theme`; `main.gd` merges it into the default theme, so a panel only names a variation
+(`FramePanel`, `HeaderLabel`, `PrimaryButton`, `GhostButton` ...). `scripts/ui/ui_kit.gd` builds the
+shared pieces: the framed panel, the gold divider, the darkened backdrop, the open animation and
+the button sounds. The title screen is a card over the turning planet, the ESC menu puts its
+commands beside the hall of fame, and the settings have tabs for display, sound and controls.
+The HUD at the bottom shows a lapis level badge, the name, the exact gold beside a coin, the five
+reserves as coloured bars (a reserve at 20 or less blinks) and the experience bar across its width;
+the hand slots and the minimap wear the same gold frame.
+
+Native test runs save screenshots in Czech: `godot4 --path . --script res://tests/escape_menu.gd`
+(menu and settings), `tests/achievements.gd`, `tests/panels_look.gd` (every game window with sample
+data) and `tests/connection_controls.gd`, at 1600x900 and 640x480 in `/tmp`.
+
+## Achievements
+
+The server grants achievements (the first tree felled, a first catch, a friend, levels 5 to 30
+...) inside the action that earns them; the catalog is `etc/achievements.json` of the server.
+The ESC menu opens them as cards, earned ones in gold with their date, secret ones as "???"
+until earned. A new one slides in at the top of the screen with the level fanfare.
+
 ## Credits and Thanks
 
 Thanks to [Kenney](https://kenney.nl/) for making high-quality game assets
@@ -523,7 +548,8 @@ The client includes resources from:
 - [Nature Kit](https://kenney.nl/assets/nature-kit): all 161 natural model variants under CC0, with original transforms and licence.
 - [Interface Sounds](https://kenney.nl/assets/interface-sounds): interface feedback audio under CC0.
 - [UI Pack Adventure](https://kenney.nl/assets/ui-pack-adventure): HUD panels, meters and checkboxes under CC0.
-- [Fantasy UI Borders](https://kenney.nl/assets/fantasy-ui-borders): selected decorative HUD border under CC0.
+- [Fantasy UI Borders](https://kenney.nl/assets/fantasy-ui-borders): the gold frames, the clay panel fill and the fading divider of the interface theme (`scripts/ui/ui_theme.gd`) and the HUD border, under CC0.
+- [Kenney Fonts](https://kenney.nl/assets/kenney-fonts): Kenney Future and Kenney Future Narrow under CC0, for titles, buttons and headers. The originals have no Czech caron and their Ů no ring; `tools/kenney-font-czech.py` adds Č Ď Ě Ň Ř Š Ť Ž and Ů (both cases) to make `assets/kenney/fonts/KenneyFutureCS.ttf` and `KenneyFutureNarrowCS.ttf`, renamed so they are not mistaken for Kenney's own fonts.
 - [UI Pack (RPG Expansion)](https://kenney.nl/assets/ui-pack-rpg-expansion): HUD surface and small button states under CC0.
 - [Animated Characters Protagonists](https://kenney.nl/assets/animated-characters-protagonists): model, four skins, idle and run animations under CC0.
 - [Animated Characters Retro](https://kenney.nl/assets/animated-characters-retro): model, four skins, idle and run animations under CC0.
@@ -535,7 +561,7 @@ The client includes resources from:
 - [Retro Fantasy Kit](https://kenney.nl/assets/retro-fantasy-kit): trees, barrels and crates in towns and harbours under CC0 (`tools/bundle-scenery.py` copies the used models).
 - [Pirate Kit](https://kenney.nl/assets/pirate-kit): harbour huts, piers, boats and ships under CC0.
 - [Graveyard Kit](https://kenney.nl/assets/graveyard-kit): headstone, obelisk, crypt parts and their texture under CC0.
-- [Game Icons](https://kenney.nl/assets/game-icons): inventory, connection settings and audio controls under CC0.
+- [Game Icons](https://kenney.nl/assets/game-icons): inventory, connection settings, audio controls, closing windows and achievements (trophy, padlock) under CC0.
 
 Original license notices are retained alongside the bundled resources in
 [`assets/kenney/`](assets/kenney/). These third-party resources retain their own

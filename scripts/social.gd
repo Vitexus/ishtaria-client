@@ -113,10 +113,19 @@ static func valid_event(data: Variant) -> bool:
 			# subject: armed | too_close | animal | animal_fled | ruined; body is optional JSON.
 			return data.subject in ["armed", "too_close", "animal", "animal_fled", "ruined"] \
 				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
+		"hurt":
+			# Ambush bite: subject is the animal model id; body is damage JSON.
+			return data.subject.length() <= 64 \
+				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
 		"escort":
 			# subject: started | ended | threatened | protected | hurt | failed
 			return data.subject in ["started", "ended", "threatened", "protected", "hurt", "failed"] \
 				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
+		"story":
+			return data.subject in ["quest_restart"] \
+				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
+		"achievement":
+			return preload("res://scripts/achievements_client.gd").valid_id(data.subject)
 		"love":
 			return data.subject in ["zone", "hit", "won", "miss"] \
 				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))

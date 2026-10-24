@@ -3,6 +3,8 @@ extends CanvasLayer
 ## player's quests expect them (the server only names them once the player holds the aetherglass).
 ## It never takes the mouse.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+
 const RPG := "res://assets/kenney/ui-rpg/PNG/"
 const ARROW := "res://assets/kenney/game-icons/arrowLeft.png"
 const STRIP_WIDTH := 560.0
@@ -28,7 +30,7 @@ func _ready() -> void:
 	style.texture = load(RPG + "panelInset_blue.png")
 	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
 		style.set_texture_margin(side, 10.0)
-	style.modulate_color = Color(0.45, 0.5, 0.65)
+	style.modulate_color = Color(UiTheme.CLAY.lightened(0.15), 0.9)
 	_strip.add_theme_stylebox_override("panel", style)
 	_strip.custom_minimum_size = Vector2(STRIP_WIDTH, STRIP_HEIGHT)
 	_strip.anchor_left = 0.5
@@ -94,7 +96,7 @@ func set_markers(markers: Array) -> void:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.add_theme_font_size_override("font_size", 13)
 		label.add_theme_color_override("font_color", color)
-		label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+		label.add_theme_color_override("font_outline_color", UiTheme.CLAY_DARK)
 		label.add_theme_constant_override("outline_size", 5)
 		item.add_child(label)
 		_area.add_child(item)

@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: ishtaria-client
 Architecture: amd64
-Depends: ${shlibs:Depends}, ${misc:Depends}, libgl1, libvulkan1
+Depends: ${shlibs:Depends}, ${misc:Depends}, libgl1, libvulkan1, fonts-noto-core
 Description: client of the Ishtaria virtual planet
  Explore a persistent, federated, Earth-sized virtual planet with a fully
  customisable avatar. Built with the Godot engine.

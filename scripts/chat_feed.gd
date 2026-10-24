@@ -2,6 +2,8 @@ extends CanvasLayer
 ## The chat part of the screen: short lines in the bottom left corner that fade after ten
 ## seconds. For now it carries what friends do (reaching a level); text messages will use it too.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+
 const SHOWN_SECONDS := 10.0
 const MAX_LINES := 6
 const MAX_CHARACTERS := 500
@@ -88,7 +90,7 @@ func add_line(text: String, color := Color(0.95, 0.9, 0.7), seconds := SHOWN_SEC
 	label.custom_minimum_size.x = 340.0
 	label.add_theme_font_size_override("font_size", 16)
 	label.add_theme_color_override("font_color", color)
-	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	label.add_theme_color_override("font_outline_color", Color(UiTheme.CLAY_DARK, 0.92))
 	label.add_theme_constant_override("outline_size", 5)
 	_column.add_child(label)
 	var tween := create_tween()

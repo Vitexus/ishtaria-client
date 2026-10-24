@@ -130,6 +130,8 @@ static func _create_disk_model() -> Node3D:
 	if inner == null:
 		return null
 	var model := Node3D.new()
+	# The controls measure how fast its walking clip walks (character_controls.gd `_bind_animation`).
+	model.set_meta("disk_model", true)
 	inner.name = "Body"
 	inner.scale *= GLTF_UNITS_PER_METRE
 	model.add_child(inner)

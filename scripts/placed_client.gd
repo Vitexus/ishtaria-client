@@ -6,12 +6,16 @@ signal placed_loaded(things: Array)
 ## An action worked: its kind (`place`, `plant`, `pickup`, `harvest`, `fish`) and the validated reply.
 signal done(kind: String, reply: Dictionary)
 signal failed(message: String)
+## True while a place / plant / pickup / harvest / fish request awaits the server.
+signal busy_changed(busy: bool)
 
 const POLL_SECONDS := 4.0
 
 var server_url := ""
 ## Returns the player's position in metres from the planet's centre, or the zero vector.
 var player_metres := Callable()
+## True while an action request is on the wire (not during background polls).
+var busy := false
 var _token := ""
 var _generation := 0
 var _timer: Timer
@@ -33,12 +37,19 @@ func stop() -> void:
 	_generation += 1
 	_token = ""
 	_polling = false
+	_set_busy(false)
 	if is_instance_valid(_timer):
 		_timer.stop()
 	placed_loaded.emit([])
 
 func is_running() -> bool:
 	return not _token.is_empty()
+
+func _set_busy(value: bool) -> void:
+	if busy == value:
+		return
+	busy = value
+	busy_changed.emit(value)
 
 # --- validation ---
 
@@ -133,60 +144,70 @@ func poll() -> void:
 	if at == Vector3.ZERO:
 		return
 	_polling = true
-	_send("/world/placed?x=%.2f&y=%.2f&z=%.2f" % [at.x, at.y, at.z], HTTPClient.METHOD_GET, "", func(result: int, code: int, reply: PackedByteArray) -> void:
+	if not _send("/world/placed?x=%.2f&y=%.2f&z=%.2f" % [at.x, at.y, at.z], HTTPClient.METHOD_GET, "", func(result: int, code: int, reply: PackedByteArray) -> void:
 		_polling = false
 		if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 			return
 		var data: Variant = JSON.parse_string(reply.get_string_from_utf8())
 		if valid_things(data):
 			placed_loaded.emit(data)
-	)
+	):
+		_polling = false
 
 ## Puts a thing from the inventory down at a point in metres from the planet's centre.
-func place(item_id: String, at: Vector3, yaw: float) -> void:
-	_put("place", item_id, at, yaw)
+## Returns false when the request was not sent (caller clears any button hourglass).
+func place(item_id: String, at: Vector3, yaw: float) -> bool:
+	return _put("place", item_id, at, yaw)
 
-func plant(seed_id: String, at: Vector3, yaw: float) -> void:
-	_put("plant", seed_id, at, yaw)
+func plant(seed_id: String, at: Vector3, yaw: float) -> bool:
+	return _put("plant", seed_id, at, yaw)
 
-func _put(kind: String, item_id: String, at: Vector3, yaw: float) -> void:
+func _put(kind: String, item_id: String, at: Vector3, yaw: float) -> bool:
 	var pattern := RegEx.new()
 	pattern.compile("^[a-z0-9_]{1,40}$")
 	if pattern.search(item_id) == null or not (is_finite(at.x) and is_finite(at.y) and is_finite(at.z) and is_finite(yaw)):
-		return
+		return false
 	var body := JSON.stringify({"item_id": item_id, "x": at.x, "y": at.y, "z": at.z, "yaw": fposmod(yaw, TAU)})
-	_act(kind, "/players/me/" + kind, body)
+	return _act(kind, "/players/me/" + kind, body)
 
-func pickup(id: int) -> void:
-	if id > 0:
-		_act("pickup", "/placed/%d/pickup" % id, "{}")
+func pickup(id: int) -> bool:
+	return id > 0 and _act("pickup", "/placed/%d/pickup" % id, "{}")
 
-func harvest(id: int) -> void:
-	if id > 0:
-		_act("harvest", "/placed/%d/harvest" % id, "{}")
+func harvest(id: int) -> bool:
+	return id > 0 and _act("harvest", "/placed/%d/harvest" % id, "{}")
 
-func fish() -> void:
-	_act("fish", "/players/me/fish", "{}")
+func fish() -> bool:
+	return _act("fish", "/players/me/fish", "{}")
 
-func _act(kind: String, path: String, body: String) -> void:
-	_send(path, HTTPClient.METHOD_POST, body, func(result: int, code: int, reply: PackedByteArray) -> void:
+func _act(kind: String, path: String, body: String) -> bool:
+	if busy or _token.is_empty():
+		return false
+	_set_busy(true)
+	if not _send(path, HTTPClient.METHOD_POST, body, func(result: int, code: int, reply: PackedByteArray) -> void:
+		_set_busy(false)
 		if result != HTTPRequest.RESULT_SUCCESS:
 			failed.emit("Action unavailable")
 			return
 		if code >= 400:
 			var key := error_key(code, reply.get_string_from_utf8())
-			if not key.is_empty():
-				failed.emit(key)
+			failed.emit(key if not key.is_empty() else "Action unavailable")
 			return
 		var data: Variant = JSON.parse_string(reply.get_string_from_utf8())
 		if valid_reply(kind, data):
 			done.emit(kind, data)
 			poll()
-	)
+		else:
+			failed.emit("Action unavailable")
+	):
+		_set_busy(false)
+		failed.emit("Action unavailable")
+		return false
+	return true
 
-func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+## Starts an HTTP request; returns false when it could not be sent (caller clears busy).
+func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> bool:
 	if _token.is_empty():
-		return
+		return false
 	var request := HTTPRequest.new()
 	request.timeout = 6.0
 	request.max_redirects = 0
@@ -203,3 +224,5 @@ func _send(path: String, method: HTTPClient.Method, body: String, handler: Calla
 	if request.request(server_url + path, headers, method, body) != OK:
 		request.queue_free()
 		_polling = false
+		return false
+	return true

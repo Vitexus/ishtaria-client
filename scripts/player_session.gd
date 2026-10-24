@@ -105,8 +105,9 @@ func sign_out() -> void:
 	_send("/players/session", HTTPClient.METHOD_DELETE)
 
 func eat(item_id: String) -> void:
-	if not busy and not _token.is_empty():
-		_send("/players/me/eat", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}))
+	if busy or _token.is_empty() or item_id.is_empty() or item_id.length() > 64:
+		return
+	_send("/players/me/eat", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}))
 
 func drink() -> void:
 	if not busy and not _token.is_empty():
@@ -346,8 +347,14 @@ static func action_error(code: int, text: String) -> String:
 			return "Object is out of reach"
 		"cannot strike companion":
 			return "You will not strike your companion"
+		"cannot strike a friend":
+			return "You will not strike a friend"
 		"npc not found":
 			return "Nothing to hit"
+		"story unavailable":
+			return "Action unavailable"
+		"player position unavailable":
+			return "Action unavailable"
 		"cannot sit while airborne":
 			return "Cannot sit while jumping"
 		"weapon missing":
@@ -385,6 +392,12 @@ static func valid_harvest(data: Variant) -> bool:
 	for item: Variant in data.items:
 		if not item is Dictionary or not item.get("item_id") is String or not item.get("name") is String or not item.get("quantity") is String or not item.quantity.is_valid_int():
 			return false
+	if data.has("ground"):
+		if not data.ground is Array or data.ground.size() > 16:
+			return false
+		for item: Variant in data.ground:
+			if not item is Dictionary or not item.get("item_id") is String or not item.get("name") is String or not item.get("quantity") is String or not item.quantity.is_valid_int():
+				return false
 	return true
 
 static func valid_milk(data: Variant) -> bool:
@@ -576,7 +589,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		if path == "/players/me/drink":
 			failed.emit(drink_error(code, body.get_string_from_utf8()))
 			return
-		if path == "/players/me/eat" or (path.ends_with("/loot") and path.begins_with("/graves/")):
+		if path == "/players/me/eat" or path.begins_with("/graves/"):
 			failed.emit("Player is dead" if code == 409 and path == "/players/me/eat" else ("Grave is out of reach" if code == 403 else "Item action unavailable"))
 			refresh()
 			return
@@ -675,6 +688,8 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		blocked.emit(block_reply)
 	if not harvest_reply.is_empty():
 		harvested.emit(harvest_reply)
+		if harvest_reply.get("ground") is Array and not harvest_reply.ground.is_empty():
+			ground_changed.emit()
 	elif not milk_reply.is_empty():
 		milked.emit(milk_reply)
 	elif path == "/players/me/craft":

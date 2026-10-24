@@ -34,6 +34,7 @@ Close,Close,Zavřít
 Press a key,Press a key,Stiskněte klávesu
 Could not save controls,Could not save controls,Nastavení ovládání nelze uložit
 Movement unavailable,Movement unavailable,Pohyb není dostupný
+Movement interrupted,"Movement interrupted, retrying","Pohyb se přerušil, zkouším znovu"
 Language,Language,Jazyk
 Connect,Connect,Připojit
 Disconnect,Disconnect,Odpojit
@@ -112,6 +113,14 @@ Deceased,Deceased,Zesnulý
 Inventory %s / %s,Inventory %s / %s,Inventář %s / %s
 %s kcal,%s kcal,%s kcal
 Player is dead,Player is dead,Hráč je mrtvý
+You have died,You have died,Zemřeli jste
+Your journey ends here, %s.,Your journey ends here, %s.,Tvá cesta zde končí, %s.
+You were slain in combat.,You were slain in combat.,Byl jsi zabit v boji.
+The quest returns to its beginning — try again,The quest returns to its beginning — try again,Výprava se vrací na začátek — zkus to znovu
+You fell to your death.,You fell to your death.,Zahynul jsi pádem.
+You drowned.,You drowned.,Utonul jsi.
+Your strength failed you.,Your strength failed you.,Síly tě opustily.
+Cause: %s,Cause: %s,Příčina: %s
 Grave is out of reach,Grave is out of reach,Hrob je mimo dosah
 Item action unavailable,Item action unavailable,Akce s předmětem není dostupná
 In Memoriam,In Memoriam,Parte
@@ -175,6 +184,7 @@ E: Stand up,E: Stand up,E: Vstát
 Cannot sit while jumping,Cannot sit while jumping,Nelze sedět ve skoku
 E: Take logs,E: Take logs,E: Vzít klády
 Harvested: %s,Harvested: %s,Získáno: %s
+Left on the ground: %s,Left on the ground: %s,Zůstalo na zemi: %s
 Hit %s / %s,Hit %s / %s,Úder %s / %s
 Inventory is full,Inventory is full,Inventář je plný
 Too exhausted,Too exhausted,Příliš vyčerpáno
@@ -329,6 +339,7 @@ Equip,Equip,Vybavit
 Unequip,Unequip,Sundat
 In hand,In hand,V ruce
 Settings,Settings,Nastavení
+Go to main menu,Go to main menu,Jít do hlavního menu
 Quit game,Quit game,Ukončit hru
 Hall of fame,Hall of fame,Síň slávy
 Name,Name,Jméno
@@ -372,6 +383,8 @@ Nothing in hand,Nothing in hand,Nic v ruce
 Nothing to hit,Nothing to hit,Není do čeho udeřit
 No shield in hand,No shield in hand,Žádný štít v ruce
 E: Talk to %s,E: Talk to %s,E: Promluvit s postavou %s
+E: Pick up %s,E: Pick up %s,E: Sebrat %s
+E: Examine grave of %s,E: Examine grave of %s,E: Prohlédnout hrob %s
 Leave,Leave,Odejít
 Too far away to talk,Too far away to talk,Je příliš daleko na rozhovor
 Not enough gold,Not enough gold,Nemáš dost zlata
@@ -449,6 +462,7 @@ You are talking too fast,You are talking too fast,Mluvíš příliš rychle
 You can only whisper to friends,You can only whisper to friends,Šeptat můžeš jen přátelům
 Their mailbox is full,Their mailbox is full,Jejich schránka je plná
 The animal bites you: -%s health,The animal bites you: -%s health,Zvíře tě kouslo: -%s zdraví
+A predator ambushes you: -%s health,A predator ambushes you: -%s health,Šelma tě přepadla: -%s zdraví
 Blocked,Blocked,Zablokováno
 Armour %s%%,Armour %s%%,Zbroj %s%%
 Armour piece broke,Armour piece broke,Kus zbroje se zničil
@@ -561,6 +575,9 @@ Dawn breaks,Dawn breaks,Svítá
 Night falls,Night falls,Nastává soumrak
 Road,Road,Cesta
 Building,Building,Budova
+Friendly,Friendly,Přátelské
+Hostile,Hostile,Nepřátelské
+Item,Item,Předmět
 Snare,Snare,Past (oko)
 Stand far from the snare and wait,Stand far from the snare and wait,Vzdal se od pasti a čekej
 Too close — the herd will not come,Too close — the herd will not come,Příliš blízko — stádo nepřijde
@@ -587,6 +604,7 @@ They will remember this,They will remember this,Tohle si bude pamatovat
 They stop fighting,They stop fighting,Přestává bojovat
 They strike back: -%s health,They strike back: -%s health,Bijí zpět: −%s zdraví
 You will not strike your companion,You will not strike your companion,Svého společníka neudeříš
+You will not strike a friend,You will not strike a friend,Přítele neudeříš
 They accept your apology,They accept your apology,Přijímají tvou omluvu
 Tell me about yourself,Tell me about yourself,Pověz mi něco o sobě
 Back to the conversation,Back to the conversation,Zpět k rozhovoru
@@ -619,3 +637,43 @@ Nothing to pick up,Nothing to pick up,Není co sebrat
 Drop one piece at a time,Drop one piece at a time,Zahazujte po jednom kuse
 Trade,Trade,Obchodovat
 Nothing left to buy,Nothing left to buy,Už není co koupit
+Display,Display,Obraz
+Sound,Sound,Zvuk
+Achievements,Achievements,Úspěchy
+Achievement unlocked,Achievement unlocked,Získán úspěch
+All,All,Vše
+Progress,Progress,Postup
+Gathering,Gathering,Řemesla
+Magic,Magic,Magie
+Social,Social,Společnost
+Story,Story,Příběh
+A secret achievement,A secret achievement,Tajný úspěch
+Earned %s,Earned %s,Získáno %s
+Woodcutter,Woodcutter,Dřevorubec
+Swing an axe or a pickaxe at a tree or a rock.,Swing an axe or a pickaxe at a tree or a rock.,Zatni sekeru nebo krumpáč do stromu či skály.
+Craftsman,Craftsman,Řemeslník
+Craft your first item.,Craft your first item.,Vyrob svůj první předmět.
+Patient Angler,Patient Angler,Trpělivý rybář
+Catch a fish.,Catch a fish.,Chyť rybu.
+Hunter,Hunter,Lovec
+Bring down an animal.,Bring down an animal.,Ulov zvíře.
+Builder,Builder,Stavitel
+"Place something you made, or plant a crop.","Place something you made, or plant a crop.","Postav něco, co jsi vyrobil, nebo zasaď plodinu."
+Spellcaster,Spellcaster,Kouzelník
+Cast a spell.,Cast a spell.,Sešli kouzlo.
+Gatekeeper,Gatekeeper,Strážce brány
+Finish building a portal.,Finish building a portal.,Dostav portál.
+Companion,Companion,Druh
+Make a friend.,Make a friend.,Najdi si přítele.
+Merchant,Merchant,Kupec
+Complete an exchange with another player.,Complete an exchange with another player.,Dokonči výměnu s jiným hráčem.
+The Tale Begins,The Tale Begins,Příběh začíná
+Set out on a quest.,Set out on a quest.,Vydej se na výpravu.
+Apprentice,Apprentice,Učeň
+Reach level 5.,Reach level 5.,Dosáhni úrovně 5.
+Journeyman,Journeyman,Tovaryš
+Reach level 10.,Reach level 10.,Dosáhni úrovně 10.
+Master,Master,Mistr
+Reach level 20.,Reach level 20.,Dosáhni úrovně 20.
+Legend of Ishtaria,Legend of Ishtaria,Legenda Ishtarie
+Reach level 30.,Reach level 30.,Dosáhni úrovně 30.

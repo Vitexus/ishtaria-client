@@ -43,8 +43,8 @@ void fragment() {
 	float foam = smoothstep(0.35, 0.0, depth_m) * (0.6 + 0.4 * waves);
 	vec3 colour = mix(deep_colour, shallow_colour, clarity);
 	ALBEDO = mix(colour, vec3(0.92, 0.96, 0.95), clamp(foam, 0.0, 1.0));
-	// Shallows show the bed through them, depths hide it; foam is opaque.
-	ALPHA = clamp(mix(0.96, 0.38, clarity) + foam * 0.6, 0.0, 1.0);
+	// Shallows show a little of the bed; from about a metre the pond reads as filled, not a floating film.
+	ALPHA = clamp(mix(0.97, 0.55, clarity) + foam * 0.5, 0.0, 1.0);
 	ROUGHNESS = mix(0.06, 0.5, clamp(foam, 0.0, 1.0));
 	SPECULAR = 0.6;
 }

@@ -6,6 +6,8 @@ signal selection_changed
 signal language_selected(index: int)
 
 const CATALOG := preload("res://scripts/character_catalog.gd")
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
 var nickname_input: LineEdit
 var password_input: LineEdit
 var packs: OptionButton
@@ -77,7 +79,7 @@ func _ready() -> void:
 	_camera.fov = 35.0
 	_stage.add_child(_camera)
 	_band = ColorRect.new()
-	_band.color = Color(0.065, 0.08, 0.075)
+	_band.color = Color(UiTheme.CLAY_DARK, 0.97)
 	_screen.add_child(_band)
 	var backdrop := load("res://assets/branding/background.jpg") as Texture2D
 	if backdrop != null:
@@ -99,7 +101,8 @@ func _ready() -> void:
 	var heading_row := HBoxContainer.new()
 	column.add_child(heading_row)
 	_heading = Label.new()
-	_heading.add_theme_font_size_override("font_size", 24)
+	_heading.theme_type_variation = &"HeaderLabel"
+	_heading.add_theme_font_size_override("font_size", 22)
 	_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading_row.add_child(_heading)
 	language_choice = OptionButton.new()
@@ -107,6 +110,7 @@ func _ready() -> void:
 	language_choice.add_icon_item(preload("res://assets/kenney/flag-pack/GB.png"), "English")
 	language_choice.add_icon_item(preload("res://assets/kenney/flag-pack/CZ.png"), "Čeština")
 	language_choice.item_selected.connect(func(index: int) -> void: language_selected.emit(index))
+	language_choice.add_theme_constant_override("icon_max_width", 28)
 	heading_row.add_child(language_choice)
 	mode = TabBar.new()
 	mode.add_tab("New player")
@@ -153,23 +157,31 @@ func _ready() -> void:
 	rotation_slider.value_changed.connect(_on_rotation_changed)
 	_appearance.add_child(rotation_slider)
 	var commands := HBoxContainer.new()
+	commands.add_theme_constant_override("separation", 8)
 	column.add_child(commands)
-	submit_button = Button.new()
+	submit_button = UiKit.button("", &"PrimaryButton", "confirmation")
 	submit_button.custom_minimum_size.y = 36
 	submit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	submit_button.pressed.connect(_submit)
 	commands.add_child(submit_button)
-	back_button = Button.new()
-	back_button.text = "Later"
+	back_button = UiKit.button("Later", &"GhostButton", "back")
 	back_button.custom_minimum_size.y = 36
 	back_button.pressed.connect(func() -> void: password_input.clear(); hide(); dismissed.emit())
 	commands.add_child(back_button)
 	feedback = Label.new()
 	feedback.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	feedback.add_theme_color_override("font_color", Color(1.0, 0.58, 0.5))
+	feedback.add_theme_color_override("font_color", UiTheme.CARNELIAN.lightened(0.25))
 	feedback.custom_minimum_size.y = 40
 	column.add_child(feedback)
+	# The form is 360 px wide: its two commands keep less padding than the theme's buttons.
+	for button: Button in [submit_button, back_button]:
+		button.add_theme_font_size_override("font_size", 15)
+		for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+			var style := button.get_theme_stylebox(state).duplicate() as StyleBox
+			style.content_margin_left = 8.0
+			style.content_margin_right = 8.0
+			button.add_theme_stylebox_override(state, style)
 	_screen.resized.connect(_resize)
 	set_selection(CATALOG.NEW_CHARACTER_DEFAULT)
 	_update_labels()

@@ -1,10 +1,17 @@
 extends Window
+## The settings: display, sound and controls (key bindings, mouse), saved with the other local
+## preferences. A window over the whole game with its own framed card (scripts/ui).
+
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
 
 signal closed
 
 var controls: Node3D
 ## The dialogue panel whose music and voice levels the sliders set.
 var dialogue: Node
+## The quest clay-tablet prologue; shares the dialogue voice volume.
+var tablet: Node
 ## Whether closing the dialog gives the mouse back to the game; off when the ESC menu opened it.
 var recapture := true
 ## The sky whose volumetric light shafts the check box switches.
@@ -18,24 +25,52 @@ var _sensitivity: HSlider
 var _invert: CheckBox
 var _music_volume: HSlider
 var _voice_volume: HSlider
+var _card: Control
+var _title_label: Label
+var _close_icon: Button
+var _tabs: TabContainer
+var _tab_keys: Array[String] = []
 
 func _ready() -> void:
 	title = tr("Settings")
-	size = Vector2i(400, 640)
-	min_size = Vector2i(320, 480)
+	# The window covers the game: a dimmed scene with a framed card in the middle and the
+	# settings in three tabs. It draws its own frame and title, so the system border is off.
+	borderless = true
+	transparent_bg = true
 	transient = true
 	exclusive = true
 	close_requested.connect(_close)
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(panel)
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	panel.add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
+	var root := PanelContainer.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	add_child(root)
+	root.add_child(UiKit.backdrop(0.8))
+	var center := CenterContainer.new()
+	root.add_child(center)
+	var column := UiKit.framed_panel(center, 10)
+	_card = column.get_parent()
+	var header := HBoxContainer.new()
+	column.add_child(header)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(40, 0)
+	header.add_child(spacer)
+	_title_label = Label.new()
+	_title_label.theme_type_variation = &"HeaderLabel"
+	_title_label.add_theme_font_size_override("font_size", 24)
+	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_title_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	header.add_child(_title_label)
+	_close_icon = UiKit.icon_button(preload("res://assets/kenney/game-icons/cross.png"), "back")
+	_close_icon.pressed.connect(_close)
+	header.add_child(_close_icon)
+	column.add_child(UiKit.divider())
+	_tabs = TabContainer.new()
+	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tabs.tab_alignment = TabBar.ALIGNMENT_CENTER
+	column.add_child(_tabs)
+
+	var display := _page("Display")
 	_fullscreen = CheckBox.new()
 	_fullscreen.name = "Fullscreen"
 	_fullscreen.text = tr("Fullscreen")
@@ -43,7 +78,7 @@ func _ready() -> void:
 		apply_fullscreen(enabled)
 		_feedback.text = "" if save_fullscreen(enabled) else tr("Could not save controls")
 	)
-	column.add_child(_fullscreen)
+	display.add_child(_fullscreen)
 	_light_shafts = CheckBox.new()
 	_light_shafts.name = "LightShafts"
 	_light_shafts.text = tr("Light shafts")
@@ -52,31 +87,14 @@ func _ready() -> void:
 			sky.set_light_shafts(enabled)
 		_feedback.text = "" if save_light_shafts(enabled) else tr("Could not save controls")
 	)
-	column.add_child(_light_shafts)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(scroll)
-	var bindings := VBoxContainer.new()
-	bindings.add_theme_constant_override("separation", 6)
-	bindings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(bindings)
-	for index in controls.ACTIONS.size():
-		var row := HBoxContainer.new()
-		bindings.add_child(row)
-		var label := Label.new()
-		label.text = controls.LABELS[index]
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(120, 32)
-		button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-		button.pressed.connect(_begin_binding.bind(index))
-		row.add_child(button)
-		_buttons.append(button)
-	var label := Label.new()
-	label.text = "Mouse sensitivity"
-	column.add_child(label)
+	display.add_child(_light_shafts)
+
+	var sound := _page("Sound")
+	_music_volume = _volume_slider(sound, "Music volume", "music_volume")
+	_voice_volume = _volume_slider(sound, "Dialogue voice volume", "voice_volume")
+
+	var input := _page("Controls")
+	_setting_label(input, "Mouse sensitivity")
 	_sensitivity = HSlider.new()
 	_sensitivity.min_value = 0.0005
 	_sensitivity.max_value = 0.01
@@ -86,7 +104,7 @@ func _ready() -> void:
 		controls.sensitivity = value
 		_save()
 	)
-	column.add_child(_sensitivity)
+	input.add_child(_sensitivity)
 	_invert = CheckBox.new()
 	_invert.text = "Invert mouse Y"
 	_invert.button_pressed = controls.invert_y
@@ -94,17 +112,34 @@ func _ready() -> void:
 		controls.invert_y = enabled
 		_save()
 	)
-	column.add_child(_invert)
-	_music_volume = _volume_slider(column, "Music volume", "music_volume")
-	_voice_volume = _volume_slider(column, "Dialogue voice volume", "voice_volume")
+	input.add_child(_invert)
+	input.add_child(UiKit.divider())
+	for index in controls.ACTIONS.size():
+		var row := HBoxContainer.new()
+		input.add_child(row)
+		var label := Label.new()
+		label.text = controls.LABELS[index]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		# A key cap: the bound key in gold on a clay plate.
+		var button := UiKit.button("")
+		button.custom_minimum_size = Vector2(130, 36)
+		button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+		button.add_theme_font_override("font", ThemeDB.fallback_font)
+		button.add_theme_font_size_override("font_size", 18)
+		button.pressed.connect(_begin_binding.bind(index))
+		row.add_child(button)
+		_buttons.append(button)
+
 	_feedback = Label.new()
 	_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_feedback.custom_minimum_size.y = 24
+	_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_feedback.add_theme_color_override("font_color", UiTheme.CARNELIAN.lightened(0.25))
 	column.add_child(_feedback)
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
-	var reset := Button.new()
-	reset.text = "Restore defaults"
+	var reset := UiKit.button("Restore defaults", &"GhostButton")
 	reset.pressed.connect(func() -> void:
 		controls.reset_keys()
 		controls.sensitivity = 0.002
@@ -118,12 +153,58 @@ func _ready() -> void:
 		_refresh()
 	)
 	row.add_child(reset)
-	var close := Button.new()
-	close.text = "Close"
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(gap)
+	var close := UiKit.button("Close", &"PrimaryButton", "back")
+	close.custom_minimum_size.x = 160
 	close.pressed.connect(_close)
 	row.add_child(close)
+	_update_titles()
 	_refresh()
+	get_tree().root.size_changed.connect(func() -> void:
+		if visible:
+			size = get_tree().root.size
+			_fit()
+	)
 	hide()
+
+## One tab: a scrolled column of settings, named by its untranslated key.
+func _page(key: String) -> VBoxContainer:
+	var scroll := ScrollContainer.new()
+	scroll.name = key
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_tabs.add_child(scroll)
+	_tab_keys.append(key)
+	var margin := MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_right", 12)
+	scroll.add_child(margin)
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 10)
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(page)
+	return page
+
+func _setting_label(page: VBoxContainer, key: String) -> Label:
+	var label := Label.new()
+	label.text = key
+	label.theme_type_variation = &"GoldLabel"
+	page.add_child(label)
+	return label
+
+func _update_titles() -> void:
+	title = tr("Settings")
+	if is_instance_valid(_title_label):
+		_title_label.text = title
+		_close_icon.tooltip_text = tr("Close")
+		for index in _tab_keys.size():
+			_tabs.set_tab_title(index, tr(_tab_keys[index]))
+
+## The card takes 720x640 at most and shrinks with the window, leaving a margin around it.
+func _fit() -> void:
+	var screen := Vector2(size)
+	_card.custom_minimum_size = Vector2(minf(720.0, screen.x - 24.0), minf(640.0, screen.y - 24.0))
 
 ## Connects the dialogue panel (created later than this window) and shows its current levels.
 func bind_dialogue(panel: Node) -> void:
@@ -131,11 +212,15 @@ func bind_dialogue(panel: Node) -> void:
 	_music_volume.set_value_no_signal(panel.music_volume)
 	_voice_volume.set_value_no_signal(panel.voice_volume)
 
+## Connects the quest tablet so the narrator uses the same voice volume as dialogue.
+func bind_tablet(panel: Node) -> void:
+	tablet = panel
+	if panel != null and panel.has_method("set_voice_volume"):
+		panel.set_voice_volume(_voice_volume.value)
+
 ## A 0-200 % slider for a playback level; the value is saved as [audio] <key> and applied at once.
 func _volume_slider(column: VBoxContainer, label_key: String, key: String) -> HSlider:
-	var label := Label.new()
-	label.text = label_key
-	column.add_child(label)
+	_setting_label(column, label_key)
 	var slider := HSlider.new()
 	slider.name = key.to_pascal_case()
 	slider.min_value = 0.0
@@ -148,6 +233,8 @@ func _volume_slider(column: VBoxContainer, label_key: String, key: String) -> HS
 				dialogue.set_music_volume(level)
 			else:
 				dialogue.set_voice_volume(level)
+		if key == "voice_volume" and tablet != null and tablet.has_method("set_voice_volume"):
+			tablet.set_voice_volume(level)
 		var config := ConfigFile.new()
 		config.load(controls.settings_path)
 		config.set_value("audio", key, level)
@@ -163,7 +250,9 @@ func open() -> void:
 	_fullscreen.set_pressed_no_signal(is_fullscreen())
 	_light_shafts.set_pressed_no_signal(is_instance_valid(sky) and sky.light_shafts)
 	_refresh()
-	popup_centered(Vector2i(mini(400, get_tree().root.size.x - 16), mini(640, get_tree().root.size.y - 32)))
+	popup(Rect2i(Vector2i.ZERO, get_tree().root.size))
+	_fit()
+	UiKit.open_animated(_card)
 
 static func is_fullscreen() -> bool:
 	var mode := DisplayServer.window_get_mode()
@@ -219,7 +308,7 @@ func _close() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED:
-		title = tr("Settings")
+		_update_titles()
 		if is_instance_valid(_fullscreen):
 			_fullscreen.text = tr("Fullscreen")
 		_refresh()

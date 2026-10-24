@@ -7,8 +7,11 @@ signal spells_loaded(known: Dictionary)
 signal cast_done(reply: Dictionary)
 signal learned(spell_id: String)
 signal failed(message: String)
+## True while learn / cast awaits the server (not during spell list refresh).
+signal busy_changed(busy: bool)
 
 var server_url := ""
+var busy := false
 var _token := ""
 var _generation := 0
 
@@ -21,10 +24,17 @@ func start(url: String, token: String) -> void:
 func stop() -> void:
 	_generation += 1
 	_token = ""
+	_set_busy(false)
 	spells_loaded.emit({"mana": 0, "mana_max": 100, "spells": []})
 
 func is_running() -> bool:
 	return not _token.is_empty()
+
+func _set_busy(value: bool) -> void:
+	if busy == value:
+		return
+	busy = value
+	busy_changed.emit(value)
 
 # --- validation ---
 
@@ -99,31 +109,39 @@ func refresh() -> void:
 			spells_loaded.emit(data)
 	)
 
-## Reads a scroll of the inventory.
-func learn(item_id: String) -> void:
+## Reads a scroll of the inventory. Returns false when the request was not sent.
+func learn(item_id: String) -> bool:
 	var pattern := RegEx.new()
 	pattern.compile("^scroll_[a-z0-9_]{1,30}$")
-	if pattern.search(item_id) == null:
-		return
-	_send("/players/me/learn", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}), func(result: int, code: int, reply: PackedByteArray) -> void:
+	if pattern.search(item_id) == null or busy or _token.is_empty():
+		return false
+	_set_busy(true)
+	if not _send("/players/me/learn", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}), func(result: int, code: int, reply: PackedByteArray) -> void:
+		_set_busy(false)
 		if not _ok(result, code, reply):
 			return
 		var data: Variant = JSON.parse_string(reply.get_string_from_utf8())
 		if data is Dictionary and data.get("spell") is String:
 			learned.emit(data.spell)
 			refresh()
-	)
+	):
+		_set_busy(false)
+		failed.emit("Magic unavailable")
+		return false
+	return true
 
-## Casts a known spell; a bolt names the animal it is aimed at.
-func cast(spell_id: String, object_id := "") -> void:
+## Casts a known spell; a bolt names the animal it is aimed at. Returns false when not sent.
+func cast(spell_id: String, object_id := "") -> bool:
 	var pattern := RegEx.new()
 	pattern.compile("^[a-z0-9_]{1,40}$")
-	if pattern.search(spell_id) == null or object_id.length() > 100:
-		return
+	if pattern.search(spell_id) == null or object_id.length() > 100 or busy or _token.is_empty():
+		return false
 	var body := {"spell": spell_id}
 	if not object_id.is_empty():
 		body["object_id"] = object_id
-	_send("/players/me/cast", HTTPClient.METHOD_POST, JSON.stringify(body), func(result: int, code: int, reply: PackedByteArray) -> void:
+	_set_busy(true)
+	if not _send("/players/me/cast", HTTPClient.METHOD_POST, JSON.stringify(body), func(result: int, code: int, reply: PackedByteArray) -> void:
+		_set_busy(false)
 		if not _ok(result, code, reply):
 			refresh()
 			return
@@ -131,7 +149,11 @@ func cast(spell_id: String, object_id := "") -> void:
 		if valid_cast(data):
 			cast_done.emit(data)
 			refresh()
-	)
+	):
+		_set_busy(false)
+		failed.emit("Magic unavailable")
+		return false
+	return true
 
 func _ok(result: int, code: int, reply: PackedByteArray) -> bool:
 	if result != HTTPRequest.RESULT_SUCCESS:
@@ -144,9 +166,9 @@ func _ok(result: int, code: int, reply: PackedByteArray) -> bool:
 		return false
 	return true
 
-func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> bool:
 	if _token.is_empty():
-		return
+		return false
 	var request := HTTPRequest.new()
 	request.timeout = 6.0
 	request.max_redirects = 0
@@ -162,3 +184,5 @@ func _send(path: String, method: HTTPClient.Method, body: String, handler: Calla
 	var headers := PackedStringArray(["Content-Type: application/json", "Authorization: Bearer " + _token])
 	if request.request(server_url + path, headers, method, body) != OK:
 		request.queue_free()
+		return false
+	return true

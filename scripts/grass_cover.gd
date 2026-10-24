@@ -66,6 +66,8 @@ func _mix(cell_a: int, cell_b: int, salt: int) -> int:
 	return value ^ (value >> 16)
 
 ## How thickly grass grows here, 0 to 1: grassland fully, forest floor partly, never on beaches, water or snow.
+## Dry land of a landscape patch (a water-hole bank on a coarse river cell) grows grass even when the
+## planet biome is floodplain — matching the server's wildlife placement rule.
 func _density(point: Vector3) -> float:
 	if every_biome:
 		return 1.0
@@ -74,6 +76,10 @@ func _density(point: Vector3) -> float:
 			return 1.0
 		5:
 			return 0.55
+	var direction := [point.x, point.y, point.z]
+	if surface._terrain_offset_m(direction, surface.elevation64_base(direction) * 1000.0) != 0.0 \
+			and not is_finite(surface._terrain_water_m(direction)):
+		return 0.9
 	return 0.0
 
 ## Worker-safe (reads terrain data only). Returns {chunk key: PackedFloat32Array of MultiMesh buffer rows},

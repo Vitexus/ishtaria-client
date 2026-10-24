@@ -21,19 +21,27 @@ func _run() -> void:
 	# Standing on the +Y pole facing -Z: right is +X, forward (up on the map) is -Z.
 	minimap.set_player_orientation(Vector3.UP, Vector3.FORWARD)
 	var entities: Array[Dictionary] = [
-		{"id": "near", "name": "Gilgamesh", "kind": "npc", "position": Vector3(1050, 0, 1000), "is_quest": false},
+		{"id": "near", "name": "Gilgamesh", "kind": "neutral", "position": Vector3(1050, 0, 1000), "is_quest": false},
+		{"id": "ally", "name": "Shamhat", "kind": "friendly", "position": Vector3(1020, 0, 1000), "is_quest": false},
+		{"id": "foe", "name": "Enkidu", "kind": "hostile", "position": Vector3(1000, 0, 1050), "is_quest": false},
+		{"id": "wood", "name": "", "kind": "pickup", "position": Vector3(980, 0, 1000), "is_quest": false},
 		{"id": "north", "name": "Uruk", "kind": "city", "position": Vector3(1000, 0, 900), "is_quest": false},
-		{"id": "far", "name": "Humbaba", "kind": "npc", "position": Vector3(5000, 0, 1000), "is_quest": false},
+		{"id": "far", "name": "Humbaba", "kind": "hostile", "position": Vector3(5000, 0, 1000), "is_quest": false},
 		{"id": "goal", "name": "Goal", "kind": "quest", "position": Vector3(1000, 0, 400), "is_quest": true},
 	]
 	minimap.set_entities(entities)
 	minimap._update_minimap()
 	var markers: Dictionary = minimap._entity_markers
-	_check(markers.size() == 4, "Every entity gets a marker")
+	_check(markers.size() == 7, "Every entity gets a marker")
 	var centre: Vector2 = minimap._get_size() / 2.0
 	_check(markers.near.marker.visible and markers.near.marker.position.x > centre.x, "East of the player is right of the centre")
 	_check(markers.north.marker.position.y < centre.y, "North of the player is above the centre")
 	_check(not markers.far.marker.visible, "Beyond the view radius is hidden")
+	_check(minimap._get_kind_color("neutral") == minimap.NEUTRAL_COLOR, "Neutral characters are grey")
+	_check(minimap._get_kind_color("friendly") == minimap.FRIENDLY_COLOR, "Friendly characters are green")
+	_check(minimap._get_kind_color("hostile") == minimap.HOSTILE_COLOR, "Hostile characters are red")
+	_check(minimap._get_kind_color("pickup") == minimap.PICKUP_COLOR, "Pickable items are white")
+	_check(not markers.wood.label.visible, "Pickup dots have no letter label")
 	var goal: Array = minimap._goal_overlay._goals
 	_check(goal.size() == 1 and goal[0].id == "goal", "Only quest entities are goals, even beyond the view radius")
 	_check(not markers.goal.marker.visible and goal[0].offset.y < 0.0, "A distant goal is hidden but still points forward")

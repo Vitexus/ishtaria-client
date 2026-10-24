@@ -2,6 +2,8 @@ extends CanvasLayer
 ## Short messages about the player's own actions (harvesting, crafting) and a
 ## prompt naming what the interaction key would do. It never takes the mouse.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+
 const SHOWN_SECONDS := 3.0
 
 var _toast: Label
@@ -22,7 +24,7 @@ func _make_label(offset: int, size: int) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	label.add_theme_color_override("font_outline_color", Color(UiTheme.CLAY_DARK, 0.92))
 	label.add_theme_constant_override("outline_size", 6)
 	label.anchor_left = 0.2
 	label.anchor_right = 0.8

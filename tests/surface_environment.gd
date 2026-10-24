@@ -44,7 +44,8 @@ func _test_async_detail(surface: Node3D) -> void:
 	surface.show_region(Vector3.FORWARD)
 
 ## A pond of a landscape patch is water for the client as it is for the server: the surface is announced where the
-## water stands above the ground, and nowhere else.
+## water stands above the ground, and nowhere else. The water mesh stays a flat plane over the bowl (not a sheet
+## ramping down the bank into the bed).
 func _test_pond(surface: Node3D) -> void:
 	var point := [0.0, 0.0, -1.0]
 	var size := 200
@@ -56,13 +57,34 @@ func _test_pond(surface: Node3D) -> void:
 	water.fill(-4.0)
 	var height_m: float = surface.elevation64_base(point) * 1000.0
 	var saved: Array = surface._terrain_patches
-	surface._terrain_patches = [{"place": "pond", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": height_m, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}]
+	var patch := {"place": "pond", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": height_m, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}
+	surface._terrain_patches = [patch]
 	var metres := [0.0, 0.0, -6371000.0 - height_m]
 	var level: float = surface.water_surface_km(metres)
 	_check(is_finite(level) and absf(level * 1000.0 - (height_m - 0.4)) < 0.01, "The surface of a pond is announced 40 cm under the anchor height")
+	surface.show_region(Vector3(0, 0, -1))
+	_check(surface.detail.get_child_count() == 2, "A pond patch builds land and water meshes")
+	var water_mesh: ArrayMesh = surface.detail.get_child(1).mesh
+	var water_arrays := water_mesh.surface_get_arrays(0)
+	var water_verts: PackedVector3Array = water_arrays[Mesh.ARRAY_VERTEX]
+	var water_uv2: PackedVector2Array = water_arrays[Mesh.ARRAY_TEX_UV2]
+	var water_tris: PackedInt32Array = water_arrays[Mesh.ARRAY_INDEX]
+	_check(water_tris.size() > 0 and water_tris.size() < surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX].size(), "Water only keeps cells that touch the pond")
+	var wet_radii: Array[float] = []
+	for index in water_verts.size():
+		if water_uv2[index].y > -50.0:
+			# Absolute radius from the planet centre (render origin is the patch anchor).
+			var absolute: Vector3 = water_verts[index] + Vector3(0, 0, -6371.0)
+			wet_radii.append(absolute.length())
+	_check(wet_radii.size() > 8, "The pond has wet water vertices")
+	if not wet_radii.is_empty():
+		var lo: float = wet_radii.min()
+		var hi: float = wet_radii.max()
+		# A flat pond surface: wet verts share one radius within a few centimetres (not the 2 m bowl).
+		_check(hi - lo < 0.05, "Water over a carved bowl stays a flat plane (spread %.3f km)" % (hi - lo))
 	surface._terrain_patches = []
 	_check(not is_finite(surface.water_surface_km(metres)) or absf(surface.water_surface_km(metres) * 1000.0 - (height_m - 0.4)) > 0.01, "Without the patch there is no pond")
-	surface._terrain_patches = [{"place": "pond", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": height_m, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}]
+	surface._terrain_patches = [patch.duplicate()]
 	grid.fill(0.0)
 	surface._terrain_patches[0].grid = grid
 	_check(not is_finite(surface.water_surface_km(metres)), "Water below the ground is not a surface")

@@ -19,6 +19,8 @@ const PORTAL_MODEL := "res://assets/kenney/survival-kit/Models/GLB format/struct
 const PORTAL_STATES := ["building", "open", "closed"]
 ## Scale of the gate model: the model is half a metre tall, so the portal is four metres tall.
 const PORTAL_SCALE_M := 8.0
+## Player death memorials (Kenney headstone / monument / mausoleum): four metres of height.
+const MEMORIAL_SCALE_M := 4.0
 ## Default detail disk (km) without a datadisk landscape patch. Large enough to walk and to
 ## hide the coarse globe underfoot; small enough that the mesh stays fine (~5.5 m cells).
 const DETAIL_RADIUS := 0.7
@@ -60,6 +62,10 @@ const WATER_MAP_EXTENT_MAX_M := 3500.0
 const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 ## Built / tilled ground from a datadisk clear mask (streets, houses, fields).
 const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
+## NPC health / hostility bar (metres). Billboard meshes are sized in km — see `_attach_health_bar`.
+const HEALTH_BAR_LENGTH_M := 0.5
+const HEALTH_BAR_HEIGHT_M := 0.04
+const HEALTH_BAR_ABOVE_HEAD_M := 0.20
 
 var heightmap: Image:
 	set(value):
@@ -141,6 +147,8 @@ const COMMON_GESTURES := ["Point", "Sad", "Happy", "Salute"]
 var _origin_metres: Array = []
 var _models: Dictionary = {}
 var _objects_request: HTTPRequest
+## Drop/pickup asked for a refresh while a region fetch was already in flight.
+var _objects_refresh_pending := false
 ## Landscape patches of datadisk places (ADR 0013): their metadata arrives with the region,
 ## their 16-bit height and water grids are downloaded directly (Godot would load them as half
 ## floats and lose the decimetre step) and replace the base terrain inside their rectangle.
@@ -256,6 +264,9 @@ func load_catalog(path: String) -> bool:
 			var metallic: Variant = entry.metallic
 			if not (metallic is float or metallic is int) or not is_finite(float(metallic)) or metallic < 0 or metallic > 1:
 				return false
+		# Nose along +Z (default; Quaternius and 0 A.D. fauna) or -Z: wander turns with this.
+		if entry.has("face_z") and entry.face_z != 1 and entry.face_z != -1:
+			return false
 		validated.append(entry)
 	if validated.is_empty() or validated.size() > 512:
 		return false
@@ -590,11 +601,13 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 	var land_uv2 := PackedVector2Array()
 	var water_vertices := PackedVector3Array()
 	var water_uv2 := PackedVector2Array()
+	var water_levels := PackedFloat32Array()
 	land.resize(count)
 	land_normals.resize(count)
 	water_vertices.resize(count)
 	land_uv2.resize(count)
 	water_uv2.resize(count)
+	water_levels.resize(count)
 	for row in segments + 1:
 		for column in segments + 1:
 			var horizontal: float = (float(column) / segments * 2.0 - 1.0) * radius_km
@@ -618,27 +631,49 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 			if edge < 1.0 and is_finite(water_level):
 				var base_water := float(environment.water_m[environment_index(point)]) / 1000.0
 				water_level = lerpf(base_water, water_level, edge)
-			# Dry ground carries no water: the vertex sinks under the land and the shader discards it.
-			var water := (water_level if is_finite(water_level) else height - 0.01) + 0.001
+			# Wet verts sit on the announced surface (+5 cm in metres avoids z-fighting). Dry verts sit
+			# under the land for now; shore quads lift them onto the pond plane below so a triangle
+			# from deep water to the bank stays a flat sheet, not a ramp down the bowl.
+			var water := (water_level if is_finite(water_level) else height - 0.01) + 0.00005
 			var index := row * (segments + 1) + column
 			land_normals[index] = point
 			land_uv2[index] = Vector2(height, water_level if is_finite(water_level) else -100.0)
 			land[index] = _position_from(anchor, [direction[0] * (RADIUS + height) * 1000.0, direction[1] * (RADIUS + height) * 1000.0, direction[2] * (RADIUS + height) * 1000.0])
 			water_uv2[index] = Vector2(height, water_level if is_finite(water_level) else -100.0)
+			water_levels[index] = water_level if is_finite(water_level) else NAN
 			water_vertices[index] = _position_from(anchor, [direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0])
 	# A disk, not a square: the old axis-aligned patch looked like a huge floating tile from above.
 	var indices := PackedInt32Array()
+	var water_indices := PackedInt32Array()
+	var stride := segments + 1
 	for row in segments:
 		for column in segments:
 			var mid_h: float = ((float(column) + 0.5) / segments * 2.0 - 1.0) * radius_km
 			var mid_v: float = ((float(row) + 0.5) / segments * 2.0 - 1.0) * radius_km
 			if Vector2(mid_h, mid_v).length() > radius_km:
 				continue
-			var first := row * (segments + 1) + column
-			indices.append_array(PackedInt32Array([first, first + segments + 1, first + 1, first + 1, first + segments + 1, first + segments + 2]))
+			var first := row * stride + column
+			var quad := PackedInt32Array([first, first + stride, first + 1, first + stride + 1])
+			indices.append_array(PackedInt32Array([first, first + stride, first + 1, first + 1, first + stride, first + stride + 1]))
+			var plane := NAN
+			for corner in quad:
+				var level: float = water_levels[corner]
+				if is_finite(level):
+					plane = level if not is_finite(plane) else maxf(plane, level)
+			if not is_finite(plane):
+				continue
+			# Dry corners of a wet cell sit on the same pond plane; the shader still discards them
+			# (UV2.y = -100) so the shoreline clips cleanly instead of ramping into the bed.
+			for corner in quad:
+				if is_finite(water_levels[corner]):
+					continue
+				var up: Vector3 = land_normals[corner]
+				var water_h := plane + 0.00005
+				water_vertices[corner] = _position_from(anchor, [up.x * (RADIUS + water_h) * 1000.0, up.y * (RADIUS + water_h) * 1000.0, up.z * (RADIUS + water_h) * 1000.0])
+			water_indices.append_array(PackedInt32Array([first, first + stride, first + 1, first + 1, first + stride, first + stride + 1]))
 	var tufts: Dictionary = grass_cover.compute(unit, anchor)
 	var water_image := _bake_water_image(unit, tangent, forward, float(job.map_extent))
-	return {"job": job, "grass": tufts, "water_image": water_image, "land": land, "normals": land_normals, "uv2": land_uv2, "water": water_vertices, "water_uv2": water_uv2, "indices": indices}
+	return {"job": job, "grass": tufts, "water_image": water_image, "land": land, "normals": land_normals, "uv2": land_uv2, "water": water_vertices, "water_uv2": water_uv2, "indices": indices, "water_indices": water_indices}
 
 func _build_detail_mesh(vertices: PackedVector3Array, normals: PackedVector3Array, uv2: PackedVector2Array, indices: PackedInt32Array) -> ArrayMesh:
 	var arrays := []
@@ -676,7 +711,12 @@ func _finish_detail(result: Dictionary) -> void:
 	local_land.material_override = material
 	detail.add_child(local_land)
 	var local_water := MeshInstance3D.new()
-	local_water.mesh = _build_detail_mesh(result.water, result.normals, result.water_uv2, result.indices)
+	# Wet cells only when a pond/river is present; an empty index list is invalid for ArrayMesh,
+	# so a dry disk falls back to the land triangles (every fragment is discarded by the shader).
+	var water_tris: PackedInt32Array = result.get("water_indices", PackedInt32Array())
+	if water_tris.is_empty():
+		water_tris = result.indices
+	local_water.mesh = _build_detail_mesh(result.water, result.normals, result.water_uv2, water_tris)
 	var water_detail := ShaderMaterial.new()
 	water_detail.shader = preload("res://scripts/local_water.gdshader")
 	var anchor: Array = job.anchor
@@ -756,6 +796,9 @@ func _on_objects_received(result: int, code: int, _headers: PackedStringArray, b
 	_objects_request = null
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200 or not apply_objects(JSON.parse_string(body.get_string_from_utf8())):
 		objects_failed.emit("Surface objects unavailable")
+	if _objects_refresh_pending:
+		_objects_refresh_pending = false
+		refresh_objects()
 
 func apply_objects(data: Variant) -> bool:
 	if environment.is_empty() or not data is Dictionary or data.get("version") != 1 or data.get("heightmap_sha256") != environment.heightmap_sha256 or data.get("seed") != environment.seed:
@@ -933,7 +976,8 @@ func apply_memorials(data: Variant) -> bool:
 		placement.position = _render_position(entry.position)
 		var up := Vector3(entry.position[0], entry.position[1], entry.position[2]).normalized()
 		placement.quaternion = Quaternion(Vector3.UP, up)
-		placement.scale = Vector3.ONE / 1000.0
+		# Kenney graveyard meshes are authored near 1 m; player memorials need to read at a glance.
+		placement.scale = Vector3.ONE * MEMORIAL_SCALE_M / 1000.0
 		placement.add_child(MEMORIALS.create_memorial(entry.kind))
 		memorials.add_child(placement)
 	return true
@@ -1037,7 +1081,9 @@ func media_ready(url: String, resource: Resource) -> void:
 			label.position = Vector3(0, head * 1.08, 0)
 		_attach_health_bar(placement, _npc_entries[index], head)
 
-## Health bar above the name: green for a friend (escort), red for a foe; hidden when absent.
+## Half-metre bar, twenty centimetres above the head: green for a friend (escort), red for a foe.
+## Billboard materials keep only the node's origin (Godot drops ancestor scale), and NPC placements
+## are scaled to kilometres (~0.001), so mesh sizes are authored in km (metres × 0.001).
 func _attach_health_bar(placement: Node3D, entry: Dictionary, head: float) -> void:
 	var old := placement.get_node_or_null("HealthBar")
 	if old != null:
@@ -1055,12 +1101,15 @@ func _attach_health_bar(placement: Node3D, entry: Dictionary, head: float) -> vo
 	if max_hp <= 0.0:
 		return
 	var ratio := clampf(float(current) / max_hp, 0.0, 1.0)
+	# Placement local units → km via placement.scale; 1 m of height above the head in those units.
+	var metres_to_local := 0.001 / maxf(placement.scale.x, 0.000001)
+	var km := 0.001
 	var root := Node3D.new()
 	root.name = "HealthBar"
-	root.position = Vector3(0, head * 1.08 + 0.14, 0)
+	root.position = Vector3(0, head * 1.08 + HEALTH_BAR_ABOVE_HEAD_M * metres_to_local, 0)
 	var bg := MeshInstance3D.new()
 	var bg_mesh := BoxMesh.new()
-	bg_mesh.size = Vector3(0.45, 0.045, 0.012)
+	bg_mesh.size = Vector3(HEALTH_BAR_LENGTH_M * km, HEALTH_BAR_HEIGHT_M * km, HEALTH_BAR_HEIGHT_M * 0.3 * km)
 	bg.mesh = bg_mesh
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -1071,10 +1120,11 @@ func _attach_health_bar(placement: Node3D, entry: Dictionary, head: float) -> vo
 	root.add_child(bg)
 	var fill := MeshInstance3D.new()
 	var fill_mesh := BoxMesh.new()
-	fill_mesh.size = Vector3(0.42 * maxf(ratio, 0.02), 0.032, 0.014)
+	var fill_length := HEALTH_BAR_LENGTH_M * 0.94 * maxf(ratio, 0.02)
+	fill_mesh.size = Vector3(fill_length * km, HEALTH_BAR_HEIGHT_M * 0.7 * km, HEALTH_BAR_HEIGHT_M * 0.35 * km)
 	fill.mesh = fill_mesh
-	# Left-align the fill inside the background while billboarded.
-	fill.position = Vector3(-0.21 * (1.0 - ratio), 0, 0.001)
+	# Left-align the fill inside the background while billboarded (offsets also in km).
+	fill.position = Vector3(-0.5 * (HEALTH_BAR_LENGTH_M - fill_length) * km, 0, 0.001 * km)
 	var fill_mat := StandardMaterial3D.new()
 	fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fill_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
@@ -1103,6 +1153,7 @@ func set_npc_health(npc_id: String, current: int, maximum: int, relation: String
 	if index < 0 or index >= npcs.get_child_count():
 		return
 	var entry: Dictionary = _npc_entries[index]
+	var was_hostile := entry.get("health") is Dictionary and str(entry.health.get("relation", "")) == "foe"
 	if current >= maximum and relation != "foe":
 		entry.erase("health")
 	else:
@@ -1114,6 +1165,9 @@ func set_npc_health(npc_id: String, current: int, maximum: int, relation: String
 	if label != null:
 		head = label.position.y / 1.08
 	_attach_health_bar(placement, entry, head)
+	var is_hostile := relation == "foe" and entry.has("health")
+	if was_hostile != is_hostile:
+		npcs_changed.emit()
 
 ## Applies health fields from a fresh `/world/objects` npc list onto the current characters.
 func sync_npc_health(data: Variant) -> void:
@@ -1755,6 +1809,7 @@ func _place_structure(placement: Node3D, url: String) -> void:
 func _fill_structure(placement: Node3D, scene: PackedScene) -> void:
 	var model := scene.instantiate() as Node3D
 	if model != null:
+		_light_materials(model)
 		placement.add_child(model)
 
 ## A building model arrived: it fills the placements that waited for it.
@@ -1841,6 +1896,7 @@ func _apply_night(light: Node) -> void:
 func apply_placed(data: Variant) -> bool:
 	_clear_placed()
 	if not data is Array or data.size() > 500:
+		npcs_changed.emit()
 		return false
 	for entry: Variant in data:
 		if not entry is Dictionary or not (entry.get("id") is float or entry.get("id") is int) or not entry.get("kind") is String or not entry.get("position") is Array or entry.position.size() != 3:
@@ -1880,6 +1936,7 @@ func apply_placed(data: Variant) -> bool:
 		placement.add_child(model)
 		placed.add_child(placement)
 		_placed_entries.append(entry.duplicate(true))
+	npcs_changed.emit()
 	return true
 
 func _clear_placed() -> void:
@@ -1888,10 +1945,11 @@ func _clear_placed() -> void:
 		placed.remove_child(child)
 		child.queue_free()
 
-## Loose packs lying on the ground. Drawn as floating item icons.
+## Loose packs lying on the ground. Drawn as floating item icons (same km scale as NPC labels).
 func apply_loot(data: Variant) -> void:
 	_clear_loot()
 	if not data is Array or data.size() > 200:
+		npcs_changed.emit()
 		return
 	var icons := preload("res://scripts/item_icons.gd")
 	for entry: Variant in data:
@@ -1910,19 +1968,30 @@ func apply_loot(data: Variant) -> void:
 		var point := Vector3(metres[0], metres[1], metres[2]) / 1000.0
 		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
 			continue
+		var up := point.normalized()
 		var marker := Node3D.new()
 		marker.name = "Loot%d" % int(entry.id)
-		marker.position = _render_position(metres) + point.normalized() * 0.0004
+		# Scene units are kilometres; scale like remote players so icon metres become km.
+		marker.scale = Vector3.ONE * 0.001
+		marker.position = _render_position(metres) + up * 0.00035
+		marker.quaternion = Quaternion(Vector3.UP, up)
 		var sprite := Sprite3D.new()
 		sprite.texture = icons.texture(entry.item_id)
-		sprite.pixel_size = 0.004
+		if sprite.texture == null:
+			# Missing bake: still show a clay tile so the pile is findable.
+			var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+			image.fill(Color(0.72, 0.55, 0.32, 0.95))
+			sprite.texture = ImageTexture.create_from_image(image)
+		sprite.pixel_size = 0.012
 		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		sprite.shaded = false
 		sprite.double_sided = true
-		sprite.position = Vector3(0, 0.35, 0)
+		sprite.no_depth_test = false
+		sprite.position = Vector3(0, 0.45, 0)
 		marker.add_child(sprite)
 		loot.add_child(marker)
 		_loot_entries.append(entry.duplicate(true))
+	npcs_changed.emit()
 
 func _clear_loot() -> void:
 	_loot_entries.clear()
@@ -1938,6 +2007,20 @@ func nearest_loot(player_metres: Vector3, reach_m: float) -> Dictionary:
 	var best_distance := INF
 	for entry: Dictionary in _loot_entries:
 		var at := Vector3(float(entry.position_x), float(entry.position_y), float(entry.position_z))
+		var distance := player_metres.distance_to(at)
+		if distance <= reach_m and distance < best_distance:
+			best = entry
+			best_distance = distance
+	return best
+
+## The nearest player memorial (headstone / monument / mausoleum) within reach, for examine / loot.
+func nearest_memorial(player_metres: Vector3, reach_m: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for entry: Dictionary in _memorial_entries:
+		if not entry.get("position") is Array or entry.position.size() != 3:
+			continue
+		var at := Vector3(float(entry.position[0]), float(entry.position[1]), float(entry.position[2]))
 		var distance := player_metres.distance_to(at)
 		if distance <= reach_m and distance < best_distance:
 			best = entry
@@ -2148,8 +2231,10 @@ func _wander(delta: float) -> void:
 		if walking:
 			var up := metres.normalized()
 			var forward := (velocity - up * velocity.dot(up)).normalized()
-			# Models face +Z, and a basis that looks at a point has -Z pointing there.
-			var facing := Basis.looking_at(-forward, up).get_rotation_quaternion()
+			# Basis.looking_at points -Z at the target. face_z=+1 (most Quaternius / 0 A.D. /
+			# Hyper3D) faces +Z → look at -forward; face_z=-1 (0 A.D. lion / lioness) faces -Z.
+			var look := -forward if float(walker.get("face_z", 1.0)) > 0.0 else forward
+			var facing := Basis.looking_at(look, up).get_rotation_quaternion()
 			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 5.0))
 		if walking != walker.walking:
 			walker.walking = walking
@@ -2455,10 +2540,14 @@ func nearest_harvestable(player_metres: Vector3, reach_m: float) -> Dictionary:
 			best_distance = distance
 	return best
 
-## Requests the objects again, for example after a tree was felled.
+## Requests the objects again, for example after a tree was felled or an item dropped.
 func refresh_objects() -> void:
-	if not server_url.is_empty() and target != Vector3.ZERO and not is_instance_valid(_objects_request):
-		_request_objects(target.normalized())
+	if server_url.is_empty() or target == Vector3.ZERO:
+		return
+	if is_instance_valid(_objects_request):
+		_objects_refresh_pending = true
+		return
+	_request_objects(target.normalized())
 
 func _place_object(entry: Dictionary) -> void:
 	var selected: Dictionary = _models[entry.model]
@@ -2492,8 +2581,9 @@ func _place_object(entry: Dictionary) -> void:
 	var point := Vector3(entry.position[0] / 1000.0, entry.position[1] / 1000.0, entry.position[2] / 1000.0)
 	placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
 	placement.scale = Vector3.ONE * entry.scale_m / 1000.0
-	# Vertical placement offset in metres (negative sinks into the ground); 0 A.D. trees
-	# have roots at Y=0 but their trunks start higher, so they appear to float without this.
+	# Vertical placement offset in metres (negative sinks into the ground). 0 A.D. figs and
+	# similar trees put only root tips at Y=0; the solid flare sits ~2 m higher and floats
+	# unless the server sends a deep enough ground_offset_m.
 	var ground_offset: float = entry.get("ground_offset_m", 0.0)
 	if ground_offset != 0.0:
 		model.position.y = ground_offset / float(entry.scale_m)
@@ -2510,4 +2600,12 @@ func _place_object(entry: Dictionary) -> void:
 	var record := {"id":entry.id,"model":selected.id,"position":point,"coordinates":entry.position.duplicate(),"scale":placement.scale,"rotation":placement.quaternion,"biome":BIOMES[int(entry.biome)],"collision_radius_m":entry.collision_radius_m,"harvest":_harvest_info(entry.get("harvest"))}
 	placements.append(record)
 	if entry.has("wander"):
-		_walkers.append({"id": entry.id, "node": placement, "placement": record, "player": player, "route": _parse_route(entry.wander), "walking": false})
+		_walkers.append({
+			"id": entry.id,
+			"node": placement,
+			"placement": record,
+			"player": player,
+			"route": _parse_route(entry.wander),
+			"walking": false,
+			"face_z": float(selected.get("face_z", 1.0)),
+		})

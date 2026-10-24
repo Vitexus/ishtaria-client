@@ -146,6 +146,15 @@ const ICONS := {
 	"iron_ore": {"model": "rock-c", "tint": Color("8a6f66")},
 	"copper_ore": {"model": "rock-c", "tint": Color("d9894a")},
 	"quartz_crystal": {"model": "rock-c", "tint": Color("bfe6f2")},
+	"campfire": {"model": "campfire-pit"},
+	"bedroll": {"model": "bedroll"},
+	"tent": {"model": "tent"},
+	"fence": {"model": "fence"},
+	"workbench": {"model": "workbench"},
+	"anvil": {"model": "workbench-anvil"},
+	"iron_ingot": {"model": "gold_ingots", "rpg": true, "tint": Color("8a9098")},
+	"fishing_rod": {"model": "spear", "rpg": true, "tint": Color("c49a63")},
+	"hide": {"model": "armor_leather", "rpg": true, "tint": Color("8b6914")},
 }
 
 func _initialize() -> void:

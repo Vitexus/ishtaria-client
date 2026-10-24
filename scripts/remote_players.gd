@@ -52,6 +52,13 @@ func names() -> Array:
 	result.sort()
 	return result
 
+## Interpolated position in metres from the planet's centre, or zero when unknown.
+func position_of(player_name: String) -> Vector3:
+	if not _players.has(player_name):
+		return Vector3.ZERO
+	var player: Dictionary = _players[player_name]
+	return player.from.lerp(player.to, clampf(player.elapsed / POLL_SECONDS, 0.0, 1.0))
+
 ## Whether `data` is a player the server may list: a name, a known character and a finite position.
 static func valid_player(data: Variant) -> bool:
 	if not data is Dictionary or not data.get("name") is String or data.name.is_empty() or data.name.length() > 32:

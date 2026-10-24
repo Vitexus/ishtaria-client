@@ -1,38 +1,46 @@
 extends CanvasLayer
-## The menu of the ESC key: the name of the game, settings, quitting and the hall of fame
-## of the server (its ten most successful characters).
+## The menu of the ESC key: the name of the game, a column of commands (continue, settings,
+## friends, achievements, main menu, quitting) and the hall of fame of the server (its ten most
+## successful characters), side by side on a wide screen and one under the other on a narrow one.
 
 signal settings_requested
 signal quit_requested
 signal friends_requested
+signal achievements_requested
+## Leave the world and open the connection screen (pick another server).
+signal main_menu_requested
 
-const RPG := "res://assets/kenney/ui-rpg/PNG/"
-const BORDER := "res://assets/kenney/fantasy-ui-borders/PNG/Default/Border/panel-border-000.png"
-const GOLD := Color(1.0, 0.83, 0.35)
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const GOLD := UiTheme.GOLD
 const MAX_ENTRIES := 10
 const HEADSTONE := "res://assets/icons/ui/headstone.png"
+## The first three places of the hall: gold, silver and bronze.
+const PODIUM := [Color("ffd77a"), Color("d8d8e0"), Color("d79a5a")]
 
 var server_url := ""
 var title_label: Label
+var resume_button: Button
 var settings_button: Button
 var quit_button: Button
 var friends_button: Button
+var achievements_button: Button
+var main_menu_button: Button
 var hall_title: Label
 var hall_status: Label
 var hall_spinner: TextureRect
 var hall_grid: GridContainer
 var _scroll: ScrollContainer
-var _content: VBoxContainer
+var _content: BoxContainer
+var _commands: VBoxContainer
+var _hall_panel: Control
 var _request: HTTPRequest
 var _entries: Array = []
 var _status_key := ""
 
 func _ready() -> void:
 	layer = 30
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.02, 0.02, 0.04, 0.88)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	add_child(UiKit.backdrop(0.85))
 	_scroll = ScrollContainer.new()
 	_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -41,103 +49,64 @@ func _ready() -> void:
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(center)
-	_content = VBoxContainer.new()
-	_content.add_theme_constant_override("separation", 14)
+	_content = BoxContainer.new()
+	_content.add_theme_constant_override("separation", 28)
 	center.add_child(_content)
-	_build_title()
-	_build_buttons()
+	_build_commands()
 	_build_hall()
 	get_viewport().size_changed.connect(_fit)
 	_fit()
 	_update_texts()
 	hide()
 
-## A framed panel with a dark fill and the gold border of the interface kit. The border
-## covers the whole panel; the content sits inside it with its own margin.
-func _framed(parent: Node, fill: Color) -> VBoxContainer:
-	var panel := PanelContainer.new()
-	var style := StyleBoxTexture.new()
-	style.texture = load(RPG + "panelInset_blue.png")
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_texture_margin(side, 10.0)
-		style.set_content_margin(side, 0.0)
-	style.modulate_color = fill
-	panel.add_theme_stylebox_override("panel", style)
-	parent.add_child(panel)
-	var frame := NinePatchRect.new()
-	frame.texture = load(BORDER)
-	for margin in ["left", "right", "top", "bottom"]:
-		frame.set("patch_margin_" + margin, 16)
-	frame.modulate = Color(0.95, 0.75, 0.35, 0.9)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(frame)
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 30)
-	panel.add_child(margin)
-	var inner := VBoxContainer.new()
-	inner.add_theme_constant_override("separation", 8)
-	margin.add_child(inner)
-	return inner
-
-func _build_title() -> void:
-	var inner := _framed(_content, Color(0.16, 0.1, 0.05, 0.96))
-	var top := _ornament(inner)
+## The title over a column of large commands, like the main menu of a console game.
+func _build_commands() -> void:
+	_commands = VBoxContainer.new()
+	_commands.add_theme_constant_override("separation", 10)
+	_commands.alignment = BoxContainer.ALIGNMENT_CENTER
+	_content.add_child(_commands)
 	title_label = Label.new()
 	title_label.name = "Title"
+	title_label.theme_type_variation = &"TitleLabel"
 	title_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	title_label.text = "Ishtaria"
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_color_override("font_color", GOLD)
-	title_label.add_theme_color_override("font_outline_color", Color(0.12, 0.05, 0.0))
-	title_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.75))
-	title_label.add_theme_constant_override("outline_size", 14)
-	title_label.add_theme_constant_override("shadow_offset_x", 5)
-	title_label.add_theme_constant_override("shadow_offset_y", 6)
-	inner.add_child(title_label)
-	_ornament(inner)
-	top.name = "OrnamentTop"
-
-## A line of gold diamonds and bars that ornaments the title.
-func _ornament(parent: Node) -> Label:
-	var line := Label.new()
-	line.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	line.text = "◆ ━━━━━━━ ❖ ━━━━━━━ ◆"
-	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	line.add_theme_color_override("font_color", Color(0.85, 0.65, 0.28))
-	line.add_theme_font_size_override("font_size", 18)
-	parent.add_child(line)
-	return line
-
-func _build_buttons() -> void:
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 16)
-	_content.add_child(row)
-	settings_button = _button(row, "SettingsButton")
+	_commands.add_child(title_label)
+	var line := UiKit.divider()
+	line.name = "OrnamentTop"
+	_commands.add_child(line)
+	resume_button = _button("ResumeButton", &"PrimaryButton", "back")
+	resume_button.pressed.connect(close)
+	settings_button = _button("SettingsButton")
 	settings_button.pressed.connect(func() -> void: settings_requested.emit())
-	friends_button = _button(row, "FriendsButton")
+	friends_button = _button("FriendsButton")
 	friends_button.pressed.connect(func() -> void: friends_requested.emit())
-	quit_button = _button(row, "QuitButton")
+	achievements_button = _button("AchievementsButton")
+	achievements_button.icon = preload("res://assets/kenney/game-icons/trophy.png")
+	achievements_button.add_theme_constant_override("icon_max_width", 24)
+	achievements_button.pressed.connect(func() -> void: achievements_requested.emit())
+	main_menu_button = _button("MainMenuButton", &"", "back")
+	main_menu_button.pressed.connect(func() -> void: main_menu_requested.emit())
+	quit_button = _button("QuitButton", &"", "back")
 	quit_button.pressed.connect(func() -> void: quit_requested.emit())
 
-func _button(row: Node, name: String) -> Button:
-	var button := Button.new()
+func _button(name: String, variation := &"", sound := "click") -> Button:
+	var button := UiKit.button("", variation, sound)
 	button.name = name
-	button.custom_minimum_size = Vector2(220, 52)
+	button.custom_minimum_size = Vector2(280, 52)
 	button.add_theme_font_size_override("font_size", 20)
-	row.add_child(button)
+	_commands.add_child(button)
 	return button
 
 func _build_hall() -> void:
-	var inner := _framed(_content, Color(0.08, 0.1, 0.16, 0.96))
-	hall_title = Label.new()
+	var inner := UiKit.framed_panel(_content, 8)
+	_hall_panel = inner.get_parent()
+	_hall_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hall_title = UiKit.section_header(inner)
 	hall_title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	hall_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hall_title.add_theme_font_size_override("font_size", 28)
-	hall_title.add_theme_color_override("font_color", GOLD)
-	inner.add_child(hall_title)
+	hall_title.add_theme_font_size_override("font_size", 22)
 	hall_status = Label.new()
+	hall_status.theme_type_variation = &"MutedLabel"
 	hall_status.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	hall_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hall_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -156,13 +125,18 @@ func _build_hall() -> void:
 	hall_grid.name = "Hall"
 	hall_grid.columns = 6
 	hall_grid.add_theme_constant_override("h_separation", 22)
-	hall_grid.add_theme_constant_override("v_separation", 6)
+	hall_grid.add_theme_constant_override("v_separation", 8)
 	inner.add_child(hall_grid)
 
+## Commands beside the hall when there is room, above it otherwise.
 func _fit() -> void:
 	var screen := get_viewport().get_visible_rect().size
-	_content.custom_minimum_size.x = clampf(screen.x - 32.0, 280.0, 760.0)
-	var size := int(clampf(screen.x / 9.0, 44.0, 104.0))
+	var wide := screen.x >= 1100.0
+	_content.vertical = not wide
+	_hall_panel.custom_minimum_size.x = clampf(screen.x - 32.0, 280.0, 700.0)
+	_commands.custom_minimum_size.x = clampf(screen.x - 32.0, 260.0, 340.0)
+	_commands.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var size := int(clampf(screen.x / 16.0, 34.0, 64.0))
 	if is_instance_valid(title_label):
 		title_label.add_theme_font_size_override("font_size", size)
 
@@ -174,7 +148,9 @@ func open(url: String) -> void:
 	show()
 	_update_texts()
 	_fetch()
-	settings_button.grab_focus()
+	for control: Control in [_commands, _hall_panel]:
+		UiKit.open_animated(control)
+	resume_button.grab_focus()
 
 func close() -> void:
 	_cancel()
@@ -260,7 +236,7 @@ func _set_status(key: String) -> void:
 	if is_instance_valid(hall_spinner):
 		hall_spinner.visible = key == "Loading"
 
-func _cell(text: String, color := Color(0.9, 0.9, 0.92), align := HORIZONTAL_ALIGNMENT_LEFT, expand := true) -> Label:
+func _cell(text: String, color := UiTheme.SAND, align := HORIZONTAL_ALIGNMENT_LEFT, expand := true) -> Label:
 	var label := Label.new()
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	label.text = text
@@ -300,7 +276,7 @@ func _render() -> void:
 		child.queue_free()
 	if _entries.is_empty():
 		return
-	var head := Color(0.85, 0.65, 0.28)
+	var head := UiTheme.GOLD_DIM.lightened(0.25)
 	_cell("#", head, HORIZONTAL_ALIGNMENT_LEFT, false)
 	_cell(tr("Name"), head)
 	_cell(tr("Level"), head, HORIZONTAL_ALIGNMENT_RIGHT)
@@ -310,19 +286,23 @@ func _render() -> void:
 	var rank := 0
 	for entry: Dictionary in _entries:
 		rank += 1
-		var color := Color(0.62, 0.95, 0.62) if entry.alive else Color(0.78, 0.78, 0.8)
-		_cell(str(rank), color, HORIZONTAL_ALIGNMENT_LEFT, false)
+		var color := UiTheme.SAND if entry.alive else UiTheme.SAND_MUTED
+		var place := _cell(str(rank), PODIUM[rank - 1] if rank <= PODIUM.size() else UiTheme.SAND_MUTED, HORIZONTAL_ALIGNMENT_LEFT, false)
+		place.add_theme_font_size_override("font_size", 19)
 		_name_cell(entry.name, color, not entry.alive)
 		_cell(str(int(entry.level)), color, HORIZONTAL_ALIGNMENT_RIGHT)
-		_cell(group_digits(entry.score), Color(1.0, 0.92, 0.62), HORIZONTAL_ALIGNMENT_RIGHT)
+		_cell(group_digits(entry.score), UiTheme.GOLD_BRIGHT, HORIZONTAL_ALIGNMENT_RIGHT)
 		_cell(tr("%s d") % group_digits(entry.lived_days), color, HORIZONTAL_ALIGNMENT_RIGHT)
-		_cell(group_digits(entry.wealth), GOLD if entry.wealth != "0" else Color(0.55, 0.55, 0.58), HORIZONTAL_ALIGNMENT_RIGHT)
+		_cell(group_digits(entry.wealth), GOLD if entry.wealth != "0" else UiTheme.SAND_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 
 func _update_texts() -> void:
 	if not is_instance_valid(settings_button):
 		return
+	resume_button.text = tr("Continue")
 	settings_button.text = tr("Settings")
 	friends_button.text = tr("Friends")
+	achievements_button.text = tr("Achievements")
+	main_menu_button.text = tr("Go to main menu")
 	quit_button.text = tr("Quit game")
 	hall_title.text = tr("Hall of fame")
 	_set_status(_status_key)

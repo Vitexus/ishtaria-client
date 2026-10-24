@@ -3,6 +3,9 @@ extends CanvasLayer
 ## world by a share link. All decisions are the server's; the panel shows what it reports and
 ## sends the player's intentions.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+
 signal build_requested(portal_name: String)
 signal refresh_requested
 signal details_requested(portal_id: String)
@@ -31,17 +34,10 @@ var _wanted: Array[String] = []
 
 func _ready() -> void:
 	layer = 4
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.7)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	add_child(UiKit.backdrop(0.78))
 	panel = PanelContainer.new()
 	add_child(panel)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.12, 0.13, 0.14)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 12)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.theme_type_variation = &"FramePanel"
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	panel.add_child(column)
@@ -49,6 +45,8 @@ func _ready() -> void:
 	column.add_child(header)
 	summary = _label(header, "")
 	var close := Button.new()
+	close.theme_type_variation = &"GhostButton"
+	UiKit.hook_sounds(close, "back")
 	close.name = "Close"
 	close.pressed.connect(hide)
 	header.add_child(close)
@@ -111,7 +109,10 @@ func _resize() -> void:
 	panel.size = dimensions
 
 func open() -> void:
+	var was_open := visible
 	show()
+	if not was_open:
+		UiKit.open_animated(panel)
 	_update_texts()
 	refresh_requested.emit()
 

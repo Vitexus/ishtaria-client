@@ -1,6 +1,9 @@
 extends CanvasLayer
 ## The friends: add by name, answer requests, and see where each friend is.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+
 signal add_requested(name: String)
 signal accept_requested(id: int)
 signal decline_requested(id: int)
@@ -18,17 +21,10 @@ var _feedback_key := ""
 
 func _ready() -> void:
 	layer = 4
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0, 0, 0, 0.7)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	add_child(UiKit.backdrop(0.78))
 	panel = PanelContainer.new()
 	add_child(panel)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.12, 0.13, 0.14)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_content_margin(side, 12)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.theme_type_variation = &"FramePanel"
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	panel.add_child(column)
@@ -36,11 +32,14 @@ func _ready() -> void:
 	column.add_child(header)
 	var title := Label.new()
 	title.name = "Title"
+	title.theme_type_variation = &"HeaderLabel"
 	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 20)
 	header.add_child(title)
 	var close := Button.new()
+	close.theme_type_variation = &"GhostButton"
+	UiKit.hook_sounds(close, "back")
 	close.name = "Close"
 	close.pressed.connect(hide)
 	header.add_child(close)
@@ -83,7 +82,10 @@ func _resize() -> void:
 	panel.size = dimensions
 
 func open() -> void:
+	var was_open := visible
 	show()
+	if not was_open:
+		UiKit.open_animated(panel)
 	_update_texts()
 	refresh_requested.emit()
 	name_input.grab_focus()
@@ -109,7 +111,7 @@ func set_requests(incoming: Array, outgoing: Array) -> void:
 	_outgoing = outgoing.duplicate(true)
 	_render()
 
-func _label(parent: Node, text: String, color := Color(0.9, 0.9, 0.92)) -> Label:
+func _label(parent: Node, text: String, color := UiTheme.SAND) -> Label:
 	var label := Label.new()
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	label.text = text
@@ -120,11 +122,15 @@ func _label(parent: Node, text: String, color := Color(0.9, 0.9, 0.92)) -> Label
 	return label
 
 func _heading(text: String) -> void:
-	var label := _label(list, text, Color(1.0, 0.83, 0.35))
-	label.add_theme_font_size_override("font_size", 17)
+	var label := _label(list, text, UiTheme.GOLD)
+	label.theme_type_variation = &"HeaderLabel"
+	label.add_theme_font_size_override("font_size", 15)
 
 func _button(parent: Node, name: String, text: String, action: Callable) -> void:
 	var button := Button.new()
+	# Taking something back is quiet; accepting stands out.
+	button.theme_type_variation = &"GhostButton" if name in ["Remove", "Decline", "Cancel"] else &""
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.name = name
 	button.text = text
 	button.custom_minimum_size = Vector2(88, 34)
@@ -143,27 +149,24 @@ func _render() -> void:
 	if not _incoming.is_empty():
 		_heading(tr("Friend requests"))
 		for request: Dictionary in _incoming:
-			var row := HBoxContainer.new()
+			var row := UiKit.card(list)
 			row.name = "Request_%d" % int(request.id)
-			list.add_child(row)
 			_label(row, request.name)
 			_button(row, "Accept", tr("Accept"), func() -> void: accept_requested.emit(int(request.id)))
 			_button(row, "Decline", tr("Decline"), func() -> void: decline_requested.emit(int(request.id)))
 	if not _outgoing.is_empty():
 		_heading(tr("Sent requests"))
 		for request: Dictionary in _outgoing:
-			var row := HBoxContainer.new()
+			var row := UiKit.card(list)
 			row.name = "Sent_%d" % int(request.id)
-			list.add_child(row)
-			_label(row, request.name, Color(0.7, 0.72, 0.75))
+			_label(row, request.name, UiTheme.SAND_MUTED)
 			_button(row, "Cancel", tr("Cancel"), func() -> void: decline_requested.emit(int(request.id)))
 	_heading(tr("Friends"))
 	if _friends.is_empty():
-		_label(list, tr("No friends yet"), Color(0.7, 0.72, 0.75))
+		_label(list, tr("No friends yet"), UiTheme.SAND_MUTED)
 	for friend: Dictionary in _friends:
-		var row := HBoxContainer.new()
+		var row := UiKit.card(list)
 		row.name = "Friend_" + friend.name
-		list.add_child(row)
 		var flag_texture := _flag_texture(friend.get("flag"))
 		if flag_texture != null:
 			var flag := TextureRect.new()
@@ -174,14 +177,14 @@ func _render() -> void:
 			flag.custom_minimum_size = Vector2(26, 26)
 			flag.tooltip_text = String(friend.flag)
 			row.add_child(flag)
-		var dot := _label(row, "●" if friend.online else "○", Color(0.45, 0.95, 0.5) if friend.online else Color(0.55, 0.55, 0.58))
+		var dot := _label(row, "●" if friend.online else "○", Color(0.45, 0.95, 0.5) if friend.online else UiTheme.SAND_MUTED)
 		dot.size_flags_horizontal = Control.SIZE_FILL
 		dot.custom_minimum_size.x = 22
 		dot.tooltip_text = tr("Online") if friend.online else tr("Offline")
 		var text := "%s  ·  %s %d" % [friend.name, tr("Level"), int(friend.level)]
 		if friend.online:
 			text += "  ·  " + tr("World") + ": " + friend.world
-		_label(row, text, Color(0.9, 0.9, 0.92) if friend.online else Color(0.7, 0.72, 0.75))
+		_label(row, text, UiTheme.SAND if friend.online else UiTheme.SAND_MUTED)
 		_button(row, "Remove", tr("Remove"), func() -> void: remove_requested.emit(friend.name))
 
 ## The bundled picture of a flag a friend chose to show (two capital letters), if we have it.

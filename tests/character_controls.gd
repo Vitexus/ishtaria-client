@@ -77,6 +77,9 @@ func _run() -> void:
 	check(memorial_surface.memorials.get_child_count() == 1 and memorial_surface.memorials.get_child(0).position == Vector3.ZERO, "Memorial uses exact origin subtraction at planet scale")
 	var first_memorial: Node = memorial_surface.memorials.get_child(0)
 	check(memorial_surface.apply_memorials(memorial_data) and memorial_surface.memorials.get_child(0) == first_memorial, "Unchanged polling preserves memorial instances")
+	var at_grave := Vector3(6371001.0, 0.0, 0.0)
+	check(not memorial_surface.nearest_memorial(at_grave, 2.8).is_empty(), "A memorial within reach is found for examine")
+	check(memorial_surface.nearest_memorial(at_grave + Vector3(10.0, 0.0, 0.0), 2.8).is_empty(), "A memorial beyond reach is ignored")
 	var invalid_memorials := memorial_data.duplicate(true)
 	invalid_memorials[0].kind = "unknown"
 	check(not memorial_surface.apply_memorials(invalid_memorials) and memorial_surface.memorials.get_child(0) == first_memorial, "Invalid memorials cannot replace validated geometry")

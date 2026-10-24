@@ -2,6 +2,9 @@ extends CanvasLayer
 ## A conversation with a character: the portrait, what they say and what the player can
 ## answer. It only shows what the server sent; choosing sends the choice back.
 
+const UiTheme := preload("res://scripts/ui/ui_theme.gd")
+const UiKit := preload("res://scripts/ui/ui_kit.gd")
+
 signal choice_made(npc_id: String, seq: int, choice: int)
 ## The character holds found goods; open a trade with their pack.
 signal trade_requested(npc_id: String)
@@ -56,13 +59,8 @@ func _ready() -> void:
 	layer = 4
 	panel = PanelContainer.new()
 	add_child(panel)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.12, 0.94)
-	style.border_color = Color(0.75, 0.6, 0.3)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		style.set_border_width(side, 2)
-		style.set_content_margin(side, 12)
-	panel.add_theme_stylebox_override("panel", style)
+	# The framed clay card with less padding: it sits at the bottom over the game.
+	panel.add_theme_stylebox_override("panel", UiTheme.framed_style(Color(UiTheme.CLAY, 0.95), UiTheme.GOLD, 20.0))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
 	panel.add_child(row)
@@ -80,8 +78,8 @@ func _ready() -> void:
 	name_label = Label.new()
 	name_label.name = "Speaker"
 	name_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	name_label.theme_type_variation = &"HeaderLabel"
 	name_label.add_theme_font_size_override("font_size", 20)
-	name_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.5))
 	column.add_child(name_label)
 	speech = Label.new()
 	speech.name = "Speech"
@@ -184,6 +182,9 @@ func _fill_node(reply: Dictionary) -> void:
 		leave.name = "Leave"
 		leave.pressed.connect(close)
 		choices_box.add_child(leave)
+	for button in choices_box.get_children():
+		if button is Button:
+			button.theme_type_variation = &"ChoiceButton"
 
 ## The card could not be fetched: the button works again.
 func about_failed() -> void:
