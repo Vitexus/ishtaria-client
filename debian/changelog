@@ -1,3 +1,19 @@
+ishtaria-client (0.4.2) unstable; urgency=medium
+
+  * Natural walk for every Kenney character (retargeted Quaternius walk
+    clip).
+  * Terrain under the player stays until its rebuilt replacement is
+    ready: shadows no longer fall far below the ground and grass no
+    longer vanishes while walking.
+  * Quest compass labels no longer overlap; the place nearest the
+    walking direction keeps its label.
+  * 0 A.D. animals no longer walk backwards; the Quaternius fox is fox-
+    sized.
+  * NPCs that share the player's pack look are no longer drawn as the
+    datadisk's hero.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 27 Oct 2026 14:23:36 +0100
+
 ishtaria-client (0.4.1) unstable; urgency=medium
 
   * Allow three minutes for the 16-bit height strip download (12.6 MB at
