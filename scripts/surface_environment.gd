@@ -66,11 +66,16 @@ const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
 const HEALTH_BAR_LENGTH_M := 0.5
 const HEALTH_BAR_HEIGHT_M := 0.04
 const HEALTH_BAR_ABOVE_HEAD_M := 0.20
+## Share of a walking cycle a foot stands on the ground, and the poses sampled to find the stride
+## (the same as the player's avatar, `character_controls.gd`).
+const NPC_STANCE_SHARE := 0.6
+const NPC_PACE_SAMPLES := 24
 
-var heightmap: Image:
+var heightmap := PackedFloat32Array():
 	set(value):
 		_stop_detail_work()
 		heightmap = value
+var heightmap_size := 0
 var environment: Dictionary = {}
 var catalog: Array[Dictionary] = []
 var placements: Array[Dictionary] = []
@@ -277,7 +282,7 @@ func load_catalog(path: String) -> bool:
 
 func apply_environment(data: Variant, expected_sha256: String, expected_seed: String) -> bool:
 	_stop_detail_work()
-	if not data is Dictionary or (data.get("version") != 1 and data.get("version") != 2) or data.get("heightmap_sha256") != expected_sha256 or data.get("seed") != expected_seed:
+	if not data is Dictionary or data.get("version") != 3 or data.get("heightmap_sha256") != expected_sha256 or data.get("seed") != expected_seed:
 		return false
 	var size: Variant = data.get("face_size")
 	if not (size is float or size is int) or size < 1 or size > 64 or float(size) != floorf(float(size)):
@@ -311,7 +316,7 @@ func apply_environment(data: Variant, expected_sha256: String, expected_seed: St
 func clear_world() -> void:
 	_stop_detail_work()
 	environment.clear()
-	heightmap = null
+	heightmap = PackedFloat32Array()
 	target = Vector3.ZERO
 	server_url = ""
 	_origin_metres.clear()
@@ -371,33 +376,53 @@ func _coordinates64(direction: Array) -> Array:
 func elevation(direction: Vector3) -> float:
 	return elevation64([direction.x, direction.y, direction.z])
 
-func relief64(direction: Array, base_metres: float, seed: String) -> float:
-	var radius := sqrt(float(direction[0]) * direction[0] + float(direction[1]) * direction[1] + float(direction[2]) * direction[2])
-	var point: Array = [float(direction[0]) / radius * 6371000.0, float(direction[1]) / radius * 6371000.0, float(direction[2]) / radius * 6371000.0]
-	var hash := 0
-	for byte in seed.to_utf8_buffer():
-		hash = (hash * 31 + byte) % 997
-	var phase := float(hash) * TAU / 997.0
-	var coast := clampf(base_metres / 150.0, 0.0, 1.0)
-	var fade := coast * coast * (3.0 - 2.0 * coast)
-	return fade * (9.0 * sin((point[0] * 0.73 + point[1] * 0.41 + point[2] * 0.55) / 93.0 + phase) * sin((point[0] * -0.38 + point[1] * 0.87 + point[2] * 0.31) / 127.0 - phase) + 3.0 * sin((point[0] * 0.21 + point[1] * -0.52 + point[2] * 0.83) / 37.0 + phase))
+## Reads the server's height strip: a binary P5 PGM, maxval 65535, big-endian, six faces of `face_size`
+## square samples. Returns the heights in metres (sample x 0.25 - 8000), or an empty array if the bytes
+## are not that strip.
+func parse_strip(body: PackedByteArray, face_size: int) -> PackedFloat32Array:
+	var tokens := PackedStringArray()
+	var cursor := 0
+	while tokens.size() < 4 and cursor < body.size():
+		var byte := body[cursor]
+		if byte == 35:
+			while cursor < body.size() and body[cursor] != 10:
+				cursor += 1
+		elif byte <= 32:
+			cursor += 1
+		else:
+			var start := cursor
+			while cursor < body.size() and body[cursor] > 32:
+				cursor += 1
+			tokens.append(body.slice(start, cursor).get_string_from_ascii())
+	cursor += 1
+	var width := face_size * 6
+	if tokens.size() < 4 or tokens[0] != "P5" or tokens[1] != str(width) or tokens[2] != str(face_size) or tokens[3] != "65535":
+		return PackedFloat32Array()
+	var count := width * face_size
+	if body.size() - cursor != count * 2:
+		return PackedFloat32Array()
+	var metres := PackedFloat32Array()
+	metres.resize(count)
+	for index in count:
+		metres[index] = float(body[cursor + 2 * index] * 256 + body[cursor + 2 * index + 1]) * 0.25 - 8000.0
+	return metres
 
-## Base elevation in kilometres from the planet heightmap (and shared relief), without landscape patches.
+## The strip's samples in metres (16-bit PGM from the server, relief already in), `heightmap_size` a face.
+## Base elevation in kilometres from the planet heightmap, without landscape patches.
 func elevation64_base(direction: Array) -> float:
-	if heightmap == null:
+	if heightmap.is_empty():
 		return 0.0
 	var mapped := _coordinates64(direction)
-	var size := heightmap.get_height()
+	var size := heightmap_size
+	var stride := size * 6
 	var horizontal := clampf(mapped[1] * size - 0.5, 0, size - 1)
 	var vertical := clampf(mapped[2] * size - 0.5, 0, size - 1)
 	var column := int(horizontal)
 	var row := int(vertical)
 	var offset := int(mapped[0]) * size
-	var upper := lerpf(roundf(heightmap.get_pixel(offset + column, row).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), row).r * 255.0), horizontal - column)
-	var lower := lerpf(roundf(heightmap.get_pixel(offset + column, mini(row + 1, size - 1)).r * 255.0), roundf(heightmap.get_pixel(offset + mini(column + 1, size - 1), mini(row + 1, size - 1)).r * 255.0), horizontal - column)
-	var base := lerpf(upper, lower, vertical - row) * 16000.0 / 255.0 - 8000.0
-	var metres := base + (relief64(direction, base, environment.seed) if environment.get("version") == 2 else 0.0)
-	return metres / 1000.0
+	var upper := lerpf(heightmap[row * stride + offset + column], heightmap[row * stride + offset + mini(column + 1, size - 1)], horizontal - column)
+	var lower := lerpf(heightmap[mini(row + 1, size - 1) * stride + offset + column], heightmap[mini(row + 1, size - 1) * stride + offset + mini(column + 1, size - 1)], horizontal - column)
+	return lerpf(upper, lower, vertical - row) / 1000.0
 
 func elevation64(direction: Array) -> float:
 	# The landscape patches look the ground up by a unit direction. A point in metres (the camera's) must be reduced to one, or the
@@ -500,12 +525,18 @@ func _clear_objects() -> void:
 		objects.remove_child(child)
 		child.queue_free()
 
-func _clear_region(clear_objects: bool = true) -> void:
+## `keep_detail`: when the region only moves along with the player, the old disk, its grass and the hole it cuts in the
+## globe stay until the new disk replaces them (`_finish_detail`). Removing them at once left the player walking over
+## the coarse globe, whose 78-km triangles sag up to about 120 m under the real surface, for as long as the new disk took:
+## everything then seemed to float and shadows fell far below and away from what cast them.
+func _clear_region(clear_objects: bool = true, keep_detail: bool = false) -> void:
 	_cancel_objects()
-	_detail_vertices.clear()
 	if clear_objects:
 		_clear_objects()
 		_clear_portals()
+	if keep_detail:
+		return
+	_detail_vertices.clear()
 	for child in detail.get_children():
 		detail.remove_child(child)
 		child.queue_free()
@@ -519,8 +550,9 @@ func _clear_region(clear_objects: bool = true) -> void:
 
 func show_region(direction: Vector3) -> void:
 	target = direction
-	_clear_region(direction == Vector3.ZERO or heightmap == null or environment.is_empty())
-	if direction == Vector3.ZERO or heightmap == null or environment.is_empty():
+	var available := direction != Vector3.ZERO and not heightmap.is_empty() and not environment.is_empty()
+	_clear_region(not available, available)
+	if not available:
 		return
 	_build_detail()
 	_request_objects(direction.normalized())
@@ -544,7 +576,7 @@ func _compute_detail_segments(radius_km: float) -> int:
 ## mesh is ready when this returns, which is what the headless tests rely on.
 func _build_detail() -> void:
 	_detail_generation += 1
-	if target == Vector3.ZERO or heightmap == null or environment.is_empty():
+	if target == Vector3.ZERO or heightmap.is_empty() or environment.is_empty():
 		_detail_pending = false
 		_detail_vertices.clear()
 		for child in detail.get_children():
@@ -734,7 +766,7 @@ func _finish_detail(result: Dictionary) -> void:
 ## dry ground: the same rule the water mesh and the server use, so what swims is what is drawn as water.
 func water_surface_km(coordinates_metres: Array) -> float:
 	var radius := sqrt(float(coordinates_metres[0]) * coordinates_metres[0] + float(coordinates_metres[1]) * coordinates_metres[1] + float(coordinates_metres[2]) * coordinates_metres[2])
-	if radius <= 0.0 or heightmap == null or environment.is_empty():
+	if radius <= 0.0 or heightmap.is_empty() or environment.is_empty():
 		return NAN
 	var direction: Array = [float(coordinates_metres[0]) / radius, float(coordinates_metres[1]) / radius, float(coordinates_metres[2]) / radius]
 	var height := elevation64(direction)
@@ -2251,8 +2283,48 @@ func _npc_player(model: Node) -> AnimationPlayer:
 	var players := model.find_children("*", "AnimationPlayer", true, false)
 	return players[0] if not players.is_empty() else null
 
-## Plays Idle, Walk or Run for a character from ground speed (m/s). Walk is authored near 1 m/s;
-## Run near 2.2 m/s. Falls back to Walk when Run is missing (elderly models).
+## Metres per second a character's walking clip shows at its own speed, measured once per model the
+## way the player's avatar is (`character_controls._bind_animation`): the distance a foot slides back
+## while it stands, over the share of the cycle it stands. Pack models walk between about 1 m/s
+## (Kenney) and 2.3 m/s (Quaternius); 1 m/s when the clip cannot be measured.
+func _npc_walk_pace(player: AnimationPlayer, clip: String) -> float:
+	if player.has_meta("walk_pace_m_s"):
+		return player.get_meta("walk_pace_m_s")
+	var pace := 1.0
+	var model := player.get_node_or_null(player.root_node) as Node3D
+	var animation := player.get_animation(clip)
+	var skeletons: Array = model.find_children("*", "Skeleton3D", true, false) if model != null else []
+	if model != null and model.is_inside_tree() and not skeletons.is_empty() and animation.length > 0.1:
+		var skeleton := skeletons[0] as Skeleton3D
+		var to_model := model.global_transform.affine_inverse() * skeleton.global_transform
+		# Scene units are kilometres; the model's own scale turns its units into them.
+		var metres_per_unit := model.global_transform.basis.x.length() * 1000.0
+		var playing := player.current_animation
+		var position := player.current_animation_position if not playing.is_empty() else 0.0
+		var stride := 0.0
+		for bone in skeleton.get_bone_count():
+			if not skeleton.get_bone_name(bone).to_lower().contains("foot"):
+				continue
+			var low := Vector3.INF
+			var high := -Vector3.INF
+			for sample in NPC_PACE_SAMPLES:
+				player.play(clip)
+				player.seek(animation.length * float(sample) / float(NPC_PACE_SAMPLES), true)
+				var point := to_model * skeleton.get_bone_global_pose(bone).origin
+				low = low.min(point)
+				high = high.max(point)
+			var reach := (high - low) * metres_per_unit
+			stride = maxf(stride, maxf(reach.x, reach.z))
+		if not playing.is_empty():
+			player.play(playing)
+			player.seek(position, true)
+		if stride > 0.1:
+			pace = clampf(stride / (NPC_STANCE_SHARE * animation.length), 0.5, 4.0)
+	player.set_meta("walk_pace_m_s", pace)
+	return pace
+
+## Plays Idle, Walk or Run for a character from ground speed (m/s). Walk plays at the pace measured
+## from its clip; Run is authored near 2.2 m/s. Falls back to Walk when Run is missing (elderly models).
 func _play_npc(player: AnimationPlayer, speed_m_s: float) -> void:
 	if player == null:
 		return
@@ -2268,6 +2340,8 @@ func _play_npc(player: AnimationPlayer, speed_m_s: float) -> void:
 	if clip.is_empty():
 		return
 	var reference := 2.2 if wanted == "run" else 1.0
+	if wanted == "walk":
+		reference = _npc_walk_pace(player, clip)
 	var scale := 1.0 if wanted == "idle" else clampf(speed_m_s / reference, 0.35, 1.85)
 	player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	player.speed_scale = scale

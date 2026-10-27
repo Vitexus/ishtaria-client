@@ -1337,12 +1337,14 @@ func _load_terrain(world: Dictionary) -> void:
 	if size < 1 or size > 1024 or float(size) != floorf(float(size)):
 		return
 	_terrain_request = HTTPRequest.new()
-	_terrain_request.timeout = 4.0
+	# The 16-bit strip of a face-1024 world is about 12.6 MB; the datadisk cover shows the progress.
+	_terrain_request.timeout = 180.0
 	_terrain_request.max_redirects = 0
 	_terrain_request.body_size_limit = 16 * 1024 * 1024
 	_terrain_request.request_completed.connect(_on_terrain_received.bind(_connection_generation, int(size)))
 	add_child(_terrain_request)
-	if _terrain_request.request(_server_url + "/world/heightmap.png") != OK:
+	_disk_cover.track_download(_terrain_request)
+	if _terrain_request.request(_server_url + "/world/heightmap") != OK:
 		_terrain_request.queue_free()
 		_terrain_request = null
 
@@ -1354,22 +1356,21 @@ func _on_terrain_received(result: int, code: int, _headers: PackedStringArray, b
 	_terrain_request = null
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		return
-	if body.size() < 33 or body.slice(0, 8) != PackedByteArray([137, 80, 78, 71, 13, 10, 26, 10]):
+	var metres: PackedFloat32Array = _environment.parse_strip(body, face_size)
+	if metres.is_empty():
 		return
-	var header := StreamPeerBuffer.new()
-	header.big_endian = true
-	header.data_array = body
-	header.seek(8)
-	if header.get_u32() != 13 or header.get_u32() != 0x49484452 or header.get_u32() != face_size * 6 or header.get_u32() != face_size:
-		return
-	var image := Image.new()
-	if image.load_png_from_buffer(body) != OK or image.get_width() != face_size * 6 or image.get_height() != face_size:
-		return
+	# The planet shader reads a normalised height: -8000 m is 0, +8000 m is 1.
+	var shader_values := PackedFloat32Array()
+	shader_values.resize(metres.size())
+	for index in metres.size():
+		shader_values[index] = clampf((metres[index] + 8000.0) / 16000.0, 0.0, 1.0)
+	var image := Image.create_from_data(face_size * 6, face_size, false, Image.FORMAT_RF, shader_values.to_byte_array())
 	var texture := ImageTexture.create_from_image(image)
 	for material in [_terrain_material, _water_material]:
 		material.set_shader_parameter("heightmap", texture)
 		material.set_shader_parameter("has_heightmap", true)
-	_environment.heightmap = image
+	_environment.heightmap = metres
+	_environment.heightmap_size = face_size
 	get_node("Ocean").show()
 	_terrain_loaded = true
 	_load_environment()

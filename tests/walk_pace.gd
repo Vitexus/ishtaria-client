@@ -62,10 +62,13 @@ func _run() -> void:
 		"sitting=false does not rewind the Walk cycle (was %.3f, now %.3f)" % [mid_pos, float(controls._animation.current_animation_position)]
 	)
 	Input.action_release("walk_forward")
-	# A pack character keeps the pace its run clip was made for.
+	# A pack character walks with a real walk clip (Kenney's retargeted from the Quaternius
+	# Universal Animation Library), so its pace is measured too, not taken for a 4 m/s run.
 	CATALOG.set_disk_model("", null)
 	controls.swap_character("protagonists/criminalMaleA")
-	_check(is_equal_approx(controls._walk_pace, controls.WALK_CLIP_PACE), "a pack character keeps 4 m/s")
+	_check(controls._walk_pace > 0.8 and controls._walk_pace < 2.0, "a Kenney character's walk is measured: %.2f m/s" % controls._walk_pace)
+	controls.swap_character("quaternius/adventurer")
+	_check(controls._walk_pace > 1.5 and controls._walk_pace < controls.WALK_CLIP_PACE, "a Quaternius character's own Walk is measured: %.2f m/s" % controls._walk_pace)
 	if _failures > 0:
 		push_error("%d walk pace checks failed" % _failures)
 	else:

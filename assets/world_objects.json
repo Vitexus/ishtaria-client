@@ -2380,7 +2380,7 @@
         "grassland"
       ],
       "weight": 2,
-      "scale_m": 0.978,
+      "scale_m": 0.34,
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
@@ -3887,7 +3887,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.goat",
@@ -3898,7 +3898,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.sheep",
@@ -3919,7 +3919,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.bull",
@@ -3930,7 +3930,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.donkey",
@@ -3941,7 +3941,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.pig",
@@ -3962,7 +3962,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.fox",
@@ -3976,7 +3976,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.wolf",
@@ -3990,7 +3990,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.lion",
@@ -4032,7 +4032,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.boar",
@@ -4045,7 +4045,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.crocodile",
@@ -4056,7 +4056,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.camel",
@@ -4082,7 +4082,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.zebu",
@@ -4093,7 +4093,7 @@
       "max_slope": 0.35,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.mastiff",
@@ -4104,7 +4104,7 @@
       "max_slope": 0.4,
       "fauna": true,
       "animation": "Idle",
-      "face_z": 1
+      "face_z": -1
     },
     {
       "id": "zeroad.hawk",

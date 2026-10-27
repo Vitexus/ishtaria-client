@@ -3,6 +3,9 @@
 # godot4-export-templates packages (nothing is downloaded during the build).
 GODOT ?= /usr/bin/godot4
 export XDG_DATA_HOME = $(CURDIR)/build/xdg
+# The developer's own editor settings (~/.config/godot) must not mix with the build's data:
+# with both, a headless import crashes on exit. Keep the build self-contained.
+export XDG_CONFIG_HOME = $(CURDIR)/build/xdg-config
 
 # The web build needs the Godot web export template (web_nothreads_release.zip), which the Debian godot4-export-templates package does
 # not ship. The package ishtaria-client-web is built when a template is found: in $(WEB_TEMPLATES) (default: next to the Linux ones),

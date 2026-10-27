@@ -19,6 +19,8 @@ var _backdrop: ColorRect
 var _picture: TextureRect
 var _caption: Label
 var _hint: Label
+var _progress: ProgressBar
+var _tracked: HTTPRequest
 var _timer: Timer
 var _jingle: AudioStreamPlayer
 
@@ -60,6 +62,18 @@ func _ready() -> void:
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint.offset_top = -30.0
 	_hint.offset_bottom = -8.0
+	_progress = ProgressBar.new()
+	_progress.name = "Loading"
+	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_progress.show_percentage = true
+	_progress.visible = false
+	_backdrop.add_child(_progress)
+	_progress.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_progress.offset_left = 160.0
+	_progress.offset_right = -160.0
+	_progress.offset_top = -96.0
+	_progress.offset_bottom = -72.0
+	set_process(false)
 	_timer = Timer.new()
 	_timer.one_shot = true
 	_timer.timeout.connect(_next)
@@ -73,6 +87,31 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED:
 		_update_hint()
+
+## Shows how far a download the world needs has got, on the cover while it is on screen.
+## The bar hides itself when the request completes.
+func track_download(request: HTTPRequest) -> void:
+	_tracked = request
+	_progress.value = 0.0
+	_progress.visible = true
+	set_process(true)
+	request.request_completed.connect(_on_tracked_done.bind(request), CONNECT_ONE_SHOT)
+
+func _on_tracked_done(_result: int, _code: int, _headers: PackedStringArray, _body: PackedByteArray, request: HTTPRequest) -> void:
+	if _tracked == request:
+		_stop_tracking()
+
+func _stop_tracking() -> void:
+	_tracked = null
+	_progress.visible = false
+	set_process(false)
+
+func _process(_delta: float) -> void:
+	if not is_instance_valid(_tracked):
+		_stop_tracking()
+		return
+	var total := _tracked.get_body_size()
+	_progress.value = 100.0 * float(_tracked.get_downloaded_bytes()) / float(total) if total > 0 else 0.0
 
 func _update_hint() -> void:
 	if is_instance_valid(_hint):

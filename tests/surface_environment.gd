@@ -120,7 +120,7 @@ func _grass_signature(surface: Node3D) -> Array:
 
 func _fixture(size: int) -> Dictionary:
 	var count := size * size * 6
-	var data := {"version":1,"heightmap_sha256":"fixture","seed":"18446744073709551615","face_size":size,"elevation_m":[],"water_m":[],"biomes":[],"downstream":[],"flow":[]}
+	var data := {"version":3,"heightmap_sha256":"fixture","seed":"18446744073709551615","face_size":size,"elevation_m":[],"water_m":[],"biomes":[],"downstream":[],"flow":[]}
 	for index in count:
 		data.elevation_m.append(1000)
 		data.water_m.append(-8001)
@@ -165,7 +165,8 @@ func _run() -> void:
 			_check(int(mapped.x) == face and absf(mapped.y - (position.x + 1) * 0.5) < 0.00001 and absf(mapped.z - (1 - position.y) * 0.5) < 0.00001, "Cube-sphere inverse preserves face, coordinates and north-up rows")
 	var image := Image.create(96, 16, false, Image.FORMAT_L8)
 	image.fill(Color(0.5625, 0.5625, 0.5625))
-	surface.heightmap = image
+	surface.heightmap = metres_of(image)
+	surface.heightmap_size = image.get_height()
 	var texture := ImageTexture.create_from_image(image)
 	for material in [surface.land_material, surface.water_material]:
 		material.set_shader_parameter("heightmap", texture)
@@ -209,6 +210,20 @@ func _run() -> void:
 	var indices: PackedInt32Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 	# A disk inscribed in the old square: full vertex grid, fewer triangles (about π/4 of the square).
 	_check(vertices.size() == 129 * 129 and indices.size() < 128 * 128 * 6 and indices.size() > int(128 * 128 * 6 * 0.7), "Fine detail is a shared-vertex disk, not a floating square tile")
+	# Following the player rebuilds the disk on a worker: the old disk must stay until the new one replaces it, or the
+	# player stands over the coarse globe (its long triangles sag far below the ground) while the new one is computed.
+	surface.async_detail = true
+	var kept_children := surface.detail.get_child_count()
+	var old_disk := surface.detail.get_child(0)
+	surface.show_region((Vector3.FORWARD * surface.RADIUS + Vector3(0.05, 0.0, 0.0)).normalized())
+	_check(kept_children > 0 and surface.detail.get_child_count() == kept_children and surface.detail.get_child(0) == old_disk, "Moving the region keeps the old terrain disk until the new one is ready")
+	for frame in 600:
+		if not surface._detail_pending:
+			break
+		await process_frame
+	_check(not surface._detail_pending and surface.detail.get_child_count() > 0 and surface.detail.get_child(0) != old_disk, "The new terrain disk replaces the old one when it is ready")
+	surface.async_detail = false
+	surface.show_region(Vector3.FORWARD)
 	_check(is_equal_approx(surface._detail_radius, surface.DETAIL_RADIUS), "Without a landscape patch the detail disk stays at the default radius")
 	# A city patch (Uruk is 6 km) widens the disk so the walled precinct is not cut by a 700 m circle.
 	surface._terrain_patches = [{"extent": [6000.0, 6000.0], "offset": [0.0, 0.0], "feather": 120.0, "axes": [[1, 0, 0], [0, 0, 1]], "grid": null, "water_grid": null, "width": 0, "height": 0, "anchor_height_m": 0.0, "place": "uruk", "heightmap_url": "", "water_url": "", "clear_url": ""}]
@@ -231,26 +246,17 @@ func _run() -> void:
 	_test_pond(surface)
 	for placement in surface.placements:
 		_check(placement.position.is_finite() and absf(placement.position.length() - (surface.RADIUS + surface.elevation(placement.position) + 0.0005)) < 0.002, "Objects stand on actual terrain")
-	for sample in [
-		[[1.0, 0.0, 0.0], "42", -7.595497428807521],
-		[[1.0, 1.0, 0.0], "42", 4.106134823054352],
-		[[1.0, 2.0, 3.0], "18446744073709551615", -1.7645037024417682],
-		[[6371000.0, 0.01, 0.0], "42", -7.594750622916318],
-	]:
-		_check(absf(surface.relief64(sample[0], 1000.0, sample[1]) - sample[2]) < 0.000001, "Relief matches Rust's metre-scale reference, including seams and u64 seed")
+	# The local relief is generated into the server's strip (ADR 0020, tested in ishtaria-worldgen);
+	# an environment of the old run-time relief must not be drawn over it a second time.
 	data.version = 2
-	_check(surface.apply_environment(data, "fixture", data.seed), "Version two explicitly enables shared relief")
-	_check(surface.apply_environment(JSON.parse_string(JSON.stringify(data)), "fixture", data.seed), "Version two is accepted after real JSON numeric decoding")
-	var minimum := INF
-	var maximum := -INF
+	_check(not surface.apply_environment(data, "fixture", data.seed), "Version two (run-time relief) is rejected")
+	data.version = 3
+	_check(surface.apply_environment(JSON.parse_string(JSON.stringify(data)), "fixture", data.seed), "Version three is accepted after real JSON numeric decoding")
 	for metre in 1000:
 		var point: Array = [6371000.0, float(metre), 0.0]
 		var height: float = surface.elevation64(point)
-		minimum = minf(minimum, height)
-		maximum = maxf(maximum, height)
 		point[1] += 0.01
 		_check(absf(height - surface.elevation64(point)) < 0.000003, "Terrain height remains continuous during centimeter movement")
-	_check(maximum - minimum > 0.01, "Walkable landscape has more than ten metres of local relief")
 	data.seed = "43"
 	_check(surface.apply_environment(data, "fixture", "43"), "Another seed is accepted with its matching identity")
 	surface.show_region(Vector3.FORWARD)
@@ -271,9 +277,10 @@ func _run() -> void:
 	river.elevation_m.fill(30)
 	river.water_m.fill(30)
 	_check(surface.apply_environment(river, "fixture", "43"), "A flow river cell is accepted")
-	surface.heightmap = Image.create(16, 16, false, Image.FORMAT_RF)
-	# Pixel 128 ≈ +31 m land (same encoding as the planet heightmap).
-	surface.heightmap.fill(Color(128.0 / 255.0, 0, 0, 1))
+	surface.heightmap = metres_of(Image.create(96, 16, false, Image.FORMAT_RF))
+	surface.heightmap_size = 16
+	# Land at +31 m (the 8-bit pixel 128 this fixture used to stand for).
+	surface.heightmap.fill(31.0)
 	surface.show_region(Vector3(1, 0, 0))
 	_check(not surface._minimap_water_at([1.0, 0.0, 0.0]), "A dry floodplain in a coarse river cell is not water on the minimap")
 	# Landscape patches: bilinear sample at the south/east edge must not index past the grid
@@ -338,7 +345,7 @@ func _run() -> void:
 	if not test_url.is_empty():
 		await _test_http(surface, test_url)
 	surface.clear_world()
-	_check(surface.environment.is_empty() and surface.heightmap == null and surface.objects.get_child_count() == 0, "Disconnect clears the entire former world")
+	_check(surface.environment.is_empty() and surface.heightmap.is_empty() and surface.objects.get_child_count() == 0, "Disconnect clears the entire former world")
 	world.queue_free()
 	await process_frame
 	print("Surface environment: %d checks, %d failures" % [_checks, _failures])
@@ -351,7 +358,7 @@ func _test_http(surface: Node3D, url: String) -> void:
 	loader.body_size_limit = 16 * 1024 * 1024
 	root.add_child(loader)
 	var responses := {}
-	for endpoint in ["/world", "/world/heightmap.png", "/world/environment"]:
+	for endpoint in ["/world", "/world/heightmap", "/world/environment"]:
 		_check(loader.request(url + endpoint) == OK, "Environment HTTP request starts")
 		var result: Array = await loader.request_completed
 		_check(result[0] == HTTPRequest.RESULT_SUCCESS and result[1] == 200, "Environment HTTP response succeeds: " + endpoint)
@@ -362,14 +369,12 @@ func _test_http(surface: Node3D, url: String) -> void:
 	loader.queue_free()
 	var metadata: Dictionary = JSON.parse_string(responses["/world"].get_string_from_utf8())
 	var data: Dictionary = JSON.parse_string(responses["/world/environment"].get_string_from_utf8())
-	var image := Image.new()
-	_check(image.load_png_from_buffer(responses["/world/heightmap.png"]) == OK, "HTTP terrain image decodes")
-	_check(image.get_height() == metadata.face_size and image.get_width() == metadata.face_size * 6, "HTTP terrain dimensions match identity")
+	var metres: PackedFloat32Array = surface.parse_strip(responses["/world/heightmap"], metadata.face_size)
+	_check(not metres.is_empty(), "HTTP terrain strip decodes")
+	_check(metres.size() == metadata.face_size * metadata.face_size * 6, "HTTP terrain samples match identity")
 	surface.clear_world()
-	surface.heightmap = image
-	var texture := ImageTexture.create_from_image(image)
-	for material in [surface.land_material, surface.water_material]:
-		material.set_shader_parameter("heightmap", texture)
+	surface.heightmap = metres
+	surface.heightmap_size = metadata.face_size
 	_check(surface.apply_environment(data, metadata.sha256, metadata.seed), "Real persisted HTTP environment is accepted by the renderer")
 	for biome in 8:
 		_check(data.biomes.has(float(biome)), "Generated world contains " + surface.BIOMES[biome])
@@ -434,3 +439,11 @@ func _capture(world: Node3D, surface: Node3D, data: Dictionary) -> void:
 				for column in range(0, screenshot.get_width(), 8):
 					colors[screenshot.get_pixel(column, row).to_html()] = true
 			_check(colors.size() > 20, "Native %s renders nonblank assets/water at %s" % [surface.BIOMES[biome], dimensions])
+
+## The 8-bit fixtures of this file as metres: the red channel 0..1 stood for 0..255 of -8000..+8000 m.
+func metres_of(image: Image) -> PackedFloat32Array:
+	var metres := PackedFloat32Array()
+	for y in image.get_height():
+		for x in image.get_width():
+			metres.append(roundf(image.get_pixel(x, y).r * 255.0) * 16000.0 / 255.0 - 8000.0)
+	return metres

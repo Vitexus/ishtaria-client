@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://9d50ed3e86ea3"
-path="res://.godot/imported/T_AncientClay_Roughness.png-c76f667c10b65154357dc8ea282950ee.ctex"
+uid="uid://dgv1nwqeqkd7y"
+path="res://.godot/imported/T_AncientClay_Roughness.png-c7a0117159126839ffd973f26c6cdeab.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/models/sumerian_clay_tablet/textures/T_AncientClay_Roughness.png"
-dest_files=["res://.godot/imported/T_AncientClay_Roughness.png-c76f667c10b65154357dc8ea282950ee.ctex"]
+dest_files=["res://.godot/imported/T_AncientClay_Roughness.png-c7a0117159126839ffd973f26c6cdeab.ctex"]
 
 [params]
 

@@ -1,3 +1,21 @@
+ishtaria-client (0.4.1) unstable; urgency=medium
+
+  * Allow three minutes for the 16-bit height strip download (12.6 MB at
+    face size 1024).
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 27 Oct 2026 11:03:18 +0100
+
+ishtaria-client (0.4.0) unstable; urgency=medium
+
+  * Load the 16-bit height strip from /world/heightmap with a progress
+    bar on the datadisk cover; no run-time relief (ADR 0020).
+  * Real walking clips: Quaternius characters use their Walk clip;
+    Kenney characters use a walk retargeted from the Quaternius
+    Universal Animation Library (CC0).
+  * Ignore the clay tablet's Blender source when importing assets.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 27 Oct 2026 10:29:26 +0100
+
 ishtaria-client (0.3.0.1) unstable; urgency=medium
 
   * Do not permanently disable movement on transient /players/me/move

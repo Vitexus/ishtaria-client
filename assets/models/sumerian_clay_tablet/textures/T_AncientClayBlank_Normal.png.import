@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://4c9780fec0f73"
-path="res://.godot/imported/T_AncientClayBlank_Normal.png-5cbb62ef1c5d49b6eafd387fc23a6fd1.ctex"
+uid="uid://cbf44lymelbwq"
+path="res://.godot/imported/T_AncientClayBlank_Normal.png-1f2fc45902d88f0a994f0364d1bdaad5.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/models/sumerian_clay_tablet/textures/T_AncientClayBlank_Normal.png"
-dest_files=["res://.godot/imported/T_AncientClayBlank_Normal.png-5cbb62ef1c5d49b6eafd387fc23a6fd1.ctex"]
+dest_files=["res://.godot/imported/T_AncientClayBlank_Normal.png-1f2fc45902d88f0a994f0364d1bdaad5.ctex"]
 
 [params]
 

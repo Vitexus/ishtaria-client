@@ -27,6 +27,13 @@ Files: assets/kenney/characters/*
 Copyright: Kenney (https://kenney.nl/)
 License: CC0-1.0
 
+Files: assets/kenney/characters/walk.fbx
+Copyright: Kenney (https://kenney.nl/), Quaternius (https://quaternius.com/)
+Comment: The Walk_Loop clip of the Quaternius Universal Animation Library (Standard) retargeted onto
+ the rig of Kenney's Animated Characters by tools/retarget-walk.py; see
+ assets/kenney/characters/walk-License.txt.
+License: CC0-1.0
+
 Files: assets/terrain/*
 Copyright: Poly Haven (https://polyhaven.com/)
 Comment: Ground textures grass_ground, forest_ground_06, gravelly_sand, gravel_ground_01 and gray_rocks

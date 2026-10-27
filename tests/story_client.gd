@@ -264,6 +264,18 @@ func _run() -> void:
 	_check(not compass._strip.visible, "without markers the strip is hidden")
 	compass.set_markers([marker])
 	_check(compass._strip.visible and compass._items.size() == 1, "a marker shows the strip")
+	# Two places almost in the same direction: only the one nearer the heading keeps its text, on top;
+	# a place far to the side keeps its own.
+	var beside := marker.merged({"id": "endland:beside", "position": [6.0, 0.0, -100.0], "next": false}, true)
+	var side := marker.merged({"id": "endland:side", "position": [100.0, 0.0, -10.0], "next": false}, true)
+	compass.set_markers([beside, marker, side])
+	await process_frame
+	# The headless window is small; lay the strip out at its usual width.
+	compass._area.size = Vector2(540.0, 46.0)
+	compass.update_view(Vector3.ZERO, up, ahead)
+	var texts: Array = compass._items.map(func(item: Control) -> bool: return item.get_node("Text").visible)
+	_check(texts == [false, true, true], "overlapping compass labels keep the one nearest the heading: %s" % [texts])
+	_check(compass._area.get_child(compass._area.get_child_count() - 1) == compass._items[1], "the label nearest the heading is drawn on top")
 
 	# "Tell me about yourself": a knowledge card is checked before it is shown, the article follows the language.
 	var card := {"title_key": "world:knowledge.shepherd.title", "text_key": "world:knowledge.shepherd.text", "credit_key": "world:knowledge.shepherd.credit",

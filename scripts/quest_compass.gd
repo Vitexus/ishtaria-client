@@ -109,16 +109,25 @@ static func bearing(player: Vector3, target: Vector3, direction: Vector3, headin
 	offset -= direction * offset.dot(direction)
 	return atan2(offset.dot(heading.cross(direction)), offset.dot(heading))
 
-## Moves the marks; `player` and the markers are in metres from the planet's centre.
+## Moves the marks; `player` and the markers are in metres from the planet's centre. Labels never
+## cover each other: the place nearest the way the player faces keeps its text and is drawn on top;
+## a place whose text would overlap one nearer that way shows only its arrow, dimmed.
 func update_view(player: Vector3, direction: Vector3, heading: Vector3) -> void:
 	if not _strip.visible:
 		return
 	var width := _area.size.x
 	var half := width / 2.0
-	for index in _items.size():
+	var angles: Array[float] = []
+	for marker: Dictionary in _markers:
+		angles.append(bearing(player, Vector3(marker.position[0], marker.position[1], marker.position[2]), direction, heading))
+	var order: Array = range(_items.size())
+	order.sort_custom(func(first: int, second: int) -> bool: return absf(angles[first]) < absf(angles[second]))
+	var shown: Array[Vector2] = []
+	for rank in order.size():
+		var index: int = order[rank]
 		var marker: Dictionary = _markers[index]
 		var target := Vector3(marker.position[0], marker.position[1], marker.position[2])
-		var angle := bearing(player, target, direction, heading)
+		var angle := angles[index]
 		var clamped := clampf(angle, -VISIBLE_HALF_ANGLE, VISIBLE_HALF_ANGLE)
 		var x := half + clamped / VISIBLE_HALF_ANGLE * (half - 14.0)
 		var item := _items[index]
@@ -130,6 +139,21 @@ func update_view(player: Vector3, direction: Vector3, heading: Vector3) -> void:
 			arrow.rotation = -PI / 2.0
 		else:
 			arrow.rotation = 0.0 if angle < 0.0 else PI
-		label.size = Vector2(150, 26)
-		label.position = Vector2(clampf(x - 75.0, 0.0, maxf(0.0, width - 150.0)), 18.0)
 		label.text = "%s · %d m" % [story.text(marker.name_key) if story != null else marker.name_key, roundi((target - player).length())]
+		var font_size := label.get_theme_font_size("font_size")
+		var text_width := minf(label.get_theme_font("font").get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x + 10.0, width)
+		var left := clampf(x - text_width / 2.0, 0.0, maxf(0.0, width - text_width))
+		label.size = Vector2(text_width, 26)
+		label.position = Vector2(left, 18.0)
+		var free := true
+		for span in shown:
+			if left < span.y and left + text_width > span.x:
+				free = false
+				break
+		label.visible = free
+		if free:
+			shown.append(Vector2(left, left + text_width))
+		item.modulate.a = 1.0 if free else 0.55
+	# The nearest the heading is drawn last, on top of the others.
+	for rank in range(order.size() - 1, -1, -1):
+		_area.move_child(_items[order[rank]], -1)

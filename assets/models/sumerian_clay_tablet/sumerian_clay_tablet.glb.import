@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://8b2ea66c99dc0"
-path="res://.godot/imported/sumerian_clay_tablet.glb-e883e05ad9a23628aae430cf1284f4d6.scn"
+uid="uid://cesfkqtcrndav"
+path="res://.godot/imported/sumerian_clay_tablet.glb-17233e0a137183816a77575e94d4d9dd.scn"
 
 [deps]
 
 source_file="res://assets/models/sumerian_clay_tablet/sumerian_clay_tablet.glb"
-dest_files=["res://.godot/imported/sumerian_clay_tablet.glb-e883e05ad9a23628aae430cf1284f4d6.scn"]
+dest_files=["res://.godot/imported/sumerian_clay_tablet.glb-17233e0a137183816a77575e94d4d9dd.scn"]
 
 [params]
 

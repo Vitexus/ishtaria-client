@@ -34,7 +34,7 @@ const RADIUS := 6371.0
 ## A swimmer floats with the feet this far (km) under the water surface, chest-deep; the paddling clip is slowed.
 const SWIM_DRAFT_KM := 0.0012
 const SWIM_SPEED_SCALE := 0.55
-## Metres per second of the pack characters' walking clip at speed 1 (it is a run).
+## Upper limit, metres per second, of the walking pace a pack character's Walk clip is played at (see `_bind_animation`).
 const WALK_CLIP_PACE := 4.0
 ## How much faster than its own pace a walking clip may play.
 const MAX_WALK_SCALE := 3.5
@@ -70,8 +70,8 @@ var _animation: AnimationPlayer
 var _motion_until := 0
 var _last_position_ms := 0
 var _walk_speed := 1.0
-## Metres per second the walking clip shows at its own speed. The pack characters' "walk" is a run
-## made for the server's 4 m/s; a datadisk's own model is measured when it is put on (see `_bind_animation`).
+## Metres per second the walking clip shows at its own speed. The pack characters' "walk" is their own Walk
+## clip, and a datadisk's own model is measured when it is put on (see `_bind_animation`).
 var _walk_pace := WALK_CLIP_PACE
 var _position_target := Vector3.ZERO
 var _ground_surface: Node
@@ -542,12 +542,9 @@ func set_sitting(value: bool) -> void:
 ## a pack run at 4 m/s, a real walk made short incomplete steps while the figure slid along.
 func _bind_animation() -> void:
 	_animation = avatar.get_node_or_null("CharacterAnimation")
-	_walk_pace = WALK_CLIP_PACE
+	_walk_pace = DISK_WALK_PACE
 	if not is_instance_valid(_animation):
 		return
-	if not (is_instance_valid(avatar) and avatar.has_meta("disk_model")):
-		return
-	_walk_pace = DISK_WALK_PACE
 	if not _animation.has_animation("walk"):
 		if _animation.has_animation("idle"):
 			_animation.play("idle")

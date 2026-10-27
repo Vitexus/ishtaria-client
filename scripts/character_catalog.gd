@@ -30,7 +30,7 @@ const GLTF_UNITS_PER_METRE := 2.09
 ## Weapons the glTF characters come with. They hang beside the body in the idle and walking clips, and
 ## what a player holds is decided by the server's items, so they are not drawn.
 const QUATERNIUS_HELD_ITEMS := ["Pistol", "Sword"]
-const QUATERNIUS_CLIPS := {"idle": "Idle", "walk": "Run"}
+const QUATERNIUS_CLIPS := {"idle": "Idle", "walk": "Walk"}
 ## A story datadisk may draw its own model for the character it gives every player (`player_model`):
 ## the model once fetched, and the character it stands for. Until it arrives the pack look is drawn.
 static var disk_character := ""
@@ -98,7 +98,7 @@ static func create_model(character: String) -> Node3D:
 	if not skeletons.is_empty():
 		var library := AnimationLibrary.new()
 		for action in ["idle", "walk"]:
-			var path: String = ROOT + parts[0] + "/Animations/" + ("run" if action == "walk" else "idle") + ".fbx"
+			var path: String = ROOT + "walk.fbx" if action == "walk" else ROOT + parts[0] + "/Animations/idle.fbx"
 			if ResourceLoader.exists(path):
 				_add_animation(model, skeletons[0], library, path, action)
 		var player := AnimationPlayer.new()

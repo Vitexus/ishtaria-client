@@ -1,0 +1,10 @@
+walk.fbx - the walk of the Kenney Animated Characters (protagonists, retro, survivors)
+
+Motion: "Walk_Loop" of the Universal Animation Library (Standard) by Quaternius,
+        https://quaternius.com/packs/universalanimationlibrary.html
+        License: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication,
+        https://creativecommons.org/publicdomain/zero/1.0/
+Rig:    Animated Characters by Kenney (https://kenney.nl/), CC0 1.0 Universal.
+
+Retargeted onto the Kenney rig with tools/retarget-walk.py (Blender). The result is
+released under CC0 1.0 Universal as well.

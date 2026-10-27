@@ -195,11 +195,12 @@ the transition. Logout, death or server change cancels it and restores the orbit
 Missing or invalid positions leave the client in orbit with visible feedback;
 the client never guesses a random destination to hide missing server integration.
 
-The planet shades the six-face PNG from `/world/heightmap.png` using the inverse
-spherified-cube mapping matching worldgen. Downloads are bounded, dimensions are
-verified before decoding, and stale responses cannot replace a newly selected
-world. Heights displace the sphere using the default worldgen 8000-metre amplitude.
-Cube faces use north-up pixel-center coordinates, matching the PNG and PGM.
+The planet reads the six-face 16-bit strip from `/world/heightmap` (P5 PGM, 0.25 m per
+sample from -8000 m) and shades it using the inverse spherified-cube mapping matching
+worldgen. While it downloads, a progress bar runs on the datadisk cover. Downloads are
+bounded, the header and size are verified before decoding, and stale responses cannot
+replace a newly selected world. Heights displace the sphere using the default worldgen
+8000-metre amplitude. Cube faces use north-up pixel-center coordinates, matching the PGM.
 This remains finite-resolution terrain, not full Earth-scale procedural detail
 or a physical landing simulation.
 
@@ -328,10 +329,10 @@ cancelled on disconnect, reject stale responses and retry on identity refresh.
 An older server without this endpoint still displays terrain and sea, but cannot
 provide forests, lakes or rivers. Rebuild/restart the server before testing them.
 
-Environment version 2 adds seeded, globally continuous local relief of at most
-12 metres in either direction, fading out near sea level. It is shared with
-server walking, object placement and new spawns; version 1 retains base heights.
-The imported heightmap is unchanged. The local 128-by-128-cell indexed mesh uses
+Environment version 3: the seeded local relief (at most about 12 metres in either
+direction, fading out near sea level) is part of the server's strip (ADR 0020), so the
+client, server walking, object placement and spawns read the same heights and the client
+adds no relief of its own; it rejects the older versions. The local 128-by-128-cell indexed mesh uses
 exact origin subtraction, separate land/water vertices and stable local wave
 phases. The shader does not displace these projected vertices a second time.
 
@@ -554,6 +555,7 @@ The client includes resources from:
 - [Animated Characters Protagonists](https://kenney.nl/assets/animated-characters-protagonists): model, four skins, idle and run animations under CC0.
 - [Animated Characters Retro](https://kenney.nl/assets/animated-characters-retro): model, four skins, idle and run animations under CC0.
 - [Animated Characters Survivors](https://kenney.nl/assets/animated-characters-survivors): model, four skins, idle and run animations under CC0.
+- Walk of the three Kenney character packs (`assets/kenney/characters/walk.fbx`): the Walk_Loop of the [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) by Quaternius (Standard, CC0) retargeted onto their shared rig with `tools/retarget-walk.py`, under CC0. The packs themselves have no walk, only idle, jump and run.
 - [Food Kit](https://kenney.nl/assets/food-kit): previews of apple, bread, cheese, carrot, corn, cabbage, pumpkin, fish, raw and cooked meat (inventory icons) and the carrot, corn, cabbage and pumpkin models (growing crops) under CC0.
 - [Flag Pack](https://kenney.nl/assets/flag-pack): the English (GB) and Czech (CZ) flags beside the language choice under CC0.
 - [Fantasy Town Kit](https://kenney.nl/assets/fantasy-town-kit): houses, roofs, roads, fountain, stalls and trees of generated towns under CC0.
