@@ -165,6 +165,11 @@ var _detail_vertices := PackedVector3Array()
 ## Radius (km) and segment count of the detail disk last built; grow with landscape patches.
 var _detail_radius := DETAIL_RADIUS
 var _detail_segments := DETAIL_SEGMENTS
+## The grid of `_detail_vertices` (centre, radius in km, segments): the disk being computed may already use another one,
+## and the shown disk stays until it is replaced, so ground lookups must use the grid the vertices were built on.
+var _shown_unit := Vector3.ZERO
+var _shown_radius := DETAIL_RADIUS
+var _shown_segments := DETAIL_SEGMENTS
 ## Computes the detail disk on a worker thread (the game); the tests leave it off and get the mesh at once.
 var async_detail := false
 var _detail_generation := 0
@@ -734,6 +739,9 @@ func _finish_detail(result: Dictionary) -> void:
 	var unit: Vector3 = job.unit
 	var mesh := _build_detail_mesh(result.land, result.normals, result.uv2, result.indices)
 	_detail_vertices = result.land
+	_shown_unit = unit
+	_shown_radius = float(job.radius)
+	_shown_segments = int(job.segments)
 	var local_land := MeshInstance3D.new()
 	local_land.mesh = mesh
 	var material := land_material.duplicate() as ShaderMaterial
@@ -782,22 +790,23 @@ func ground_position64(coordinates_metres: Array) -> Vector3:
 		projected.append(direction[axis] * (RADIUS + height) * 1000.0)
 	var point := _render_position(projected)
 	# While a new disk is computed the old vertices sit in the previous origin's frame: the exact height will do.
-	if _detail_vertices.is_empty() or target == Vector3.ZERO or _detail_pending:
+	if _detail_vertices.is_empty() or _shown_unit == Vector3.ZERO or _detail_pending or _detail_vertices.size() != (_shown_segments + 1) * (_shown_segments + 1):
 		return point
 	var up := Vector3(direction[0], direction[1], direction[2])
-	var unit := target.normalized()
+	var unit := _shown_unit
 	var reference := Vector3.UP if absf(unit.y) < 0.9 else Vector3.RIGHT
 	var tangent := reference.cross(unit).normalized()
 	var forward := unit.cross(tangent).normalized()
 	var denominator := up.dot(unit)
 	if denominator <= 0:
 		return point
-	var column := int(floor((up.dot(tangent) * RADIUS / denominator / _detail_radius + 1.0) * 0.5 * _detail_segments))
-	var row := int(floor((up.dot(forward) * RADIUS / denominator / _detail_radius + 1.0) * 0.5 * _detail_segments))
-	for sample_row in range(maxi(0, row - 1), mini(_detail_segments, row + 2)):
-		for sample_column in range(maxi(0, column - 1), mini(_detail_segments, column + 2)):
-			var first := sample_row * (_detail_segments + 1) + sample_column
-			for triangle in [[first, first + _detail_segments + 1, first + 1], [first + 1, first + _detail_segments + 1, first + _detail_segments + 2]]:
+	var segments := _shown_segments
+	var column := int(floor((up.dot(tangent) * RADIUS / denominator / _shown_radius + 1.0) * 0.5 * segments))
+	var row := int(floor((up.dot(forward) * RADIUS / denominator / _shown_radius + 1.0) * 0.5 * segments))
+	for sample_row in range(maxi(0, row - 1), mini(segments, row + 2)):
+		for sample_column in range(maxi(0, column - 1), mini(segments, column + 2)):
+			var first := sample_row * (segments + 1) + sample_column
+			for triangle in [[first, first + segments + 1, first + 1], [first + 1, first + segments + 1, first + segments + 2]]:
 				var hit: Variant = Geometry3D.ray_intersects_triangle(point + up * 0.002, -up, _detail_vertices[triangle[0]], _detail_vertices[triangle[1]], _detail_vertices[triangle[2]])
 				if hit is Vector3 and hit.distance_to(point) < 0.002:
 					return hit

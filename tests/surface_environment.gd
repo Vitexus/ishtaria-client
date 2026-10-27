@@ -222,6 +222,12 @@ func _run() -> void:
 			break
 		await process_frame
 	_check(not surface._detail_pending and surface.detail.get_child_count() > 0 and surface.detail.get_child(0) != old_disk, "The new terrain disk replaces the old one when it is ready")
+	# A rebuild that was stopped (new patches, a bigger disk) must not make ground lookups index the shown
+	# vertices with the grid of the disk that was never finished.
+	surface._detail_segments = surface._shown_segments + 64
+	surface._detail_radius = surface._shown_radius * 2.0
+	var ground_point: Vector3 = surface.ground_position64([surface.target.x * surface.RADIUS * 1000.0, surface.target.y * surface.RADIUS * 1000.0, surface.target.z * surface.RADIUS * 1000.0])
+	_check(ground_point.is_finite(), "Ground lookups use the grid of the shown disk, not of the next one")
 	surface.async_detail = false
 	surface.show_region(Vector3.FORWARD)
 	_check(is_equal_approx(surface._detail_radius, surface.DETAIL_RADIUS), "Without a landscape patch the detail disk stays at the default radius")
