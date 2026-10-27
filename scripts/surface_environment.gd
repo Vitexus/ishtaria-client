@@ -1036,7 +1036,7 @@ func apply_npcs(data: Variant) -> bool:
 		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
 			continue
 		identities[entry.id] = true
-		var model := CHARACTERS.create_model(entry.character)
+		var model := CHARACTERS.create_model(entry.character, false)
 		if model == null:
 			continue
 		var placement := Node3D.new()

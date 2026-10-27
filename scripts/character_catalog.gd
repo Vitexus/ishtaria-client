@@ -76,10 +76,12 @@ static func selectable(pack: String, keep := "") -> Array:
 			out.append(entry)
 	return out
 
-static func create_model(character: String) -> Node3D:
+## `for_player`: the disk's player model stands only for players. A story or generated NPC that happens to
+## share the player's pack look keeps that look (or its own model), it is not drawn as the player's hero.
+static func create_model(character: String, for_player := true) -> Node3D:
 	if not is_valid(character):
 		return null
-	if is_disk_character(character):
+	if for_player and is_disk_character(character):
 		var drawn := _create_disk_model()
 		if drawn != null:
 			return drawn

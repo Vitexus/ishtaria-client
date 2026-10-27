@@ -112,6 +112,11 @@ func _test_disk_model() -> void:
 	_check(clips != null and clips.get_animation("walk").loop_mode == Animation.LOOP_LINEAR, "The walking clip loops")
 	_check(clips != null and clips.get_animation("jump").loop_mode == Animation.LOOP_NONE and clips.get_animation("die").loop_mode == Animation.LOOP_NONE, "Jump and Die play once")
 	model.free()
+	# An NPC that shares the player's pack look is not drawn as the player's hero (the hunter herding sheep).
+	var npc_model := CATALOG.create_model("protagonists/criminalMaleA", false)
+	var npc_clips: AnimationPlayer = npc_model.get_node_or_null("CharacterAnimation")
+	_check(npc_clips != null and npc_clips.has_animation("walk") and not npc_clips.has_animation("run"), "An NPC keeps the pack look even when the player's disk model stands for it")
+	npc_model.free()
 	CATALOG.set_disk_model("", null)
 	_check(not CATALOG.is_disk_character("protagonists/criminalMaleA"), "The model can be withdrawn")
 	var plain := CATALOG.create_model("protagonists/criminalMaleA")
