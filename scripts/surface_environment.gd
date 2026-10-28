@@ -2056,6 +2056,21 @@ func nearest_loot(player_metres: Vector3, reach_m: float) -> Dictionary:
 			best_distance = distance
 	return best
 
+## The nearest structure of a datadisk that can be read (an inscribed tablet: the prop's `readable`) within reach;
+## its id is the place id the server reads it by.
+func nearest_readable(player_metres: Vector3, reach_m: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for entry: Dictionary in _prop_entries:
+		if entry.get("readable") != true:
+			continue
+		var at := Vector3(float(entry.position[0]), float(entry.position[1]), float(entry.position[2]))
+		var distance := player_metres.distance_to(at)
+		if distance <= reach_m and distance < best_distance:
+			best = entry
+			best_distance = distance
+	return best
+
 ## The nearest player memorial (headstone / monument / mausoleum) within reach, for examine / loot.
 func nearest_memorial(player_metres: Vector3, reach_m: float) -> Dictionary:
 	var best := {}

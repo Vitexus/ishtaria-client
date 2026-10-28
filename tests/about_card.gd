@@ -68,6 +68,19 @@ func _run() -> void:
 			root.get_texture().get_image().save_png("/tmp/ishtaria-about-cs-%sx%s.png" % [dimensions.x, dimensions.y])
 	dialogue.choices_box.find_child("Back", true, false).pressed.emit()
 	_check(dialogue.choices_box.has_node("About") and dialogue.speech.text == TEXTS["world:shepherd.greet"], "back to the conversation")
+	# A card read at a place (an inscription) opens on its own while no one talks, and only closes.
+	dialogue.show_reading(card)
+	_check(not dialogue.visible or dialogue._npc_id != "", "a reading never replaces an open conversation")
+	dialogue.close()
+	var closed_count := [0]
+	dialogue.closed.connect(func() -> void: closed_count[0] += 1)
+	dialogue.show_reading(card)
+	_check(dialogue.visible and dialogue._card_mode and dialogue.speech.text == TEXTS["world:knowledge.shepherd.text"], "the card is read alone")
+	var close_button: Button = dialogue.choices_box.find_child("Back", true, false)
+	_check(close_button != null and close_button.text == "Zavřít", "a reading has Close, not Back: %s" % (close_button.text if close_button else ""))
+	_check(dialogue.choices_box.find_child("Wikipedia", true, false) != null, "the article can be opened from a reading")
+	close_button.pressed.emit()
+	_check(not dialogue.visible and closed_count[0] == 1, "Close ends the reading")
 	if _failures > 0:
 		push_error("%d about card checks failed" % _failures)
 	else:

@@ -3,6 +3,9 @@ extends Node
 ## The server alone grants them, inside the action that earns one, and tells the owner through an
 ## `achievement` event; the client asks again and then announces the new one. Titles and
 ## descriptions are English keys translated here; hidden ones arrive without them until earned.
+## A datadisk's achievements (ids `<disk>:<id>`, `story` set) carry string keys of the disk instead,
+## translated through the story client. Every entry names its Steam achievement (`steam`): a Steam
+## build would mirror the announced ones to SetAchievement; the server alone grants them.
 
 signal loaded(data: Dictionary)
 ## A newly earned achievement (a validated catalog entry with `unlocked_at`), to be announced.
@@ -12,6 +15,8 @@ const CATEGORIES := ["progress", "gathering", "magic", "social", "story"]
 const MAX_ACHIEVEMENTS := 200
 
 var server_url := ""
+## story_client.gd, which translates the texts of datadisk achievements.
+var story: Node
 var data := {"achievements": [], "earned": []}
 var _token := ""
 var _generation := 0
@@ -44,13 +49,36 @@ static func valid_id(id: Variant) -> bool:
 	if not id is String:
 		return false
 	var pattern := RegEx.new()
+	pattern.compile("^([a-z0-9_]{1,48}:)?[a-z0-9_]{1,48}$")
+	return id.length() <= 64 and pattern.search(id) != null
+
+## An icon is an item id: never qualified with a disk.
+static func valid_icon(icon: Variant) -> bool:
+	if not icon is String:
+		return false
+	var pattern := RegEx.new()
 	pattern.compile("^[a-z0-9_]{1,48}$")
-	return pattern.search(id) != null
+	return pattern.search(icon) != null
+
+## The name of an achievement in Steamworks, as the server derives it from the id.
+static func valid_steam(name: Variant) -> bool:
+	if not name is String:
+		return false
+	var pattern := RegEx.new()
+	pattern.compile("^[A-Z0-9_]{1,100}$")
+	return pattern.search(name) != null
 
 static func valid_entry(entry: Variant) -> bool:
-	if not entry is Dictionary or not valid_id(entry.get("id")) or not valid_id(entry.get("icon")):
+	if not entry is Dictionary or not valid_id(entry.get("id")) or not valid_icon(entry.get("icon")):
 		return false
 	if not entry.get("category") in CATEGORIES or not entry.get("hidden") is bool:
+		return false
+	if entry.has("story") and not entry.story is bool:
+		return false
+	if entry.has("steam") and not valid_steam(entry.steam):
+		return false
+	# Only a datadisk's achievements are qualified with the disk, and only they carry its keys.
+	if (":" in entry.id) != (entry.get("story") == true):
 		return false
 	for key in ["title", "description"]:
 		if not entry.get(key) is String or entry[key].length() > 200:
@@ -75,6 +103,13 @@ static func valid_reply(reply: Variant) -> bool:
 		if not (when is float or when is int) or when < 0 or when > 1e11 or when != floor(when):
 			return false
 	return true
+
+## The title or description of an entry in the interface language: an English key, or a key of a datadisk.
+func text(entry: Dictionary, key: String) -> String:
+	var value := str(entry.get(key, ""))
+	if entry.get("story") == true and story != null:
+		return story.text(value)
+	return tr(value)
 
 ## The catalog entry of `id` with `unlocked_at` (0 when not earned), or an empty dictionary.
 func entry(id: String) -> Dictionary:

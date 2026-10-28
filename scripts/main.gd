@@ -24,6 +24,8 @@ const ANIMAL_REACH_M := 4.0
 const MILK_REACH_M := 3.0
 ## Server graves allow 3 m; stay a little under so the edge is not refused.
 const GRAVE_REACH_M := 2.8
+## Reach to read an inscribed structure; the server allows 3 m.
+const READ_REACH_M := 2.8
 
 static func parse_version(text: String) -> Array[int]:
 	return preload("res://scripts/server_history.gd").parse_version(text)
@@ -432,6 +434,11 @@ func _ready() -> void:
 	_social.event_received.connect(_on_friend_event)
 	_story = preload("res://scripts/story_client.gd").new()
 	add_child(_story)
+	# Achievements of datadisks are named by the disk's strings.
+	_achievements.story = _story
+	_achievements_panel.texts = _achievements.text
+	_achievement_toast.texts = _achievements.text
+	_story.strings_changed.connect(func() -> void: _achievements_panel.show_data(_achievements.data))
 	_dialogue = preload("res://scripts/dialogue_panel.gd").new()
 	_dialogue.story = _story
 	_dialogue.music_enabled = _audio.enabled
@@ -452,6 +459,7 @@ func _ready() -> void:
 	_dialogue.about_requested.connect(_story.fetch_about)
 	_dialogue.trade_requested.connect(_on_npc_trade)
 	_story.about_ready.connect(_dialogue.show_about)
+	_story.reading_ready.connect(_on_reading_ready)
 	_dialogue.closed.connect(_on_dialogue_closed)
 	_dialogue.speaking_changed.connect(_environment.set_npc_talking)
 	_story.dialogue_changed.connect(_on_dialogue_changed)
@@ -1549,6 +1557,12 @@ func _interact() -> void:
 	if _player_metres != Vector3.ZERO and not _story.is_running():
 		_harvest_nearby()
 		return
+	var readable: Dictionary = _environment.nearest_readable(_player_metres, READ_REACH_M) if _player_metres != Vector3.ZERO else {}
+	if not readable.is_empty():
+		_controls.release_mouse()
+		_story.read_place(str(readable.id))
+		_audio.play("click")
+		return
 	var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _player_metres != Vector3.ZERO else {}
 	if npc.is_empty():
 		var crop := _ripe_crop_nearby()
@@ -1564,6 +1578,11 @@ func _interact() -> void:
 		_trading.open_shop(npc.id)
 		return
 	_story.start(npc.id)
+
+## The player read an inscription; an achievement it earns arrives as an event.
+func _on_reading_ready(_place_id: String, card: Dictionary) -> void:
+	_controls.release_mouse()
+	_dialogue.show_reading(card)
 
 func _on_dialogue_choice(npc_id: String, seq: int, choice: int) -> void:
 	# Server injects apology as choice index 65000 on hostile NPCs.
@@ -2088,11 +2107,14 @@ func _update_prompt() -> void:
 		var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0)
 		var memorial: Dictionary = _environment.nearest_memorial(_player_metres, GRAVE_REACH_M)
 		var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _story.is_running() else {}
+		var readable: Dictionary = _environment.nearest_readable(_player_metres, READ_REACH_M) if _story.is_running() else {}
 		var target: Dictionary = _environment.nearest_harvestable(_player_metres, HARVEST_REACH_M)
 		if not pile.is_empty():
 			text = tr("E: Pick up %s") % tr(str(pile.name))
 		elif not memorial.is_empty():
 			text = tr("E: Examine grave of %s") % str(memorial.player_name)
+		elif not readable.is_empty():
+			text = tr("E: Read the inscription")
 		elif not npc.is_empty():
 			text = tr("E: Talk to %s") % _story.text(npc.name_key)
 		elif not _ripe_crop_nearby().is_empty():

@@ -17,6 +17,8 @@ signal markers_changed(markers: Array)
 signal media_ready(url: String, resource: Resource)
 ## What a character tells about itself (a knowledge card).
 signal about_ready(npc_id: String, card: Dictionary)
+## What the player read at a structure of a place (a knowledge card).
+signal reading_ready(place_id: String, card: Dictionary)
 
 const MAX_STRINGS_BYTES := 4194304
 const MAX_IMAGE_BYTES := 2097152
@@ -182,6 +184,20 @@ func fetch_about(npc_id: String) -> void:
 			failed.emit("Conversation unavailable")
 			return
 		about_ready.emit(npc_id, data)
+	)
+
+## Reads what a structure of a place carries, standing at it; the server may grant an achievement for it
+## (announced as an event). The answer arrives as `reading_ready`.
+func read_place(place_id: String) -> void:
+	_send("/story/places/%s/read" % place_id.uri_encode(), HTTPClient.METHOD_POST, "", func(result: int, code: int, body: PackedByteArray) -> void:
+		if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+			failed.emit("Too far away to read" if code == 403 else "Nothing to read here")
+			return
+		var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+		if not valid_about(data):
+			failed.emit("Nothing to read here")
+			return
+		reading_ready.emit(place_id, data)
 	)
 
 func load_strings() -> void:

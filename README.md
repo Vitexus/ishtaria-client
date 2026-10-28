@@ -523,7 +523,7 @@ Thanks to [Kenney](https://kenney.nl/) for making high-quality game assets
 freely available, and to the [Godot](https://godotengine.org/) contributors
 for the open-source engine powering this client.
 
-The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the six spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0). The love-minigame heart grenade (`assets/props/heart_grenade/`) is an original Blender prop under MIT — a humorous anachronism for Šamḫat’s throws at Enkidu, not the Cults3D CULTS PU listing that inspired the joke.
+The application icon, logo, splash and background (`assets/branding/`), the portrait of the gate guard, and the item icons of acorn, coconut, pear, pine nut, raw meat, suitcase, aetherglass and the six spell scrolls were generated for this project with InvokeAI (SDXL) and are released under the MIT license. The boat and ship icons are Blender renders of Kenney Pirate Kit models (CC0). The foundation-tablet icon (`assets/icons/items/foundation_tablet.png`) is a Blender render of the Gilgamesh datadisk's original tablet model (`models-src/foundation_tablet/` there, same author), released here under MIT; its signs are drawn with Noto Sans Cuneiform (SIL OFL, font not bundled). The love-minigame heart grenade (`assets/props/heart_grenade/`) is an original Blender prop under MIT — a humorous anachronism for Šamḫat’s throws at Enkidu, not the Cults3D CULTS PU listing that inspired the joke.
 
 The client includes resources from:
 

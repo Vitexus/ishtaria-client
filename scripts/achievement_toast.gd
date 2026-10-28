@@ -50,6 +50,9 @@ func _ready() -> void:
 	text.add_child(_title)
 	panel.hide()
 
+## Translates an entry's text (achievements_client.gd `text`); English keys when unset.
+var texts: Callable
+
 ## Queues the banner of a validated achievement entry.
 func show_achievement(achievement: Dictionary) -> void:
 	if _queue.size() >= MAX_QUEUE:
@@ -72,7 +75,7 @@ func _next() -> void:
 	if _icon.texture == null:
 		_icon.texture = preload("res://assets/kenney/game-icons/trophy.png")
 	_heading.text = tr("Achievement unlocked")
-	_title.text = tr(str(achievement.get("title", "")))
+	_title.text = texts.call(achievement, "title") if texts.is_valid() else tr(str(achievement.get("title", "")))
 	panel.reset_size()
 	var screen := get_viewport().get_visible_rect().size
 	var width := panel.get_combined_minimum_size().x

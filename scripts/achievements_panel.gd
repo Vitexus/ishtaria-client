@@ -101,6 +101,9 @@ func close() -> void:
 	hide()
 	closed.emit()
 
+## Translates an entry's text (achievements_client.gd `text`); English keys when unset.
+var texts: Callable
+
 ## Shows a validated reply of achievements_client.gd.
 func show_data(data: Dictionary) -> void:
 	_data = data
@@ -152,7 +155,8 @@ func _add_card(entry: Dictionary, unlocked_at: int) -> void:
 	var earned := unlocked_at > 0
 	var secret: bool = entry.hidden and not earned
 	var card := PanelContainer.new()
-	card.name = "Achievement_" + entry.id
+	# A node name cannot hold the `:` of a datadisk achievement.
+	card.name = "Achievement_" + entry.id.replace(":", "_")
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var style := UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.85 if earned else 0.55), UiTheme.GOLD if earned else Color(UiTheme.GOLD_DIM, 0.45), 2 if earned else 1, 3, 12.0)
 	if earned:
@@ -183,7 +187,7 @@ func _add_card(entry: Dictionary, unlocked_at: int) -> void:
 	title.name = "Title"
 	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	title.theme_type_variation = &"GoldLabel" if earned else &""
-	title.text = "???" if secret else tr(entry.title)
+	title.text = "???" if secret else _text(entry, "title")
 	if not earned:
 		title.add_theme_color_override("font_color", UiTheme.SAND_MUTED)
 	title.add_theme_font_size_override("font_size", 18)
@@ -193,7 +197,7 @@ func _add_card(entry: Dictionary, unlocked_at: int) -> void:
 	description.theme_type_variation = &"MutedLabel"
 	description.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	description.text = tr("A secret achievement") if secret else tr(entry.description)
+	description.text = tr("A secret achievement") if secret else _text(entry, "description")
 	text.add_child(description)
 	if earned:
 		var date := Label.new()
@@ -214,6 +218,9 @@ func _update_texts() -> void:
 	for index in CATEGORY_KEYS.size():
 		_tabs.set_tab_title(index, tr(CATEGORY_KEYS[index]))
 	_render()
+
+func _text(entry: Dictionary, key: String) -> String:
+	return texts.call(entry, key) if texts.is_valid() else tr(str(entry.get(key, "")))
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED:

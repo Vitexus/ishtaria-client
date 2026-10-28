@@ -207,6 +207,18 @@ func show_about(npc_id: String, card: Dictionary) -> void:
 	_about_pending = false
 	if not visible or npc_id != _npc_id or _card_mode:
 		return
+	_show_card(card, false)
+
+## A card the player read at a place (an inscription), with no conversation behind it: Close ends it.
+func show_reading(card: Dictionary) -> void:
+	if visible and not _npc_id.is_empty():
+		return
+	_npc_id = ""
+	_reply = {}
+	show()
+	_show_card(card, true)
+
+func _show_card(card: Dictionary, alone: bool) -> void:
 	_card_mode = true
 	_resize()
 	name_label.text = _text(card.title_key)
@@ -233,10 +245,10 @@ func show_about(npc_id: String, card: Dictionary) -> void:
 	choices_box.add_child(buttons)
 	var back := Button.new()
 	back.name = "Back"
-	back.text = tr("Back to the conversation")
-	back.icon = load(ICONS + "arrowLeft.png") as Texture2D
+	back.text = tr("Close") if alone else tr("Back to the conversation")
+	back.icon = load(ICONS + ("cross.png" if alone else "arrowLeft.png")) as Texture2D
 	back.add_theme_constant_override("icon_max_width", 20)
-	back.pressed.connect(_leave_card)
+	back.pressed.connect(close if alone else _leave_card)
 	buttons.add_child(back)
 	var link := Button.new()
 	link.name = "Wikipedia"

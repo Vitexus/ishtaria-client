@@ -47,6 +47,31 @@ func _run() -> void:
 	for broken: Variant in [null, "x", {"achievements": "x", "earned": []}, {"achievements": [{"id": "Bad Id"}], "earned": []}]:
 		_check(not CLIENT.valid_reply(broken), "malformed reply %s" % [broken])
 	_check(CLIENT.valid_id("level_10") and not CLIENT.valid_id("Level") and not CLIENT.valid_id("") and not CLIENT.valid_id(5), "ids follow the server's rule")
+	_check(CLIENT.valid_id("gilgamesh:foundation_reader") and not CLIENT.valid_id("a:b:c") and not CLIENT.valid_id(":x"), "a datadisk qualifies its ids once")
+
+	# A datadisk's achievement: qualified id, the disk's keys (`story`), and its Steam name.
+	var disk := _entry("gilgamesh:foundation_reader", "story", false, "foundation_tablet")
+	disk.title = "gilgamesh:achievement.foundation_reader.title"
+	disk.description = "gilgamesh:achievement.foundation_reader.description"
+	disk.story = true
+	disk.steam = "GILGAMESH__FOUNDATION_READER"
+	var with_disk := _reply()
+	with_disk.achievements.append(disk)
+	with_disk.earned.append({"id": disk.id, "unlocked_at": 1792678600})
+	_check(CLIENT.valid_reply(with_disk), "a datadisk's achievement is accepted")
+	var engine_as_story := _reply()
+	engine_as_story.achievements[0].story = true
+	_check(not CLIENT.valid_reply(engine_as_story), "an engine achievement does not carry disk keys")
+	var unqualified := _reply()
+	unqualified.achievements.append(disk.duplicate())
+	unqualified.achievements[-1].id = "foundation_reader"
+	_check(not CLIENT.valid_reply(unqualified), "a disk's achievement is qualified with the disk")
+	var bad_steam := _reply()
+	bad_steam.achievements[0].steam = "first harvest"
+	_check(not CLIENT.valid_reply(bad_steam), "a Steam name has the Steamworks shape")
+	var bad_icon := _reply()
+	bad_icon.achievements[0].icon = "gilgamesh:axe"
+	_check(not CLIENT.valid_reply(bad_icon), "an icon is an item id")
 
 	# The event of a new achievement carries only its id.
 	_check(SOCIAL.valid_event({"id": 9, "kind": "achievement", "subject": "first_harvest"}), "an achievement event is accepted")
@@ -81,6 +106,20 @@ func _run() -> void:
 	panel._tabs.current_tab = 1
 	await process_frame
 	_check(panel.grid.get_child_count() == 2, "the progress tab shows the level achievements")
+	panel._tabs.current_tab = 0
+	# A datadisk's earned achievement is named by the disk's strings (the story client), not by tr().
+	var stub := GDScript.new()
+	stub.source_code = "extends Node\nfunc text(key: String) -> String:\n\treturn \"Disk \" + key\n"
+	stub.reload()
+	var strings: Node = stub.new()
+	root.add_child(strings)
+	client.story = strings
+	panel.texts = client.text
+	panel.show_data(with_disk)
+	await process_frame
+	var from_disk := panel.grid.find_child("Achievement_gilgamesh_foundation_reader", true, false)
+	_check(from_disk != null and from_disk.find_child("Title", true, false).text == "Disk gilgamesh:achievement.foundation_reader.title", "a disk's achievement shows the disk's text")
+	_check(panel.grid.find_child("Achievement_first_harvest", true, false).find_child("Title", true, false).text == "Woodcutter", "the engine's keep tr()")
 	panel._tabs.current_tab = 0
 	panel.show_data({"achievements": [], "earned": []})
 	_check(panel.grid.get_child_count() == 0 and panel.empty_label.visible, "without data the panel says so")

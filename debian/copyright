@@ -151,6 +151,13 @@ Copyright: 2026 VitexSoftware
 License: MIT
 Comment: Generated for the project with InvokeAI.
 
+Files: assets/icons/items/foundation_tablet.png
+Copyright: 2026 VitexSoftware
+License: MIT
+Comment: Blender render of the original foundation tablet model of the Gilgamesh datadisk
+ (models-src/foundation_tablet/build_foundation_tablet.py). The signs are drawn with
+ Noto Sans Cuneiform (SIL Open Font License); the font itself is not bundled.
+
 License: CC-BY-SA-3.0
  On Debian systems, the full text of the Creative Commons Attribution-ShareAlike 3.0
  Unported license can be found in /usr/share/common-licenses/CC-BY-SA-3.0.
