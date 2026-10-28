@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## Quest prologue on the 3D Sumerian clay tablet: cuneiform is carved sign by sign on the
-## front face; when that side is full the tablet flips and carving continues on the blank reverse.
+## front face; when that side is full the tablet flips and carving continues on the blank reverse;
+## when the reverse is full too, the written tablet slides away and a blank one takes its place.
 ## The narrator speaks the paraphrase; readable subtitles run along the bottom.
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
@@ -10,7 +11,6 @@ signal closed
 
 const TABLET_SCENE := "res://assets/models/sumerian_clay_tablet/sumerian_clay_tablet.glb"
 const BLANK_ALBEDO := "res://assets/models/sumerian_clay_tablet/textures/T_AncientClayBlank_BaseColor.png"
-const BLANK_ROUGH := "res://assets/models/sumerian_clay_tablet/textures/T_AncientClayBlank_Roughness.png"
 const BLANK_NORMAL := "res://assets/models/sumerian_clay_tablet/textures/T_AncientClayBlank_Normal.png"
 
 const VOICE_DB := 0.0
@@ -18,12 +18,29 @@ const MAX_VOLUME := 2.0
 const MIN_DURATION_SEC := 4.0
 const FALLBACK_CHAR_SEC := 0.045
 const FLIP_SEC := 0.85
+## A written tablet slides this far aside (metres, out of view) and a blank one slides in, each in SLIDE_SEC.
+const SLIDE_M := 0.17
+const SLIDE_SEC := 0.7
 ## Usable writing area on one face (metres), inset from the rounded rim.
 const FACE_W_M := 0.074
-const FACE_H_M := 0.052
+const FACE_H_M := 0.048
 const FACE_Z_M := 0.0082
-const LABEL_PIXEL_SIZE := 0.00095
-const CUNEIFORM_FONT_SIZE := 22
+const LABEL_PIXEL_SIZE := 0.00013
+const CUNEIFORM_FONT_SIZE := 48
+## Pixels added between rows (negative: the cuneiform font's line height leaves far more room than a scribe).
+const LINE_SPACING := -26.0
+## Fresh, still wet clay (the reference is a photo of cuneiform pressed into fresh clay): darker and
+## greyer than fired terracotta, with a damp sheen.
+const WET_CLAY_TINT := Color(0.50, 0.55, 0.64)
+const WET_CLAY_ROUGHNESS := 0.45
+## The layers of an impressed sign: name, colour, offset (metres) on the front face. The key light comes
+## from the upper left, so the wall of a wedge under it falls into shadow and the far, lower right wall
+## catches the light. The reverse is turned about the vertical axis, so its offsets mirror in x.
+const IMPRESSION_LAYERS := [
+	["LitWall", Color(0.86, 0.74, 0.58, 0.55), Vector3(0.00022, -0.00022, 0.00002)],
+	["ShadowWall", Color(0.10, 0.07, 0.05, 0.85), Vector3(-0.00018, 0.00018, 0.00004)],
+	["Floor", Color(0.30, 0.22, 0.15, 0.95), Vector3(0.0, 0.0, 0.00006)],
+]
 const CUNEIFORM_PATHS := [
 	"/usr/share/fonts/truetype/noto/NotoSansCuneiform-Regular.ttf",
 	"/usr/share/fonts/opentype/noto/NotoSansCuneiform-Regular.otf",
@@ -37,25 +54,28 @@ var _title: Label
 var _preview: SubViewportContainer
 var _viewport: SubViewport
 var _tablet_root: Node3D
-var _front_label: Label3D
-var _back_label: Label3D
+var _front_label: Node3D
+var _back_label: Node3D
 var _subtitles: Label
 var _subtitle_bar: PanelContainer
 var _dismiss: Button
 var _voice: AudioStreamPlayer
 var _voice_url := ""
 var _carve_text := ""
-var _side_a := ""
-var _side_b := ""
+## The text of each face in order: front and reverse of the first tablet, then of the next ones.
+var _faces := PackedStringArray()
+## Where each face starts in `_carve_text`.
+var _face_starts: Array[int] = []
+## The face being carved (or last carved).
+var _face := 0
 var _subtitle_text := ""
 var _carve_index := 0
 var _subtitle_index := 0
 var _elapsed := 0.0
 var _duration := MIN_DURATION_SEC
 var _carving := false
-var _flipping := false
-var _flipped := false
-var _flip_tween: Tween
+var _turning := false
+var _turn_tween: Tween
 var _cuneiform_font: Font
 
 
@@ -151,8 +171,10 @@ func _build_stage() -> void:
 	_tablet_root.add_child(tilt)
 
 	var model := _instantiate_tablet()
-	if model != null:
+	if model is Node3D:
 		_blank_clay_materials(model)
+		# The model is exported Y-up with its writing face up; stand that face toward the camera (+Z).
+		(model as Node3D).rotation_degrees = Vector3(90, 0, 0)
 		tilt.add_child(model)
 	else:
 		push_warning("Clay tablet GLB missing; prologue uses a stand-in box.")
@@ -163,11 +185,11 @@ func _build_stage() -> void:
 		stand_in.material_override = _blank_material()
 		tilt.add_child(stand_in)
 
-	_front_label = _make_face_label("FrontScript")
+	_front_label = _make_face_label("FrontScript", false)
 	_front_label.position = Vector3(0.0, 0.0, FACE_Z_M)
 	tilt.add_child(_front_label)
 
-	_back_label = _make_face_label("BackScript")
+	_back_label = _make_face_label("BackScript", true)
 	_back_label.position = Vector3(0.0, 0.0, -FACE_Z_M)
 	_back_label.rotation_degrees = Vector3(0, 180, 0)
 	tilt.add_child(_back_label)
@@ -179,21 +201,47 @@ func _build_stage() -> void:
 	camera.look_at(Vector3(0.0, 0.0, 0.0), Vector3.UP)
 
 
-func _make_face_label(node_name: String) -> Label3D:
-	var label := Label3D.new()
-	label.name = node_name
-	label.font = _cuneiform_font
-	label.font_size = CUNEIFORM_FONT_SIZE
-	label.pixel_size = LABEL_PIXEL_SIZE
-	label.modulate = Color(0.16, 0.10, 0.06)
-	label.outline_modulate = Color(0.12, 0.08, 0.05, 0.35)
-	label.outline_size = 2
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.width = FACE_W_M / LABEL_PIXEL_SIZE
-	label.text = ""
-	return label
+## One face of script, drawn as wedges pressed into fresh wet clay rather than ink on it: the wall of each
+## wedge toward the light falls into shadow, the far wall catches the light, the floor is the clay's own
+## darker, wetter colour (the stylus squeezes water to the surface).
+func _make_face_label(node_name: String, reverse: bool) -> Node3D:
+	var face := Node3D.new()
+	face.name = node_name
+	for index in IMPRESSION_LAYERS.size():
+		var layer: Array = IMPRESSION_LAYERS[index]
+		var label := Label3D.new()
+		# The layers lie in one plane: draw them in a fixed order (walls first, the floor over them),
+		# not by distance, which flickers between frames.
+		label.render_priority = index
+		label.name = layer[0]
+		label.font = _cuneiform_font
+		label.font_size = CUNEIFORM_FONT_SIZE
+		label.pixel_size = LABEL_PIXEL_SIZE
+		label.modulate = layer[1]
+		label.position = layer[2]
+		if reverse:
+			label.position.x = -label.position.x
+		label.shaded = true
+		label.double_sided = false
+		label.alpha_cut = Label3D.ALPHA_CUT_DISABLED
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+		# Rows are broken by _split_sides, so what is measured is what is drawn.
+		label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		label.outline_size = 0
+		label.line_spacing = LINE_SPACING
+		# A Label3D hangs its text from its origin: put that at the top left of the writing area.
+		label.position += Vector3(-FACE_W_M * 0.5, FACE_H_M * 0.5, 0.0)
+		label.text = ""
+		face.add_child(label)
+	return face
+
+
+## Shows `text` on every layer of a face.
+func _set_face_text(face: Node3D, text: String) -> void:
+	for label: Label3D in face.get_children():
+		label.text = text
+
 
 
 func _instantiate_tablet() -> Node:
@@ -223,21 +271,21 @@ func _load_texture(res_path: String) -> Texture2D:
 
 func _blank_material() -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.66, 0.48, 0.28)
+	mat.albedo_color = Color(0.50, 0.40, 0.30)
 	var albedo := _load_texture(BLANK_ALBEDO)
 	if albedo != null:
 		mat.albedo_texture = albedo
-	var rough := _load_texture(BLANK_ROUGH)
-	if rough != null:
-		mat.roughness_texture = rough
-		mat.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+		mat.albedo_color = WET_CLAY_TINT
+	# Wet clay is smooth and damp: no roughness map (that is the dry, crumbly look), a soft sheen instead.
+	# No clearcoat: on the writing face's coarse normal map it blows into bright squares.
+	mat.roughness = WET_CLAY_ROUGHNESS
 	var normal := _load_texture(BLANK_NORMAL)
 	if normal != null:
 		mat.normal_enabled = true
 		mat.normal_texture = normal
-		mat.normal_scale = 0.85
-	mat.roughness = 0.9
+		mat.normal_scale = 0.35
 	mat.metallic = 0.0
+	mat.metallic_specular = 0.25
 	return mat
 
 
@@ -308,17 +356,17 @@ func _begin(title: String, carved: String, subtitle: String, voice_url: String) 
 	_stop_carving()
 	_title.text = title
 	_carve_text = carved
-	_split_sides(carved)
+	_split_sides(carved)  # also re-lays `_carve_text` in rows
 	_subtitle_text = subtitle
 	_carve_index = 0
 	_subtitle_index = 0
 	_elapsed = 0.0
-	_flipped = false
-	_flipping = false
+	_face = 0
 	if _tablet_root != null:
 		_tablet_root.rotation = Vector3.ZERO
-	_front_label.text = ""
-	_back_label.text = ""
+		_tablet_root.position = Vector3.ZERO
+	_set_face_text(_front_label, "")
+	_set_face_text(_back_label, "")
 	_subtitles.text = ""
 	_dismiss.visible = false
 	_voice_url = ""
@@ -334,40 +382,66 @@ func _begin(title: String, carved: String, subtitle: String, voice_url: String) 
 		story.fetch_media(_voice_url)
 
 
-## Packs as much of `carved` as fits on the front face; the rest waits for the reverse.
+## Lays `carved` out in ruled rows (the breaks are put in here, the labels do not wrap) and fills the
+## faces in order: the front of a tablet, its reverse, then the front of the next tablet.
 func _split_sides(carved: String) -> void:
-	_side_a = carved
-	_side_b = ""
+	_faces = PackedStringArray([carved])
 	if carved.is_empty() or _cuneiform_font == null:
+		_lay_faces()
 		return
-	var max_w := FACE_W_M / LABEL_PIXEL_SIZE
-	var max_h := FACE_H_M / LABEL_PIXEL_SIZE
-	var lo := 0
-	var hi := carved.length()
-	var fit := 0
-	while lo <= hi:
-		var mid := (lo + hi) >> 1
-		var chunk := carved.substr(0, mid)
-		var size := _cuneiform_font.get_multiline_string_size(
-			chunk, HORIZONTAL_ALIGNMENT_LEFT, max_w, CUNEIFORM_FONT_SIZE, -1, TextServer.BREAK_WORD_BOUND
-		)
-		if size.y <= max_h + 1.0:
-			fit = mid
-			lo = mid + 1
-		else:
-			hi = mid - 1
-	# Prefer a break at whitespace / newline when splitting mid-tablet.
-	if fit > 0 and fit < carved.length():
-		var soft := carved.rfind(" ", fit)
-		var soft_nl := carved.rfind("\n", fit)
-		var break_at := maxi(soft, soft_nl)
-		if break_at >= int(float(fit) * 0.55):
-			fit = break_at + 1
-	# If metrics refuse even one sign (missing font glyphs), fall back to a half split.
-	if fit <= 0 and carved.length() > 1:
-		fit = carved.length() >> 1
-	_side_a = carved.substr(0, fit)
-	_side_b = carved.substr(fit)
+	var rows := _rows(carved, FACE_W_M / LABEL_PIXEL_SIZE)
+	var per_face := rows_per_face(LABEL_PIXEL_SIZE)
+	_faces = PackedStringArray()
+	for first in range(0, rows.size(), per_face):
+		_faces.append("\n".join(rows.slice(first, first + per_face)))
+	if _faces.is_empty():
+		_faces.append("")
+	_lay_faces()
+
+
+## Carving runs over exactly what the faces show (the row breaks included), face after face.
+func _lay_faces() -> void:
+	_carve_text = "".join(_faces)
+	_face_starts.clear()
+	var start := 0
+	for face: String in _faces:
+		_face_starts.append(start)
+		start += face.length()
+
+
+## How many ruled rows fit one face at `pixel` metres per font pixel.
+func rows_per_face(pixel: float) -> int:
+	var row := _cuneiform_font.get_height(CUNEIFORM_FONT_SIZE) + LINE_SPACING
+	var glyph := _cuneiform_font.get_height(CUNEIFORM_FONT_SIZE)
+	return maxi(1, 1 + int(floor((FACE_H_M / pixel - glyph) / row)))
+
+
+## Breaks `text` into rows no wider than `width` font pixels: at spaces, or between signs inside a word
+## too long for one row.
+func _rows(text: String, width: float) -> PackedStringArray:
+	var rows: PackedStringArray = []
+	for paragraph: String in text.split("\n"):
+		var row := ""
+		for word: String in paragraph.split(" ", false):
+			var joined := word if row.is_empty() else row + " " + word
+			if _width(joined) <= width:
+				row = joined
+				continue
+			if not row.is_empty():
+				rows.append(row)
+				row = ""
+			for sign: String in word:
+				if not row.is_empty() and _width(row + sign) > width:
+					rows.append(row)
+					row = ""
+				row += sign
+		if not row.is_empty():
+			rows.append(row)
+	return rows
+
+
+func _width(text: String) -> float:
+	return _cuneiform_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, CUNEIFORM_FONT_SIZE).x
 
 
 func media_ready(url: String, resource: Resource) -> void:
@@ -383,7 +457,7 @@ func media_ready(url: String, resource: Resource) -> void:
 
 
 func _process(delta: float) -> void:
-	if not _carving or _flipping:
+	if not _carving or _turning:
 		return
 	_elapsed += delta
 	var progress := clampf(_elapsed / _duration, 0.0, 1.0)
@@ -391,72 +465,91 @@ func _process(delta: float) -> void:
 	_subtitle_index = mini(_subtitle_text.length(), int(ceil(progress * float(_subtitle_text.length()))))
 	_apply_carve(_carve_index)
 	_subtitles.text = _subtitle_text.substr(0, _subtitle_index)
-	if progress >= 1.0 and (not _voice.playing or _voice.stream == null):
+	if _turning:
+		return
+	if progress >= 1.0 and _face == _faces.size() - 1 and (not _voice.playing or _voice.stream == null):
 		_finish_carving()
 
 
+## The face a carving position falls on: the last one that starts before it.
+func _face_of(index: int) -> int:
+	var face := 0
+	for i in _face_starts.size():
+		if _face_starts[i] < index:
+			face = i
+	return face
+
+
+## The label group showing face `face`: even faces are fronts, odd ones reverses.
+func _face_node(face: int) -> Node3D:
+	return _front_label if face % 2 == 0 else _back_label
+
+
 func _apply_carve(index: int) -> void:
-	var a_len := _side_a.length()
-	if index <= a_len:
-		_front_label.text = _side_a.substr(0, index)
-		_back_label.text = ""
+	if _face_of(index) > _face:
+		# This face is full: finish it, then turn the tablet over or bring a new one.
+		_set_face_text(_face_node(_face), _faces[_face])
+		_turn_to(_face + 1)
 		return
-	if not _flipped and not _side_b.is_empty():
-		_front_label.text = _side_a
-		_start_flip()
+	_set_face_text(_face_node(_face), _faces[_face].substr(0, maxi(0, index - _face_starts[_face])))
+
+
+## Turns to face `face`: a reverse is reached by flipping the tablet; past a reverse the written tablet
+## slides away to the side and a blank one slides in from the other.
+func _turn_to(face: int) -> void:
+	if _turning or _tablet_root == null:
 		return
-	_front_label.text = _side_a
-	_back_label.text = _side_b.substr(0, mini(_side_b.length(), index - a_len))
+	_turning = true
+	if _turn_tween != null:
+		_turn_tween.kill()
+	_turn_tween = create_tween()
+	_turn_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	if face % 2 == 1:
+		_turn_tween.tween_property(_tablet_root, "rotation:y", PI, FLIP_SEC)
+	else:
+		_turn_tween.tween_property(_tablet_root, "position:x", -SLIDE_M, SLIDE_SEC)
+		_turn_tween.tween_callback(func() -> void:
+			_tablet_root.rotation.y = 0.0
+			_tablet_root.position.x = SLIDE_M
+			_set_face_text(_front_label, "")
+			_set_face_text(_back_label, "")
+		)
+		_turn_tween.tween_property(_tablet_root, "position:x", 0.0, SLIDE_SEC)
+	_turn_tween.finished.connect(func() -> void:
+		_turning = false
+		_face = face
+		# Catch up carving that waited during the turn.
+		if _carving:
+			_apply_carve(_carve_index)
+	, CONNECT_ONE_SHOT)
 
 
-func _start_flip() -> void:
-	if _flipping or _flipped or _tablet_root == null:
-		return
-	_flipping = true
-	if _flip_tween != null:
-		_flip_tween.kill()
-	_flip_tween = create_tween()
-	_flip_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	_flip_tween.tween_property(_tablet_root, "rotation:y", PI, FLIP_SEC)
-	_flip_tween.finished.connect(_on_flip_done, CONNECT_ONE_SHOT)
-
-
-func _on_flip_done() -> void:
-	_flipping = false
-	_flipped = true
-	_back_label.text = ""
-	# Catch up carving that waited during the flip.
-	if _carving:
-		_apply_carve(_carve_index)
-
-
+## Ends the carving at once: the last tablet, written to the end, faces the player.
 func _finish_carving() -> void:
 	_carving = false
 	set_process(false)
+	_kill_turn()
 	_subtitles.text = _subtitle_text
-	if not _side_b.is_empty() and not _flipped:
-		_front_label.text = _side_a
-		_start_flip()
-		if _flip_tween != null:
-			_flip_tween.finished.connect(func() -> void:
-				_back_label.text = _side_b
-				_dismiss.visible = true
-			, CONNECT_ONE_SHOT)
-			return
-	_front_label.text = _side_a
-	_back_label.text = _side_b
+	_face = _faces.size() - 1
+	var front := _face - _face % 2
+	_set_face_text(_front_label, _faces[front])
+	_set_face_text(_back_label, _faces[front + 1] if front + 1 < _faces.size() else "")
+	if _tablet_root != null:
+		_tablet_root.position.x = 0.0
+		_tablet_root.rotation.y = PI if _face % 2 == 1 else 0.0
 	_dismiss.visible = true
 
 
+func _kill_turn() -> void:
+	if _turn_tween != null:
+		_turn_tween.kill()
+		_turn_tween = null
+	_turning = false
+
+
 func _on_backdrop() -> void:
-	if _carving or _flipping:
+	if _carving or _turning:
 		_elapsed = _duration
-		if _flipping and _flip_tween != null:
-			_flip_tween.kill()
-			if _tablet_root != null:
-				_tablet_root.rotation.y = PI
-			_flipping = false
-			_flipped = true
 		_finish_carving()
 		if _voice.playing:
 			_voice.stop()
@@ -472,10 +565,7 @@ func hide_tablet() -> void:
 
 func _stop_carving() -> void:
 	_carving = false
-	_flipping = false
-	if _flip_tween != null:
-		_flip_tween.kill()
-		_flip_tween = null
+	_kill_turn()
 	set_process(false)
 	_voice.stop()
 	_voice.stream = null
