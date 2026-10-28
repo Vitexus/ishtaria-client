@@ -15,6 +15,8 @@ const VISIBLE_HALF_ANGLE := PI / 2.0
 const MAX_MARKERS := 16
 const NEXT_COLOR := Color(1.0, 0.85, 0.5)
 const ACTIVE_COLOR := Color(0.6, 0.9, 1.0)
+## A place known from a quest that has moved on: still shown, but not a goal.
+const KNOWN_COLOR := Color(0.78, 0.74, 0.66)
 
 var story: Node
 var _markers: Array = []
@@ -63,7 +65,7 @@ static func valid_markers(data: Variant) -> bool:
 		for key in ["id", "quest", "name_key", "kind"]:
 			if not entry.get(key) is String:
 				return false
-		if not entry.get("next") is bool or not entry.get("position") is Array or entry.position.size() != 3:
+		if not entry.get("next") is bool or not entry.get("position") is Array or entry.position.size() != 3 or not entry.get("known", false) is bool:
 			return false
 		for axis: Variant in entry.position:
 			if not (axis is float or axis is int) or not is_finite(float(axis)):
@@ -78,7 +80,7 @@ func set_markers(markers: Array) -> void:
 	for marker: Dictionary in _markers:
 		var item := Control.new()
 		item.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var color: Color = NEXT_COLOR if marker.next else ACTIVE_COLOR
+		var color: Color = KNOWN_COLOR if marker.get("known") == true else (NEXT_COLOR if marker.next else ACTIVE_COLOR)
 		var arrow := TextureRect.new()
 		arrow.name = "Arrow"
 		arrow.texture = load(ARROW)
@@ -110,7 +112,8 @@ static func bearing(player: Vector3, target: Vector3, direction: Vector3, headin
 	return atan2(offset.dot(heading.cross(direction)), offset.dot(heading))
 
 ## Moves the marks; `player` and the markers are in metres from the planet's centre. Labels never
-## cover each other: the place nearest the way the player faces keeps its text and is drawn on top;
+## cover each other: a goal keeps its text before a merely known place, then the place nearest the way
+## the player faces keeps its text and is drawn on top;
 ## a place whose text would overlap one nearer that way shows only its arrow, dimmed.
 func update_view(player: Vector3, direction: Vector3, heading: Vector3) -> void:
 	if not _strip.visible:
@@ -121,7 +124,12 @@ func update_view(player: Vector3, direction: Vector3, heading: Vector3) -> void:
 	for marker: Dictionary in _markers:
 		angles.append(bearing(player, Vector3(marker.position[0], marker.position[1], marker.position[2]), direction, heading))
 	var order: Array = range(_items.size())
-	order.sort_custom(func(first: int, second: int) -> bool: return absf(angles[first]) < absf(angles[second]))
+	# Goals before places only known from earlier quests, then the one nearest the heading first.
+	var known := func(index: int) -> bool: return _markers[index].get("known") == true
+	order.sort_custom(func(first: int, second: int) -> bool:
+		if known.call(first) != known.call(second):
+			return not known.call(first)
+		return absf(angles[first]) < absf(angles[second]))
 	var shown: Array[Vector2] = []
 	for rank in order.size():
 		var index: int = order[rank]

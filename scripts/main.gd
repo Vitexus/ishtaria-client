@@ -1787,8 +1787,9 @@ func _update_minimap_entities(markers: Array) -> void:
 				var marker_name: String = _story.text(marker.get("name_key", "")) if _story != null else marker.get("name_key", "")
 				var marker_id: String = marker.get("id", "marker_" + str(entities.size()))
 				var marker_kind: String = marker.get("kind", "quest")
-				# Every place a quest points to is a goal of the minimap.
-				var is_quest_marker := true
+				# Every place a quest points to is a goal of the minimap; a place known from a quest that has
+				# moved on is only drawn where it lies.
+				var is_quest_marker: bool = marker.get("known") != true
 				entities.append({
 					"id": marker_id,
 					"name": marker_name,
@@ -2121,6 +2122,9 @@ func _on_harvested(reply: Dictionary) -> void:
 	var counter: Variant = reply.get("counter")
 	if counter is Dictionary:
 		_on_bitten(reply, counter)
+	# A struck animal that does not fight back runs off: fetch the route the server gave it now.
+	if reply.get("model") is String and reply.get("state") == "hit" and not counter is Dictionary:
+		_environment.refresh_animals()
 	var wear_note := _wear_text(reply, str(reply.get("tool", reply.get("weapon", ""))))
 	var broke := _wear_broke(reply)
 	if reply.state == "depleted":

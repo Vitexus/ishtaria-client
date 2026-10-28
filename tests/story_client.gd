@@ -276,6 +276,14 @@ func _run() -> void:
 	var texts: Array = compass._items.map(func(item: Control) -> bool: return item.get_node("Text").visible)
 	_check(texts == [false, true, true], "overlapping compass labels keep the one nearest the heading: %s" % [texts])
 	_check(compass._area.get_child(compass._area.get_child_count() - 1) == compass._items[1], "the label nearest the heading is drawn on top")
+	# A place known from an earlier quest gives way to a goal even when it lies nearer the heading.
+	var known_place := marker.merged({"id": "endland:known", "position": [0.0, 0.0, -100.0], "known": true}, true)
+	var goal := marker.merged({"id": "endland:goal", "position": [6.0, 0.0, -100.0], "next": false}, true)
+	_check(compass_script.valid_markers([known_place, goal]) and not compass_script.valid_markers([marker.merged({"known": "yes"}, true)]), "known is an optional flag")
+	compass.set_markers([known_place, goal])
+	compass.update_view(Vector3.ZERO, up, ahead)
+	texts = compass._items.map(func(item: Control) -> bool: return item.get_node("Text").visible)
+	_check(texts == [false, true], "a goal keeps its label before a known place: %s" % [texts])
 
 	# "Tell me about yourself": a knowledge card is checked before it is shown, the article follows the language.
 	var card := {"title_key": "world:knowledge.shepherd.title", "text_key": "world:knowledge.shepherd.text", "credit_key": "world:knowledge.shepherd.credit",

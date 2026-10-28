@@ -84,6 +84,8 @@ var _swimmers: Array[Dictionary] = []
 ## Land animals walking along the waypoints the server sent: {"id", "node", "placement", "player", "route", "walking"}
 ## with the route as [unix milliseconds, x, y, z] in metres.
 var _walkers: Array[Dictionary] = []
+## Faster than this (m/s) an animal is running, not walking (a struck herbivore fleeing).
+const ANIMAL_RUN_M_S := 3.0
 ## Server clock minus the local clock, in milliseconds.
 var _clock_offset_ms := 0.0
 var _animals_request: HTTPRequest
@@ -2277,12 +2279,16 @@ func _wander(delta: float) -> void:
 			var look := -forward if float(walker.get("face_z", 1.0)) > 0.0 else forward
 			var facing := Basis.looking_at(look, up).get_rotation_quaternion()
 			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * 5.0))
-		if walking != walker.walking:
+		# A struck animal runs off at several metres a second: gallop where the model can, else a quick walk.
+		var running := velocity.length() > ANIMAL_RUN_M_S
+		if walking != walker.walking or running != bool(walker.get("running", false)):
 			walker.walking = walking
+			walker.running = running
 			if walker.player != null:
-				_play_clip(walker.player, "Walk" if walking else "Idle", walker.id)
+				var gallop: bool = running and _npc_has_clip(walker.player, "Gallop")
+				_play_clip(walker.player, ("Gallop" if gallop else "Walk") if walking else "Idle", walker.id)
 				if walking:
-					walker.player.speed_scale = 1.0
+					walker.player.speed_scale = 1.0 if gallop or not running else 2.5
 
 ## The animation player of a character's model: the pack characters name it, a datadisk's model has its own.
 func _npc_player(model: Node) -> AnimationPlayer:
@@ -2525,6 +2531,10 @@ func _npc_has_clip(player: AnimationPlayer, clip: String) -> bool:
 		if String(candidate) == clip or String(candidate).ends_with("|" + clip):
 			return true
 	return false
+
+## Fetches the animals' routes at once (a struck animal runs off); the periodic refresh does the same.
+func refresh_animals() -> void:
+	_request_animals()
 
 ## Asks the server for the routes of the animals again, without rebuilding the region.
 func _request_animals() -> void:
