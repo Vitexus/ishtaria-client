@@ -11,6 +11,14 @@ uniform bool is_detail = false;
 uniform vec3 detail_direction = vec3(0.0);
 uniform float detail_discard = 0.00012;
 uniform vec2 wave_phase = vec2(0.0);
+// Rivers and ponds of the landscape patches (surface_environment.gd `_update_patch_water`): painted on the planet so
+// they show from the air and beyond the detail disk, which draws the real water near the player. Per patch the R8 mask
+// (wet > 0.5), the axes of its local frame and its rectangle (offset x/z, extent x/z, metres).
+uniform int patch_count = 0;
+uniform sampler2D patch_water[4] : filter_nearest, repeat_disable;
+uniform vec3 patch_axis_x[4];
+uniform vec3 patch_axis_z[4];
+uniform vec4 patch_rect[4];
 varying vec3 surface_point;
 varying float detail_elevation;
 varying float detail_water;
@@ -34,6 +42,14 @@ uniform float persia_blend = 0.35;
 uniform sampler2D tex_sand_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tex_soil_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tex_rock_persia : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+// Ground set "alluvial" of a datadisk world (the manifest's `ground`, announced in /world `datadisks`): the dry silt
+// plain between two rivers. The five Poly Haven layers replace the grass, soil, sand and gravel of the default set.
+uniform bool use_alluvial = false;
+uniform sampler2D tex_alluvial_steppe : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_alluvial_silt : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_alluvial_sand : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_alluvial_dirt : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_alluvial_cracked : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 
 vec2 map_coordinates(vec3 direction, float size) {
 		vec3 magnitude = abs(direction);
@@ -105,6 +121,21 @@ void fragment() {
 		ALBEDO = mix(land, vec3(0.88, 0.94, 0.96), snow);
 		vec3 slope_normal = normalize(cross(dFdx(VERTEX), dFdy(VERTEX)));
 		NORMAL = dot(slope_normal, NORMAL) < 0.0 ? -slope_normal : slope_normal;
+		if (!is_detail && !water_pass) {
+			for (int index = 0; index < min(patch_count, 4); index++) {
+				vec4 rect = patch_rect[index];
+				vec2 local = vec2(dot(direction, patch_axis_x[index]), dot(direction, patch_axis_z[index])) * planet_radius * 1000.0 - rect.xy;
+				vec2 uv = local / rect.zw + vec2(0.5);
+				if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+					continue;
+				}
+				if (texture(patch_water[index], uv).r > 0.5) {
+					// The deep colour of the detail disk's water (local_water.gdshader), so the river does not change hue at the disk's edge.
+					ALBEDO = vec3(0.04, 0.19, 0.25);
+					ROUGHNESS = 0.28;
+				}
+			}
+		}
 		if (is_detail && use_textures && !water_pass) {
 			vec3 up = direction;
 			vec3 geometric = normalize(cross(dFdx(local_point), dFdy(local_point)));
@@ -122,6 +153,17 @@ void fragment() {
 				float w = clamp(persia_blend, 0.0, 1.0);
 				soil = mix(soil, texture(tex_soil_persia, flat_uv / 4.0).rgb, w * 0.7);
 				sand = mix(sand, texture(tex_sand_persia, flat_uv / 4.0).rgb, w);
+			}
+			if (use_alluvial) {
+				// Every layer is read at two very different scales so that the 1k pictures do not show their tiling.
+				vec3 steppe = texture(tex_alluvial_steppe, flat_uv / 5.0).rgb * texture(tex_alluvial_steppe, flat_uv / 37.0).rgb * 1.9;
+				vec3 silt = texture(tex_alluvial_silt, flat_uv / 5.0).rgb * texture(tex_alluvial_silt, flat_uv / 41.0).rgb * 1.9;
+				vec3 cracked = texture(tex_alluvial_cracked, flat_uv / 6.0).rgb;
+				float dryness = texture(tex_alluvial_silt, flat_uv / 97.0).g;
+				grass = steppe;
+				soil = mix(silt, cracked, smoothstep(0.45, 0.7, dryness) * 0.8);
+				sand = texture(tex_alluvial_sand, flat_uv / 6.0).rgb * texture(tex_alluvial_sand, flat_uv / 43.0).rgb * 1.9;
+				gravel = texture(tex_alluvial_dirt, flat_uv / 5.0).rgb * texture(tex_alluvial_dirt, flat_uv / 47.0).rgb * 1.9;
 			}
 			// Patches of bare soil and gravel, cheaply, from the grass picture seen at a very different scale.
 			float patches = texture(tex_grass, flat_uv / 64.0).g;
@@ -157,7 +199,12 @@ void fragment() {
 			float macro = texture(tex_grass, flat_uv / 256.0).g;
 			textured *= mix(0.85, 1.12, macro);
 			// Far away the pictures only alias: fade to the plain biome colour.
-			float near_detail = 1.0 - smoothstep(120.0, 600.0, view_distance_m);
+			// The alluvial set is read at several large scales and does not alias, so it stays to the edge of the
+			// detail disk; a very wide macro variation breaks the tiling of the far plain.
+			float near_detail = use_alluvial ? 1.0 - smoothstep(1500.0, 3500.0, view_distance_m) : 1.0 - smoothstep(120.0, 600.0, view_distance_m);
+			if (use_alluvial) {
+				textured *= mix(0.9, 1.1, texture(tex_alluvial_silt, flat_uv / 900.0).g);
+			}
 			vec3 surface = mix(land, mix(land, textured, 0.8), near_detail);
 			// Snow does not stay on steep rock.
 			ALBEDO = mix(surface, vec3(0.88, 0.94, 0.96), snow * (1.0 - smoothstep(0.12, 0.3, slope)));

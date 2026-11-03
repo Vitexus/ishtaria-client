@@ -17,6 +17,8 @@ uniform float moon_illumination = 0.5;
 uniform float sun_elevation = 90.0;
 uniform float daylight = 1.0;
 uniform float sidereal_angle = 0.0;
+// The star map is that of J2000: the date's sky is turned to it by the precession and the tilt of the world.
+uniform mat3 precession = mat3(1.0);
 uniform float horizon_dip = 0.0;
 
 vec2 panorama_coordinates(vec3 direction) {
@@ -36,7 +38,7 @@ void sky() {
 		vec2 surface_uv = panorama_coordinates(local_direction);
 		vec3 inertial = direction;
 		inertial.xz = vec2(cos(sidereal_angle) * direction.x + sin(sidereal_angle) * direction.z, -sin(sidereal_angle) * direction.x + cos(sidereal_angle) * direction.z);
-		orbital = texture(orbit_panorama, panorama_coordinates(inertial)).rgb;
+		orbital = texture(orbit_panorama, panorama_coordinates(precession * inertial)).rgb;
 		float baked_disc = 1.0 - smoothstep(0.65, 1.0, length((surface_uv - vec2(0.91646, 0.22163)) / vec2(0.045, 0.065)));
 		vec2 clean_uv = vec2(1.0 - surface_uv.x, surface_uv.y);
 		vec3 night = mix(texture(night_panorama, surface_uv).rgb, texture(night_panorama, clean_uv).rgb, baked_disc) * 0.025 + orbital * 0.12;

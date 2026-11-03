@@ -36,7 +36,8 @@ License: CC0-1.0
 
 Files: assets/terrain/*
 Copyright: Poly Haven (https://polyhaven.com/)
-Comment: Ground textures grass_ground, forest_ground_06, gravelly_sand, gravel_ground_01 and gray_rocks
+Comment: Ground textures grass_ground, forest_ground_06, gravelly_sand, gravel_ground_01, gray_rocks, grass_path_2,
+ dry_mud_field_001, aerial_sand, dirt_aerial_03 and mud_cracked_dry_03
  (1k diffuse and normal maps) by their Poly Haven authors, see assets/terrain/License.txt.
 License: CC0-1.0
 

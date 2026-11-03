@@ -7,6 +7,8 @@ signal requests_changed(incoming: Array, outgoing: Array)
 signal event_received(event: Dictionary)
 signal failed(message: String)
 signal chat_failed(message: String)
+## A friend action the player asked for is in flight, or the last one was answered.
+signal busy_changed(busy: bool)
 
 const POLL_SECONDS := 3.0
 
@@ -16,6 +18,7 @@ var _generation := 0
 var _last_event := 0
 var _timer: Timer
 var _polling := false
+var _actions := 0
 
 func _ready() -> void:
 	_timer = Timer.new()
@@ -39,6 +42,7 @@ func stop() -> void:
 	_generation += 1
 	_token = ""
 	_polling = false
+	_set_actions(0)
 	if is_instance_valid(_timer):
 		_timer.stop()
 	friends_changed.emit([])
@@ -57,19 +61,19 @@ func poll() -> void:
 
 func request_friend(name: String) -> void:
 	if valid_name(name):
-		_send("/friends/requests", HTTPClient.METHOD_POST, JSON.stringify({"username": name}), _after_change)
+		_act("/friends/requests", HTTPClient.METHOD_POST, JSON.stringify({"username": name}), _after_change)
 
 func accept(id: int) -> void:
 	if id > 0:
-		_send("/friends/requests/%d/accept" % id, HTTPClient.METHOD_POST, "{}", _after_change)
+		_act("/friends/requests/%d/accept" % id, HTTPClient.METHOD_POST, "{}", _after_change)
 
 func decline(id: int) -> void:
 	if id > 0:
-		_send("/friends/requests/%d" % id, HTTPClient.METHOD_DELETE, "", _after_change)
+		_act("/friends/requests/%d" % id, HTTPClient.METHOD_DELETE, "", _after_change)
 
 func remove(name: String) -> void:
 	if valid_name(name):
-		_send("/friends/" + name.uri_encode(), HTTPClient.METHOD_DELETE, "", _after_change)
+		_act("/friends/" + name.uri_encode(), HTTPClient.METHOD_DELETE, "", _after_change)
 
 static func valid_name(name: String) -> bool:
 	return not name.is_empty() and name.length() <= 32 and not name.contains("/") and not name.contains("?")
@@ -160,9 +164,30 @@ func _after_chat(result: int, code: int, reply: PackedByteArray) -> void:
 func _fetch(path: String, handler: Callable) -> void:
 	_send(path, HTTPClient.METHOD_GET, "", handler)
 
-func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+## A request the player asked for: `busy_changed` reports it until its answer has been handled.
+func _act(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+	_set_actions(_actions + 1)
+	var generation := _generation
+	var done := func(result: int, code: int, reply: PackedByteArray) -> void:
+		handler.call(result, code, reply)
+		if generation == _generation:
+			_set_actions(_actions - 1)
+	if not _send(path, method, body, done):
+		_set_actions(_actions - 1)
+
+func _set_actions(count: int) -> void:
+	var was := _actions > 0
+	_actions = maxi(count, 0)
+	if was != (_actions > 0):
+		busy_changed.emit(_actions > 0)
+
+## Whether a request the player asked for is still awaited.
+func is_busy() -> bool:
+	return _actions > 0
+
+func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> bool:
 	if _token.is_empty():
-		return
+		return false
 	var request := HTTPRequest.new()
 	request.timeout = 6.0
 	request.max_redirects = 0
@@ -180,6 +205,8 @@ func _send(path: String, method: HTTPClient.Method, body: String, handler: Calla
 		request.queue_free()
 		if path.begins_with("/events"):
 			_polling = false
+		return false
+	return true
 
 func _on_friends(result: int, code: int, reply: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:

@@ -79,6 +79,9 @@ var airborne := false
 var on_object := false
 var sitting := false
 var swimming := false
+## Aboard a vehicle (a boat): the avatar floats on the water's surface and plays the vehicle's clip while it moves.
+var aboard := false
+var _vehicle_clip := ""
 var jump_pending := false
 var jump_direction := Vector3.ZERO
 var jump_running := false
@@ -463,13 +466,13 @@ func _ground_avatar(surface: Node) -> void:
 	var absolute: Array = []
 	for axis in 3:
 		absolute.append(float(_anchor_metres[axis]) + float(avatar.position[axis]) * 1000.0)
-	var level: float = surface.water_surface_km(absolute) if swimming and surface.has_method("water_surface_km") else NAN
+	var level: float = surface.water_surface_km(absolute) if (swimming or aboard) and surface.has_method("water_surface_km") else NAN
 	if is_finite(level):
 		# The server keeps a swimmer on the bed; what is shown floats chest-deep at the surface.
 		var radius_m := sqrt(float(absolute[0]) * absolute[0] + float(absolute[1]) * absolute[1] + float(absolute[2]) * absolute[2])
 		var up := Vector3(absolute[0] / radius_m, absolute[1] / radius_m, absolute[2] / radius_m)
 		# A giant of a datadisk floats as much deeper as it is taller than a man.
-		var draft := (SWIM_CLIP_DRAFT_KM if _has_clip("swim") else SWIM_DRAFT_KM) * preload("res://scripts/character_catalog.gd").body_scale(_character)
+		var draft := 0.0 if aboard else (SWIM_CLIP_DRAFT_KM if _has_clip("swim") else SWIM_DRAFT_KM) * preload("res://scripts/character_catalog.gd").body_scale(_character)
 		avatar.position += up * (RADIUS + level - draft - radius_m / 1000.0)
 	elif surface.has_method("ground_position64"):
 		avatar.position = surface.ground_position64(absolute)
@@ -528,6 +531,31 @@ func set_swimming(value: bool) -> void:
 		return
 	swimming = value
 	_play_animation(moving)
+
+## The character boards (`clip`: the rider's clip of the vehicle, in any case) or leaves a vehicle.
+func set_aboard(value: bool, clip := "") -> void:
+	aboard = value
+	_vehicle_clip = clip.to_lower() if value else ""
+	_play_animation(moving)
+
+## The avatar's place in absolute metres, which the vehicle under it follows.
+func avatar_metres() -> Array:
+	if not is_instance_valid(avatar) or origin == Vector3.ZERO:
+		return []
+	var absolute: Array = []
+	for axis in 3:
+		absolute.append(float(_anchor_metres[axis]) + float(avatar.position[axis]) * 1000.0)
+	return absolute
+
+## Puts the avatar where the server moved it outside a walk (boarding, or getting off at a shore), in absolute metres.
+func snap_to(metres: Array) -> void:
+	if metres.size() != 3:
+		return
+	var point := Vector3(metres[0], metres[1], metres[2]) / 1000.0
+	direction = point.normalized()
+	_position_target = Vector3((float(metres[0]) - _anchor_metres[0]) / 1000.0, (float(metres[1]) - _anchor_metres[1]) / 1000.0, (float(metres[2]) - _anchor_metres[2]) / 1000.0) if origin != Vector3.ZERO else point
+	if is_instance_valid(avatar):
+		avatar.position = _position_target
 
 func set_sitting(value: bool) -> void:
 	# Every move ack reports sitting; re-entering idle here restarts Walk mid-cycle.
@@ -598,6 +626,14 @@ func _play_animation(walking: bool) -> void:
 		else:
 			# Without a jump clip the legs stop until landing.
 			_animation.speed_scale = 0.0
+		return
+	if aboard:
+		# Seated in the boat; the vehicle's clip (rowing) plays while it moves.
+		var wanted := _vehicle_clip if walking and _has_clip(_vehicle_clip) else ("idle" if _has_clip("idle") else "")
+		if not wanted.is_empty():
+			_animation.speed_scale = 1.0
+			if _animation.current_animation != wanted:
+				_animation.play(wanted, 0.2)
 		return
 	if swimming and _has_clip("swim"):
 		# The swimming clip is a prone stroke, played whether the swimmer moves or treads water.

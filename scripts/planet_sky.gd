@@ -37,6 +37,13 @@ var moon_elevation_degrees := -90.0
 var moon_illumination := 0.0
 var daylight := 1.0
 var _solar: Dictionary = {}
+## The sky of the world (`solar` of GET /world): the tilt of the axis in degrees (NAN: today's slowly changing one), the turn of the
+## planet against the stars in seconds and the precession of the star field in degrees. Today's Earth until the server says otherwise.
+const EARTH_SIDEREAL_DAY := 86164.0905
+const J2000_OBLIQUITY := 23.4393
+var _tilt := NAN
+var _sidereal_day := EARTH_SIDEREAL_DAY
+var _precession := 0.0
 var _sync_ticks := 0
 var _observer := Vector3.UP
 var _altitude_m := 0.0
@@ -103,8 +110,27 @@ func apply_solar(data: Variant) -> bool:
 		var value: Variant = data.get(key)
 		if not (value is float or value is int) or not is_finite(float(value)):
 			return false
-	if data.unix_seconds < 0 or data.unix_seconds > 7258118400 or absf(data.sidereal_day_seconds - 86164.0905) > 0.001 or data.angular_radius_degrees < 0.26 or data.angular_radius_degrees > 0.28:
+	if data.unix_seconds < 0 or data.unix_seconds > 7258118400 or data.sidereal_day_seconds < 3600.0 or data.sidereal_day_seconds > 400000.0 or data.angular_radius_degrees < 0.26 or data.angular_radius_degrees > 0.28:
 		return false
+	for key in ["obliquity_degrees", "precession_degrees"]:
+		var sky_value: Variant = data.get(key)
+		if sky_value != null and (not (sky_value is float or sky_value is int) or not is_finite(float(sky_value))):
+			return false
+	var tilt: Variant = data.get("obliquity_degrees")
+	if tilt != null and (tilt < 0.0 or tilt > 60.0):
+		return false
+	var before := [_tilt, _sidereal_day, _precession]
+	_tilt = float(tilt) if tilt != null else NAN
+	_sidereal_day = float(data.sidereal_day_seconds)
+	_precession = float(data.get("precession_degrees", 0.0))
+	if not _solar_consistent(data):
+		_tilt = before[0]
+		_sidereal_day = before[1]
+		_precession = before[2]
+		return false
+	return _accept_solar(data)
+
+func _solar_consistent(data: Dictionary) -> bool:
 	if data.moon_angular_radius_degrees < 0.24 or data.moon_angular_radius_degrees > 0.30 or data.moon_illumination < 0.0 or data.moon_illumination > 1.0:
 		return false
 	var values: Variant = data.get("direction")
@@ -130,6 +156,9 @@ func apply_solar(data: Variant) -> bool:
 		return false
 	if absf(data.moon_illumination - expected_moon.illumination) > 0.0001:
 		return false
+	return true
+
+func _accept_solar(data: Dictionary) -> bool:
 	_solar = data.duplicate(true)
 	_sync_ticks = Time.get_ticks_msec()
 	material.set_shader_parameter("solar_enabled", true)
@@ -154,21 +183,39 @@ func clear_solar() -> void:
 		moon.visible = false
 	environment.ambient_light_energy = _settings.ambient_energy
 
+## The tilt of the axis in radians the world has at `days` from J2000.
+func _obliquity(days: float) -> float:
+	return deg_to_rad(_tilt if is_finite(_tilt) else 23.439 - 0.0000004 * days)
+
+## The turn of the planet against the stars at `days` from J2000, in radians.
+func _sidereal(days: float) -> float:
+	return deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days * EARTH_SIDEREAL_DAY / _sidereal_day, 360.0))
+
+## Takes a direction of the equator and equinox of the date to the star map (the equator and equinox of J2000), as the star field
+## has turned about the pole of the ecliptic by `precession_deg` and the equator has tipped from `obliquity_deg` to J2000's. The sky's
+## own coordinates are y at the pole, x at the equinox and -z towards the east, so the equatorial frame is (x, -z, y).
+static func precession_basis(obliquity_deg: float, precession_deg: float) -> Basis:
+	var to_equatorial := Basis(Vector3(1, 0, 0), Vector3(0, 0, 1), Vector3(0, -1, 0))
+	var ecliptic := Basis(Vector3.RIGHT, -deg_to_rad(obliquity_deg))
+	var shift := Basis(Vector3.BACK, deg_to_rad(precession_deg))
+	var back := Basis(Vector3.RIGHT, deg_to_rad(J2000_OBLIQUITY))
+	return to_equatorial.inverse() * (back * shift * ecliptic) * to_equatorial
+
 func solar_direction(seconds: float) -> Vector3:
 	var days := seconds / 86400.0 + 2440587.5 - 2451545.0
 	var anomaly := deg_to_rad(fposmod(357.528 + 0.9856003 * days, 360.0))
 	var longitude := deg_to_rad(fposmod(280.460 + 0.9856474 * days + 1.915 * sin(anomaly) + 0.020 * sin(2.0 * anomaly), 360.0))
-	var obliquity := deg_to_rad(23.439 - 0.0000004 * days)
+	var obliquity := _obliquity(days)
 	var ascension := atan2(cos(obliquity) * sin(longitude), cos(longitude))
 	var declination := asin(sin(obliquity) * sin(longitude))
-	var sidereal := deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days, 360.0))
+	var sidereal := _sidereal(days)
 	return Vector3(cos(declination) * cos(ascension - sidereal), sin(declination), -cos(declination) * sin(ascension - sidereal))
 
 ## Moon centre direction, angular radius in degrees and lit fraction (0 = new, 1 = full).
 func lunar_state(seconds: float) -> Dictionary:
 	var days := seconds / 86400.0 + 2440587.5 - 2451545.0
-	var obliquity := deg_to_rad(23.439 - 0.0000004 * days)
-	var sidereal := deg_to_rad(fposmod(280.46061837 + 360.98564736629 * days, 360.0))
+	var obliquity := _obliquity(days)
+	var sidereal := _sidereal(days)
 	var mean_longitude := deg_to_rad(fposmod(218.316 + 13.176396 * days, 360.0))
 	var mean_anomaly := deg_to_rad(fposmod(134.963 + 13.064993 * days, 360.0))
 	var argument := deg_to_rad(fposmod(93.272 + 13.229350 * days, 360.0))
@@ -251,7 +298,8 @@ func _update_solar(seconds: float) -> void:
 	var anomaly := deg_to_rad(fposmod(357.528 + 0.9856003 * (seconds / 86400.0 + 2440587.5 - 2451545.0), 360.0))
 	var distance_au := 1.00014 - 0.01671 * cos(anomaly) - 0.00014 * cos(2.0 * anomaly)
 	material.set_shader_parameter("sun_radius", deg_to_rad(0.2666 / distance_au))
-	material.set_shader_parameter("sidereal_angle", deg_to_rad(fposmod(280.46061837 + 360.98564736629 * (seconds / 86400.0 + 2440587.5 - 2451545.0), 360.0)))
+	material.set_shader_parameter("sidereal_angle", _sidereal(seconds / 86400.0 + 2440587.5 - 2451545.0))
+	material.set_shader_parameter("precession", precession_basis(rad_to_deg(_obliquity(seconds / 86400.0 + 2440587.5 - 2451545.0)), _precession))
 	var warmth := smoothstep(0.0, 15.0, sun_elevation_degrees)
 	var color := Color(1.0, 0.38, 0.12).lerp(_color(_settings.sun_color), warmth)
 	material.set_shader_parameter("sun_color", color)

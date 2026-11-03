@@ -51,6 +51,32 @@ func _run() -> void:
 	invalid = _metadata(sky, noon)
 	invalid.unix_seconds = INF
 	_check(not sky.apply_solar(invalid), "Nonfinite server clock is rejected")
+	# A datadisk's sky: tilt, length of the day and precession of its year (here about 2700 BCE) are announced with the sun.
+	var tilt_before: float = sky.J2000_OBLIQUITY
+	var past := _metadata(sky, noon + 86400.0 * 91.0)    # spring: the tilt moves the sun a good deal
+	past.sidereal_day_seconds = 90000.0
+	past.obliquity_degrees = 40.0
+	past.precession_degrees = 65.5
+	_check(not sky.apply_solar(past), "A sun that is not where the announced sky puts it is rejected")
+	sky._tilt = 24.0
+	sky._sidereal_day = 90000.0
+	var announced := _metadata(sky, noon)
+	sky._tilt = NAN
+	sky._sidereal_day = sky.EARTH_SIDEREAL_DAY
+	announced.sidereal_day_seconds = 90000.0
+	announced.obliquity_degrees = 24.0
+	announced.precession_degrees = 65.5
+	_check(sky.apply_solar(announced) and is_equal_approx(sky._tilt, 24.0) and is_equal_approx(sky._precession, 65.5), "The sky of another year is accepted and remembered")
+	var pole: Vector3 = Vector3(0, cos(deg_to_rad(tilt_before)), sin(deg_to_rad(tilt_before)))
+	_check((SKY.precession_basis(tilt_before, 65.5) * pole).distance_to(pole) < 0.0001, "Precession turns the stars about the pole of the ecliptic")
+	var equinox := Vector3.RIGHT
+	_check(absf(rad_to_deg(equinox.angle_to(SKY.precession_basis(tilt_before, 65.5) * equinox)) - 65.5) < 0.01, "The equinox has moved by the precession")
+	_check(SKY.precession_basis(tilt_before, 0.0).is_equal_approx(Basis.IDENTITY), "Today's sky is not turned")
+	sky.clear_solar()
+	sky._tilt = NAN
+	sky._sidereal_day = sky.EARTH_SIDEREAL_DAY
+	sky._precession = 0.0
+	_check(sky.apply_solar(_metadata(sky, noon)), "Today's sky is accepted again")
 	sky.set_altitude(120.0)
 	sky.set_observer(Vector3.RIGHT)
 	sky._update_solar(noon)

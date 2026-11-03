@@ -10,6 +10,10 @@ signal grave_changed(grave: Dictionary)
 signal position_changed(position: Dictionary, moving: bool, sitting: bool)
 ## The server says whether the character is in water (swimming, and drowning until a dry shore).
 signal swimming_changed(swimming: bool)
+## The vehicle (a place id) the character is aboard, empty when none; sent with every move acknowledgement.
+signal vehicle_changed(id: String)
+## The server moved the character itself: boarding (onto the boat) or getting off (onto the shore); absolute metres.
+signal vehicle_moved(position: Array)
 signal stats_changed(stats: Dictionary)
 signal harvested(reply: Dictionary)
 signal npc_struck(reply: Dictionary)
@@ -99,6 +103,13 @@ func refresh() -> void:
 	if not busy and not _token.is_empty():
 		_send("/players/me", HTTPClient.METHOD_GET)
 
+var _vehicle := ""
+
+func _set_vehicle(id: String) -> void:
+	if id != _vehicle:
+		_vehicle = id
+		vehicle_changed.emit(id)
+
 func sign_out() -> void:
 	if busy or _token.is_empty():
 		return
@@ -108,6 +119,35 @@ func eat(item_id: String) -> void:
 	if busy or _token.is_empty() or item_id.is_empty() or item_id.length() > 64:
 		return
 	_send("/players/me/eat", HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}))
+
+## `action`: "fill" at fresh water or a fountain, or "drink" from the waterskin anywhere.
+func waterskin(action: String) -> void:
+	if not busy and not _token.is_empty() and action in ["fill", "drink"]:
+		_send("/players/me/waterskin/" + action, HTTPClient.METHOD_POST)
+
+## Boards the vehicle of a datadisk (a boat) within reach, by its place id.
+func board_vehicle(id: String) -> void:
+	if not busy and not _token.is_empty() and not id.is_empty() and id.length() <= 200:
+		_send("/players/me/vehicle/board", HTTPClient.METHOD_POST, JSON.stringify({"id": id}))
+
+## Gets off the vehicle at the nearest shore.
+func leave_vehicle() -> void:
+	if not busy and not _token.is_empty():
+		_send("/players/me/vehicle/leave", HTTPClient.METHOD_POST)
+
+static func vehicle_error(code: int, text: String) -> String:
+	match text.strip_edges():
+		"vehicle is not within reach":
+			return "The boat is out of reach"
+		"vehicle is taken", "already aboard":
+			return "The boat is taken"
+		"vehicle is aground":
+			return "The boat is aground"
+		"no shore within reach":
+			return "No shore within reach"
+		"player is dead":
+			return "Player is dead"
+	return "Too many actions" if code == 429 else "Item action unavailable"
 
 func drink() -> void:
 	if not busy and not _token.is_empty():
@@ -325,6 +365,12 @@ static func drink_error(code: int, text: String) -> String:
 			return "Sea water is salty"
 		"no fresh water within reach":
 			return "Nothing to harvest or drink nearby"
+		"no waterskin":
+			return "You have no waterskin"
+		"waterskin is empty":
+			return "The waterskin is empty"
+		"not thirsty":
+			return "You are not thirsty"
 		"player is dead":
 			return "Player is dead"
 	return "Too many actions" if code == 429 else "Item action unavailable"
@@ -502,6 +548,7 @@ func _move_received(result: int, code: int, _headers: PackedStringArray, body: P
 		stats_changed.emit(data.stats)
 	var seated: bool = data.get("sitting") == true
 	swimming_changed.emit(data.get("swimming") == true)
+	_set_vehicle(data.get("vehicle") if data.get("vehicle") is String else "")
 	position_changed.emit(data.position, data.moving, seated)
 
 static func valid_obituary(data: Variant) -> bool:
@@ -586,7 +633,10 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 			var portal_message := portal_error(code, body.get_string_from_utf8())
 			failed.emit(portal_message)
 			return
-		if path == "/players/me/drink":
+		if path.begins_with("/players/me/vehicle/"):
+			failed.emit(vehicle_error(code, body.get_string_from_utf8()))
+			return
+		if path == "/players/me/drink" or path.begins_with("/players/me/waterskin/"):
 			failed.emit(drink_error(code, body.get_string_from_utf8()))
 			return
 		if path == "/players/me/eat" or path.begins_with("/graves/"):
@@ -599,6 +649,14 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		portal_closed.emit()
 		return
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if path.begins_with("/players/me/vehicle/") and data is Dictionary and data.get("position") is Array and data.position.size() == 3:
+		for value: Variant in data.position:
+			if not (value is float or value is int) or not is_finite(float(value)) or absf(value) > 7000000.0:
+				failed.emit("Invalid player profile")
+				return
+		_set_vehicle(data.get("vehicle") if data.get("vehicle") is String else "")
+		vehicle_moved.emit(data.position)
+		return
 	if path.begins_with("/graves/") and not path.ends_with("/loot") and data is Dictionary:
 		if valid_obituary(data.get("obituary")):
 			grave_changed.emit(data)

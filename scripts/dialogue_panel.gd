@@ -4,6 +4,7 @@ extends CanvasLayer
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 
 signal choice_made(npc_id: String, seq: int, choice: int)
 ## The character holds found goods; open a trade with their pack.
@@ -54,6 +55,8 @@ var _card_image_url := ""
 var _card_url := ""
 var _about_pending := false
 var _confirm: ConfirmationDialog
+## Answers, "tell me about yourself" and Trade wait for the server with a spinner.
+var pending := PendingActions.new(self)
 
 func _ready() -> void:
 	layer = 4
@@ -154,28 +157,29 @@ func _fill_node(reply: Dictionary) -> void:
 	for child in choices_box.get_children():
 		choices_box.remove_child(child)
 		child.queue_free()
+	pending.forget_buttons()
 	for choice: Dictionary in reply.node.choices:
 		var button := Button.new()
 		button.text = _text(choice.text_key)
 		button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.pressed.connect(_choose.bind(int(choice.index)))
 		choices_box.add_child(button)
+		pending.register(button, "Choose:%d" % int(choice.index), _choose.bind(int(choice.index)))
 	if reply.get("about") == true:
 		var about := Button.new()
 		about.name = "About"
 		about.text = tr("Tell me about yourself")
 		about.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		about.pressed.connect(_ask_about)
 		choices_box.add_child(about)
+		pending.register(about, "About", _ask_about)
 	if reply.get("can_trade") == true:
 		var trade := Button.new()
 		trade.name = "Trade"
 		trade.text = tr("Trade")
 		trade.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		trade.pressed.connect(_ask_trade)
 		choices_box.add_child(trade)
+		pending.register(trade, "Trade", _ask_trade)
 	if reply.node.choices.is_empty():
 		var leave := Button.new()
 		leave.text = tr("Leave")
@@ -231,6 +235,8 @@ func _show_card(card: Dictionary, alone: bool) -> void:
 	for child in choices_box.get_children():
 		choices_box.remove_child(child)
 		child.queue_free()
+	pending.forget_buttons()
+	pending.finish()
 	var credit := Label.new()
 	credit.name = "Credit"
 	credit.text = _text(card.credit_key)
@@ -394,6 +400,7 @@ func _set_speaking(value: bool) -> void:
 func close() -> void:
 	if not visible and _npc_id.is_empty():
 		return
+	pending.finish()
 	_speak_until_ms = 0
 	_set_speaking(false)
 	_retire_music()

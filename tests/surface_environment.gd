@@ -90,6 +90,61 @@ func _test_pond(surface: Node3D) -> void:
 	_check(not is_finite(surface.water_surface_km(metres)), "Water below the ground is not a surface")
 	surface._terrain_patches = saved
 
+## The dry ground of a patch is land even below sea level (Uruk's floodplain lies at -3 m on dry steppe), as the
+## server walks it; only over the coarse sea it stays under water.
+func _test_sunken_patch(surface: Node3D) -> void:
+	var point := [0.0, 0.0, -1.0]
+	var size := 32
+	var grid := PackedFloat32Array()
+	var water := PackedFloat32Array()
+	grid.resize(size * size)
+	water.resize(size * size)
+	water.fill(-32768.0)
+	var saved: Array = surface._terrain_patches
+	surface._terrain_patches = [{"place": "floodplain", "anchor": [0.0, 0.0, -6371.0], "anchor_height_m": -3.0, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 60.0, "axes": surface._terrain_axes(point), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": grid, "water_grid": water, "clear_image": null, "width": size, "height": size}]
+	var index: int = surface.environment_index(Vector3(0, 0, -1))
+	var biome: Variant = surface.environment.biomes[index]
+	var metres := [0.0, 0.0, -6371000.0 + 3.0]
+	surface.environment.biomes[index] = 3.0
+	_check(not is_finite(surface.water_surface_km(metres)), "A patch's dry floodplain below sea level over dry land is not water")
+	_check(not surface._minimap_water_at(point), "The map shows no water on a dry floodplain below sea level")
+	surface.environment.biomes[index] = 0.0
+	var level: float = surface.water_surface_km(metres)
+	_check(is_finite(level) and absf(level) < 1.0e-9, "Over the coarse sea a patch's ground below 0 m is under the sea")
+	_check(surface._minimap_water_at(point), "The map shows the sea over a sunken patch on the coast")
+	surface.environment.biomes[index] = biome
+	surface._terrain_patches = saved
+
+## A coarse river is the server's carved channel (`a_coarse_river_is_a_carved_channel_of_water_the_client_draws`):
+## 2 m deep on its line, its water 0.6 m below the bank, dry 100 m aside, and gone under a landscape patch.
+func _test_coarse_river(surface: Node3D) -> void:
+	var index: int = surface.environment_index(Vector3(1, 0, 0))
+	var saved := [surface.environment.biomes[index], surface.environment.flow[index], surface.environment.downstream[index], surface.environment.biomes[index + 1]]
+	surface.environment.biomes[index] = 2.0
+	surface.environment.flow[index] = 49.0
+	surface.environment.downstream[index] = float(index + 1)
+	surface.environment.biomes[index + 1] = 3.0
+	surface._index_rivers()
+	var centre: Array = surface._river_centre(index)
+	var base: float = surface.elevation64_base(centre) * 1000.0
+	_check(absf(surface._river_carve_m(centre) - 2.0) < 1.0e-6, "A coarse river is carved 2 m deep on its line")
+	_check(absf(base - surface.elevation64(centre) * 1000.0 - 2.0) < 1.0e-4, "The ground follows the carved channel")
+	var metres := [centre[0] * (6371000.0 + base - 2.0), centre[1] * (6371000.0 + base - 2.0), centre[2] * (6371000.0 + base - 2.0)]
+	var level: float = surface.water_surface_km(metres)
+	_check(is_finite(level) and absf(level * 1000.0 - (base - 0.6)) < 1.0e-4, "The river's water stands 0.6 m below the bank")
+	_check(surface._minimap_water_at(centre), "The map shows the coarse river")
+	var aside: Array = surface._unit64([centre[0], centre[1] + 100.0 / 6371000.0, centre[2]])
+	_check(surface._river_carve_m(aside) == 0.0 and not surface._minimap_water_at(aside), "100 m aside the steppe is dry")
+	var saved_patches: Array = surface._terrain_patches
+	surface._terrain_patches = [{"place": "over", "anchor": [centre[0] * 6371.0, centre[1] * 6371.0, centre[2] * 6371.0], "anchor_height_m": base, "extent": [400.0, 400.0], "offset": [0.0, 0.0], "feather": 50.0, "axes": surface._terrain_axes(centre), "heightmap_url": "", "water_url": "", "clear_url": "", "grid": null, "water_grid": null, "clear_image": null, "width": 0, "height": 0}]
+	_check(not is_finite(surface._river_level_m(centre)), "A landscape patch replaces a coarse river")
+	surface._terrain_patches = saved_patches
+	surface.environment.biomes[index] = saved[0]
+	surface.environment.flow[index] = saved[1]
+	surface.environment.downstream[index] = saved[2]
+	surface.environment.biomes[index + 1] = saved[3]
+	surface._index_rivers()
+
 ## Grass is decorative and deterministic: the same place grows the same tufts, only grassy ground grows any.
 func _test_grass(surface: Node3D) -> void:
 	surface.show_region(Vector3.FORWARD)
@@ -250,6 +305,8 @@ func _run() -> void:
 	await _test_async_detail(surface)
 	_test_grass(surface)
 	_test_pond(surface)
+	_test_sunken_patch(surface)
+	_test_coarse_river(surface)
 	for placement in surface.placements:
 		_check(placement.position.is_finite() and absf(placement.position.length() - (surface.RADIUS + surface.elevation(placement.position) + 0.0005)) < 0.002, "Objects stand on actual terrain")
 	# The local relief is generated into the server's strip (ADR 0020, tested in ishtaria-worldgen);

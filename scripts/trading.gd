@@ -8,6 +8,8 @@ signal exchange_ended(done: bool)
 ## Something was bought, sold or swapped: the player's profile changed.
 signal changed
 signal failed(message: String)
+## A request the player asked for (not the background poll) is in flight, or the last one was answered.
+signal busy_changed(busy: bool)
 
 const POLL_SECONDS := 2.0
 
@@ -20,6 +22,7 @@ var _shop_kind := "shop"
 var _timer: Timer
 var _polling := false
 var _open := false
+var _actions := 0
 
 func _ready() -> void:
 	_timer = Timer.new()
@@ -39,11 +42,16 @@ func stop() -> void:
 	_shop_kind = "shop"
 	_open = false
 	_polling = false
+	_set_actions(0)
 	if is_instance_valid(_timer):
 		_timer.stop()
 
 func is_running() -> bool:
 	return not _token.is_empty()
+
+## Whether a request the player asked for is still awaited.
+func is_busy() -> bool:
+	return _actions > 0
 
 # --- merchants ---
 
@@ -81,14 +89,14 @@ func open_shop(npc_id: String) -> void:
 	if valid_npc_id(npc_id):
 		_npc_id = npc_id
 		_shop_kind = "shop"
-		_send("/shops/" + npc_id, HTTPClient.METHOD_GET, "", _on_goods)
+		_act("/shops/" + npc_id, HTTPClient.METHOD_GET, "", _on_goods)
 
 ## Goods an NPC found on the ground and keeps in their pack.
 func open_found(npc_id: String) -> void:
 	if valid_npc_id(npc_id):
 		_npc_id = npc_id
 		_shop_kind = "found"
-		_send("/npcs/" + npc_id.uri_encode() + "/found", HTTPClient.METHOD_GET, "", _on_goods)
+		_act("/npcs/" + npc_id.uri_encode() + "/found", HTTPClient.METHOD_GET, "", _on_goods)
 
 func buy(item_id: String, quantity: int) -> void:
 	_deal("buy", item_id, quantity)
@@ -101,7 +109,7 @@ func sell(item_id: String, quantity: int) -> void:
 func repair(item_id: String) -> void:
 	if _shop_kind == "found" or _npc_id.is_empty() or item_id.is_empty() or item_id.length() > 64:
 		return
-	_send("/shops/%s/repair" % _npc_id, HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}), _after_deal)
+	_act("/shops/%s/repair" % _npc_id, HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id}), _after_deal)
 
 func _deal(kind: String, item_id: String, quantity: int) -> void:
 	if _npc_id.is_empty() or item_id.is_empty() or item_id.length() > 64 or quantity < 1 or quantity > 1000:
@@ -109,9 +117,9 @@ func _deal(kind: String, item_id: String, quantity: int) -> void:
 	if _shop_kind == "found":
 		if kind != "buy":
 			return
-		_send("/npcs/%s/found/buy" % _npc_id.uri_encode(), HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
+		_act("/npcs/%s/found/buy" % _npc_id.uri_encode(), HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
 		return
-	_send("/shops/%s/%s" % [_npc_id, kind], HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
+	_act("/shops/%s/%s" % [_npc_id, kind], HTTPClient.METHOD_POST, JSON.stringify({"item_id": item_id, "quantity": quantity}), _after_deal)
 
 func close_shop() -> void:
 	_npc_id = ""
@@ -182,11 +190,11 @@ static func valid_view(data: Variant) -> bool:
 func trade_with(name: String) -> void:
 	if not preload("res://scripts/social.gd").valid_name(name):
 		return
-	_send("/trades/current", HTTPClient.METHOD_GET, "", func(result: int, code: int, reply: PackedByteArray) -> void:
+	_act("/trades/current", HTTPClient.METHOD_GET, "", func(result: int, code: int, reply: PackedByteArray) -> void:
 		if result == HTTPRequest.RESULT_SUCCESS and code == 200:
 			_on_view(result, code, reply)
 		else:
-			_send("/trades", HTTPClient.METHOD_POST, JSON.stringify({"with": name}), _on_view)
+			_act("/trades", HTTPClient.METHOD_POST, JSON.stringify({"with": name}), _on_view)
 	)
 
 ## Puts exactly these stacks on the table: `[{item_id, quantity}]`.
@@ -196,15 +204,15 @@ func offer(items: Array) -> void:
 		if stack is Dictionary and stack.get("item_id") is String and (stack.get("quantity") is int or stack.get("quantity") is float) and stack.quantity >= 1:
 			clean.append({"item_id": stack.item_id, "quantity": int(stack.quantity)})
 	if clean.size() <= 10:
-		_send("/trades/current/offer", HTTPClient.METHOD_PUT, JSON.stringify({"items": clean}), _on_view)
+		_act("/trades/current/offer", HTTPClient.METHOD_PUT, JSON.stringify({"items": clean}), _on_view)
 
 func accept() -> void:
-	_send("/trades/current/accept", HTTPClient.METHOD_POST, "{}", _on_accepted)
+	_act("/trades/current/accept", HTTPClient.METHOD_POST, "{}", _on_accepted)
 
 func cancel() -> void:
 	_open = false
 	_timer.stop()
-	_send("/trades/current", HTTPClient.METHOD_DELETE, "", func(_r: int, _c: int, _b: PackedByteArray) -> void: exchange_ended.emit(false))
+	_act("/trades/current", HTTPClient.METHOD_DELETE, "", func(_r: int, _c: int, _b: PackedByteArray) -> void: exchange_ended.emit(false))
 
 func poll_exchange() -> void:
 	if _polling or not _open:
@@ -272,9 +280,27 @@ static func trade_error_key(code: int, text: String) -> String:
 			return "Inventory is full"
 	return "Too many actions" if code == 429 else "Trade unavailable"
 
-func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+## A request the player asked for: `busy_changed` reports it until its answer has been handled (a request the
+## answer starts in turn keeps the flag up).
+func _act(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> void:
+	_set_actions(_actions + 1)
+	var generation := _generation
+	var done := func(result: int, code: int, reply: PackedByteArray) -> void:
+		handler.call(result, code, reply)
+		if generation == _generation:
+			_set_actions(_actions - 1)
+	if not _send(path, method, body, done):
+		_set_actions(_actions - 1)
+
+func _set_actions(count: int) -> void:
+	var was := _actions > 0
+	_actions = maxi(count, 0)
+	if was != (_actions > 0):
+		busy_changed.emit(_actions > 0)
+
+func _send(path: String, method: HTTPClient.Method, body: String, handler: Callable) -> bool:
 	if _token.is_empty():
-		return
+		return false
 	var request := HTTPRequest.new()
 	request.timeout = 6.0
 	request.max_redirects = 0
@@ -291,3 +317,5 @@ func _send(path: String, method: HTTPClient.Method, body: String, handler: Calla
 	if request.request(server_url + path, headers, method, body) != OK:
 		request.queue_free()
 		_polling = false
+		return false
+	return true

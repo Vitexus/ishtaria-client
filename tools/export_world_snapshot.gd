@@ -61,7 +61,7 @@ func _export() -> void:
 	var face_size := int(world.face_size)
 	print("world: %s, ruleset %s, seed %s, face_size %d, server %s" % [world.server_name, world.ruleset, world.seed, face_size, world.server_version])
 
-	var strip: Dictionary = await _get(_server + "/world/heightmap", 60.0)
+	var strip: Dictionary = await _http_get(_server + "/world/heightmap", 60.0)
 	if strip.code != 200:
 		push_error("heightmap strip: HTTP %d" % strip.code)
 		quit(1)
@@ -146,7 +146,7 @@ func _export() -> void:
 			if url == "":
 				continue
 			var name := "%s_%s.png" % [stem, kind.trim_suffix("_url")]
-			var body: Dictionary = await _get(_server + url, 30.0)
+			var body: Dictionary = await _http_get(_server + url, 30.0)
 			if body.code != 200:
 				push_error("patch %s: HTTP %d" % [url, body.code])
 				quit(1)
@@ -169,7 +169,7 @@ func _export() -> void:
 			var point := anchor + _axis_x * x + _axis_z * z
 			var u := point.normalized()
 			heights[iz * gnx + ix] = snapped(_env.elevation64([u.x, u.y, u.z]) * 1000.0, 0.001)
-	var anchor_height := _env.elevation64([unit.x, unit.y, unit.z]) * 1000.0
+	var anchor_height: float = _env.elevation64([unit.x, unit.y, unit.z]) * 1000.0
 	print("ground: %d x %d samples at %.0f m, anchor height %.2f m" % [gnx, gnx, grid_step, anchor_height])
 
 	var snapshot := {
@@ -266,7 +266,7 @@ func _objects_url(point: Vector3) -> String:
 	return "%s/world/objects?x=%.9f&y=%.9f&z=%.9f" % [_server, point.x, point.y, point.z]
 
 ## One HTTP GET, awaited frame by frame. Returns {"code": int, "body": PackedByteArray}.
-func _get(url: String, timeout := 20.0) -> Dictionary:
+func _http_get(url: String, timeout := 20.0) -> Dictionary:
 	var request := HTTPRequest.new()
 	request.timeout = timeout
 	request.max_redirects = 0
@@ -288,7 +288,7 @@ func _get(url: String, timeout := 20.0) -> Dictionary:
 	return {"code": answer[0], "body": answer[1]}
 
 func _get_json(url: String) -> Dictionary:
-	var answer := await _get(url)
+	var answer := await _http_get(url)
 	if answer.code != 200:
 		push_error("GET %s: HTTP %d" % [url, answer.code])
 		quit(1)
@@ -315,7 +315,7 @@ func _scene_of(position: Vector3, patch: Dictionary) -> Array:
 	else:
 		x = local[0]
 		z = local[1]
-	var ground := _env.elevation64([unit.x, unit.y, unit.z]) * 1000.0
+	var ground: float = _env.elevation64([unit.x, unit.y, unit.z]) * 1000.0
 	return [x, -z, ground]
 
 ## The Blender yaw (about +Z) that puts a model's glTF +Z where the client's placement puts it.
@@ -346,7 +346,7 @@ func _prop_entry(entry: Dictionary, patch: Dictionary) -> Dictionary:
 	var file := _disk_file(model)
 	if file != "" and not FileAccess.file_exists(file):
 		push_warning("prop %s: model file missing: %s" % [entry.id, file])
-		return {
+	return {
 		"id": entry.id,
 		"model": model,
 		"file": file,
@@ -384,11 +384,15 @@ func _object_entry(entry: Dictionary, patch: Dictionary, SE: GDScript) -> Dictio
 	var position := Vector3(entry.position[0], entry.position[1], entry.position[2])
 	var scene: Array = _scene_of(position, patch)
 	var model := String(entry.get("model", ""))
-	var scene_path := String(SE.prop_path(model))
+	# The model catalog is what the game instantiates for scenery objects (nature, animals, fish,
+	# hyper3d and quaternius models live there, not in prop_path's Kenney kits).
+	var info: Dictionary = _env._models.get(model, {})
+	var scene_path := String(info.get("scene", ""))
+	if scene_path == "":
+		scene_path = String(SE.prop_path(model))
 	var file := ""
 	if scene_path != "":
 		file = ProjectSettings.globalize_path(scene_path)
-	var info: Dictionary = _env._models.get(model, {})
 	var out := {
 		"id": entry.id,
 		"model": model,

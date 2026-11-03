@@ -124,6 +124,15 @@ Cause: %s,Cause: %s,Příčina: %s
 Grave is out of reach,Grave is out of reach,Hrob je mimo dosah
 Item action unavailable,Item action unavailable,Akce s předmětem není dostupná
 In Memoriam,In Memoriam,Parte
+Fill the waterskin,Fill the waterskin,Naplnit měch na vodu
+E: Board the boat,E: Board the boat,E: Nastoupit do lodě
+E: Get off at the shore,E: Get off at the shore,E: Vystoupit na břehu
+You board the boat,You board the boat,Nastupuješ do lodě
+The boat is out of reach,The boat is out of reach,Loď je příliš daleko
+The boat is taken,The boat is taken,Loď je obsazená
+The boat is aground,The boat is aground,Loď uvízla na mělčině
+No shore within reach,No shore within reach,Žádný břeh poblíž
+He did not buy a waterskin,He did not buy a waterskin,Nekoupil si měch na vodu
 Lived days: %s,Lived days: %s,Prožité dny: %s
 Lifetime wealth: %s gold,Lifetime wealth: %s gold,Nabyté bohatství: %s zlaťáků
 Friends: %s,Friends: %s,Přátelé: %s
@@ -681,3 +690,10 @@ Master,Master,Mistr
 Reach level 20.,Reach level 20.,Dosáhni úrovně 20.
 Legend of Ishtaria,Legend of Ishtaria,Legenda Ishtarie
 Reach level 30.,Reach level 30.,Dosáhni úrovně 30.
+Waterskin,Waterskin,Měch na vodu
+Water %s / %s l,Water %s / %s l,Voda %s / %s l
+Drink,Drink,Napít se
+Fill,Fill,Naplnit
+You have no waterskin,You have no waterskin,Nemáš měch na vodu
+The waterskin is empty,The waterskin is empty,Měch na vodu je prázdný
+You are not thirsty,You are not thirsty,Nemáš žízeň

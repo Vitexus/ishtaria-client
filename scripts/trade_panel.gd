@@ -5,6 +5,7 @@ extends CanvasLayer
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 
 signal buy_requested(item_id: String, quantity: int)
 signal sell_requested(item_id: String, quantity: int)
@@ -30,6 +31,9 @@ var _view: Dictionary = {}
 var _profile: Dictionary = {}
 var _merchant_name := ""
 var _feedback_key := ""
+
+## Buying, selling, repairing and every change of an exchange wait for the server with a spinner.
+var pending := PendingActions.new(self)
 
 func _ready() -> void:
 	layer = 4
@@ -73,11 +77,11 @@ func _ready() -> void:
 	accept_button.theme_type_variation = &"PrimaryButton"
 	accept_button.name = "Accept"
 	accept_button.custom_minimum_size.y = 40
-	accept_button.pressed.connect(func() -> void:
+	column.add_child(accept_button)
+	pending.register(accept_button, "Accept", func() -> void:
 		set_feedback("")
 		accept_requested.emit()
-	)
-	column.add_child(accept_button)
+	, true)
 	feedback = Label.new()
 	feedback.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -94,9 +98,15 @@ func _resize() -> void:
 	panel.size = dimensions
 
 func set_profile(profile: Dictionary) -> void:
+	# Stats come with every step: the window is drawn again only when what it shows changed, so a button is not
+	# replaced under the mouse between its press and its release.
+	var same := _shown_part(profile) == _shown_part(_profile)
 	_profile = profile.duplicate(true)
-	if visible:
+	if visible and not same:
 		_render()
+
+func _shown_part(profile: Dictionary) -> Array:
+	return [profile.get("inventory"), profile.get("stats", {}).get("gold")]
 
 func set_feedback(key: String) -> void:
 	_feedback_key = key
@@ -107,6 +117,7 @@ func is_open() -> bool:
 
 ## Closing a window ends an open exchange (the other player is told by the server's answer).
 func close_window() -> void:
+	pending.finish()
 	var was := mode
 	mode = ""
 	hide()
@@ -122,6 +133,9 @@ func show_goods(goods: Dictionary, merchant_name: String) -> void:
 	_render()
 
 func show_exchange(view: Dictionary) -> void:
+	# The exchange is polled: an unchanged view keeps its buttons.
+	if mode == "exchange" and visible and view == _view:
+		return
 	_view = view.duplicate(true)
 	mode = "exchange"
 	show()
@@ -157,6 +171,7 @@ func _clear() -> void:
 	for child in list.get_children():
 		list.remove_child(child)
 		child.queue_free()
+	pending.forget_buttons()
 
 func _heading(text: String) -> void:
 	var label := Label.new()
@@ -187,11 +202,11 @@ func _row(item_id: String, text: String, buttons: Array) -> void:
 		button.name = entry.name
 		button.text = entry.text
 		button.custom_minimum_size = Vector2(72, 34)
-		button.pressed.connect(func() -> void:
+		row.add_child(button)
+		pending.register(button, "%s:%s" % [entry.name, item_id], func() -> void:
 			set_feedback("")
 			entry.action.call()
 		)
-		row.add_child(button)
 	UiKit.center_buttons(row)
 
 func _render() -> void:

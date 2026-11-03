@@ -8,4 +8,12 @@ Each has a page at https://polyhaven.com/a/<name>:
   gravel_ground_01 diffuse
   gray_rocks       diffuse, normal (OpenGL)
 
+Ground set "alluvial" (a datadisk's `ground`, e.g. the Gilgamesh disk), diffuse only:
+
+  grass_path_2       Rob Tuytel                          steppe grass
+  dry_mud_field_001  Rob Tuytel, Rico Cilliers           silt
+  aerial_sand        Rob Tuytel                          sand
+  dirt_aerial_03     Rob Tuytel                          dirt and gravel
+  mud_cracked_dry_03 Dario Barresi, Dimitrios Savva      cracked dry mud
+
 Only the files used by scripts/planet_surface.gdshader are bundled.

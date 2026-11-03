@@ -4,6 +4,8 @@ extends Node
 
 signal changed
 signal probed(url: String)
+## Probes started by `probe_all` are running, or they all ended.
+signal probing_changed(probing: bool)
 
 const SECTION := "servers"
 const MAX_ENTRIES := 20
@@ -71,6 +73,7 @@ var entries: Array[Dictionary] = []
 var _results := {}
 var _generation := 0
 var _queue: Array[String] = []
+var _workers := 0
 
 func load_entries() -> void:
 	entries.clear()
@@ -157,13 +160,23 @@ func cancel() -> void:
 	_generation += 1
 	_queue.clear()
 
+## Whether probes of the history are still running.
+func is_probing() -> bool:
+	return _workers > 0
+
 func _worker(generation: int) -> void:
+	_workers += 1
+	if _workers == 1:
+		probing_changed.emit(true)
 	while generation == _generation and not _queue.is_empty():
 		var url: String = _queue.pop_front()
 		var result := await _probe(url, generation)
 		if generation != _generation:
-			return
+			break
 		_apply_result(url, result)
+	_workers -= 1
+	if _workers == 0:
+		probing_changed.emit(false)
 
 func _probe(url: String, generation: int) -> Dictionary:
 	var samples: Array[float] = []

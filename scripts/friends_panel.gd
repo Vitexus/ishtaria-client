@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 
 signal add_requested(name: String)
 signal accept_requested(id: int)
@@ -18,6 +19,9 @@ var _friends: Array = []
 var _incoming: Array = []
 var _outgoing: Array = []
 var _feedback_key := ""
+## Add, accept, decline, cancel and remove wait for the server with a spinner.
+var pending := PendingActions.new(self)
+var _add_button: Button
 
 func _ready() -> void:
 	layer = 4
@@ -50,12 +54,16 @@ func _ready() -> void:
 	name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_input.custom_minimum_size.y = 36
 	name_input.max_length = 32
-	name_input.text_submitted.connect(func(_text: String) -> void: _add())
+	name_input.text_submitted.connect(func(_text: String) -> void:
+		if is_instance_valid(_add_button) and not _add_button.disabled:
+			_add_button.pressed.emit()
+	)
 	row.add_child(name_input)
 	var add := Button.new()
 	add.name = "AddFriend"
-	add.pressed.connect(_add)
 	row.add_child(add)
+	_add_button = add
+	pending.register(add, "Add", _add, true)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -102,11 +110,17 @@ func set_feedback(key: String) -> void:
 	_feedback_key = key
 	feedback.text = tr(key) if not key.is_empty() else ""
 
+## The lists come with every poll: they are drawn again only when they changed, so a button is not replaced under
+## the mouse between its press and its release.
 func set_friends(friends: Array) -> void:
+	if friends == _friends:
+		return
 	_friends = friends.duplicate(true)
 	_render()
 
 func set_requests(incoming: Array, outgoing: Array) -> void:
+	if incoming == _incoming and outgoing == _outgoing:
+		return
 	_incoming = incoming.duplicate(true)
 	_outgoing = outgoing.duplicate(true)
 	_render()
@@ -126,7 +140,7 @@ func _heading(text: String) -> void:
 	label.theme_type_variation = &"HeaderLabel"
 	label.add_theme_font_size_override("font_size", 15)
 
-func _button(parent: Node, name: String, text: String, action: Callable) -> void:
+func _button(parent: Node, name: String, text: String, key: String, action: Callable) -> void:
 	var button := Button.new()
 	# Taking something back is quiet; accepting stands out.
 	button.theme_type_variation = &"GhostButton" if name in ["Remove", "Decline", "Cancel"] else &""
@@ -134,11 +148,11 @@ func _button(parent: Node, name: String, text: String, action: Callable) -> void
 	button.name = name
 	button.text = text
 	button.custom_minimum_size = Vector2(88, 34)
-	button.pressed.connect(func() -> void:
+	parent.add_child(button)
+	pending.register(button, key, func() -> void:
 		set_feedback("")
 		action.call()
 	)
-	parent.add_child(button)
 
 func _render() -> void:
 	if not is_instance_valid(list):
@@ -146,21 +160,22 @@ func _render() -> void:
 	for child in list.get_children():
 		list.remove_child(child)
 		child.queue_free()
+	pending.forget_buttons()
 	if not _incoming.is_empty():
 		_heading(tr("Friend requests"))
 		for request: Dictionary in _incoming:
 			var row := UiKit.card(list)
 			row.name = "Request_%d" % int(request.id)
 			_label(row, request.name)
-			_button(row, "Accept", tr("Accept"), func() -> void: accept_requested.emit(int(request.id)))
-			_button(row, "Decline", tr("Decline"), func() -> void: decline_requested.emit(int(request.id)))
+			_button(row, "Accept", tr("Accept"), "Accept:%d" % int(request.id), func() -> void: accept_requested.emit(int(request.id)))
+			_button(row, "Decline", tr("Decline"), "Decline:%d" % int(request.id), func() -> void: decline_requested.emit(int(request.id)))
 	if not _outgoing.is_empty():
 		_heading(tr("Sent requests"))
 		for request: Dictionary in _outgoing:
 			var row := UiKit.card(list)
 			row.name = "Sent_%d" % int(request.id)
 			_label(row, request.name, UiTheme.SAND_MUTED)
-			_button(row, "Cancel", tr("Cancel"), func() -> void: decline_requested.emit(int(request.id)))
+			_button(row, "Cancel", tr("Cancel"), "Cancel:%d" % int(request.id), func() -> void: decline_requested.emit(int(request.id)))
 	_heading(tr("Friends"))
 	if _friends.is_empty():
 		_label(list, tr("No friends yet"), UiTheme.SAND_MUTED)
@@ -185,7 +200,7 @@ func _render() -> void:
 		if friend.online:
 			text += "  ·  " + tr("World") + ": " + friend.world
 		_label(row, text, UiTheme.SAND if friend.online else UiTheme.SAND_MUTED)
-		_button(row, "Remove", tr("Remove"), func() -> void: remove_requested.emit(friend.name))
+		_button(row, "Remove", tr("Remove"), "Remove:" + String(friend.name), func() -> void: remove_requested.emit(friend.name))
 
 ## The bundled picture of a flag a friend chose to show (two capital letters), if we have it.
 static func _flag_texture(code: Variant) -> Texture2D:

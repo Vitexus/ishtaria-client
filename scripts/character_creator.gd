@@ -8,12 +8,15 @@ signal language_selected(index: int)
 const CATALOG := preload("res://scripts/character_catalog.gd")
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 var nickname_input: LineEdit
 var password_input: LineEdit
 var packs: OptionButton
 var characters: OptionButton
 var mode: TabBar
 var submit_button: Button
+## Signing in or creating the character waits for the server with a spinner.
+var pending := PendingActions.new(self)
 var back_button: Button
 var feedback: Label
 var rotation_slider: HSlider
@@ -162,8 +165,8 @@ func _ready() -> void:
 	submit_button = UiKit.button("", &"PrimaryButton", "confirmation")
 	submit_button.custom_minimum_size.y = 36
 	submit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	submit_button.pressed.connect(_submit)
 	commands.add_child(submit_button)
+	pending.register(submit_button, "Submit", _submit, true)
 	back_button = UiKit.button("Later", &"GhostButton", "back")
 	back_button.custom_minimum_size.y = 36
 	back_button.pressed.connect(func() -> void: password_input.clear(); hide(); dismissed.emit())
@@ -309,7 +312,9 @@ func _submit() -> void:
 	submitted.emit(nickname_input.text.strip_edges(), password, character, mode.current_tab == 0)
 
 func set_busy(value: bool) -> void:
-	submit_button.disabled = value
+	if not pending.pending():
+		submit_button.disabled = value
+	pending.set_busy(value)
 	for index in mode.tab_count:
 		mode.set_tab_disabled(index, value)
 	packs.disabled = value

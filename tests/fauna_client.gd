@@ -44,8 +44,8 @@ func _run() -> void:
 			camel = entry
 			break
 	_check(camel != null and is_equal_approx(float(camel.scale_m), 0.93), "camel is about three times the prior undersized catalog scale")
-	_check(animals == 24 and fish == 35, "24 animals and 35 fish in the catalog, found %d and %d" % [animals, fish])
-	_check(environment.catalog.size() == 259, "the plant and rock catalog includes ED waterfowl")
+	_check(animals == 47 and fish == 35, "47 animals and 35 fish in the catalog, found %d and %d" % [animals, fish])
+	_check(environment.catalog.size() == 337, "the plant and rock catalog includes ED waterfowl")
 	_check(environment._models.has("animal.duck") and environment._models.has("animal.goose"), "duck and goose are loadable scenes")
 
 	# An animal stands and plays its idle animation; a fish also circles.

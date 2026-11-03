@@ -12,7 +12,8 @@ const FOOD_FILES := {
 	"seed_carrot": "carrot", "seed_corn": "corn", "seed_cabbage": "cabbage", "seed_pumpkin": "pumpkin",
 }
 ## Story items without an icon of their own may borrow the icon of a similar bundled item.
-const ALIASES := {}
+## No waterskin model is bundled: it borrows the bottle until one is.
+const ALIASES := {"waterskin": "potion_bottle_2"}
 
 static func path_for(item_id: String) -> String:
 	var pattern := RegEx.new()

@@ -102,6 +102,10 @@ var memorials: Node3D
 var npcs: Node3D
 ## Buildings, fences, ships and other props of towns, graveyards and harbours.
 var props: Node3D
+## The vehicle a character is aboard, and where it is drawn instead of where the server announced it.
+var _followed_vehicle := ""
+var _followed_metres: Array = []
+var _followed_heading := Vector3.ZERO
 ## Lamps of the generated places: warm lights (and glowing bulbs) that burn at night.
 var lamps: Node3D
 ## Things that characters built or planted: {"node", "entry"} for each.
@@ -232,6 +236,7 @@ func _ready() -> void:
 	loot.top_level = true
 
 func _process(delta: float) -> void:
+	fill_structures()
 	_swim()
 	_wander(delta)
 	_walk_npcs(delta)
@@ -322,6 +327,10 @@ func apply_environment(data: Variant, expected_sha256: String, expected_seed: St
 
 func clear_world() -> void:
 	_stop_detail_work()
+	_terrain_patches = []
+	_update_patch_water()
+	_river_segments.clear()
+	_river_cells.clear()
 	environment.clear()
 	heightmap = PackedFloat32Array()
 	target = Vector3.ZERO
@@ -440,6 +449,9 @@ func elevation64(direction: Array) -> float:
 	if length <= 0.0:
 		return metres / 1000.0
 	var unit: Array = [float(direction[0]) / length, float(direction[1]) / length, float(direction[2]) / length]
+	# A coarse river's channel is carved where no landscape patch replaces the ground (the server's `height`).
+	if not _river_segments.is_empty() and not _terrain_covers(unit):
+		return (metres - _river_carve_m(unit)) / 1000.0
 	return (metres + _terrain_offset_m(unit, metres)) / 1000.0
 
 func environment_index(direction: Vector3) -> int:
@@ -451,29 +463,148 @@ func _cell_direction(index: int) -> Vector3:
 	var size := int(environment.face_size)
 	return cube_point(index / (size * size), (index % size + 0.5) * 2.0 / size - 1.0, 1.0 - (int(index / size) % size + 0.5) * 2.0 / size)
 
+## Coarse rivers (biome 2 cells, as the server's `movement::Rivers`): a channel on the great circle from a cell's centre to
+## the centre of the cell downstream, carved RIVER_BED_M deep on that line and easing to nothing `reach` metres from it;
+## the water stands RIVER_LEVEL_M below the uncarved ground. The detail disk and the map draw this water where the server
+## walks it; the ribbon below shows it from afar.
+const RIVER_BED_M := 2.0
+const RIVER_LEVEL_M := 0.6
+const RIVER_MIN_FLOW := 18
+const RIVER_REACH_PER_FLOW_M := 10.0
+const RIVER_REACH_MIN_M := 12.0
+const RIVER_REACH_MAX_M := 90.0
+const RIVER_INDEX_STEP_M := 5000.0
+## Where the water's edge lies as a share of the carved reach (RIVER_BED_M * (1 - smoothstep) == RIVER_LEVEL_M).
+const RIVER_WATER_SHARE := 0.63
+
+var _river_segments: Array = []
+var _river_cells: Dictionary = {}
+var _rivers_material: ShaderMaterial = null
+
+## A cube-sphere point in double precision, as the server's `cube_point`.
+func _cube_point64(face: int, horizontal: float, vertical: float) -> Array:
+	var cube: Array
+	match face:
+		0: cube = [1.0, vertical, -horizontal]
+		1: cube = [-1.0, vertical, horizontal]
+		2: cube = [horizontal, 1.0, -vertical]
+		3: cube = [horizontal, -1.0, vertical]
+		4: cube = [horizontal, vertical, 1.0]
+		_: cube = [-horizontal, vertical, -1.0]
+	var point := []
+	for axis in 3:
+		var first: float = float(cube[(axis + 1) % 3]) * float(cube[(axis + 1) % 3])
+		var second: float = float(cube[(axis + 2) % 3]) * float(cube[(axis + 2) % 3])
+		point.append(float(cube[axis]) * sqrt(1.0 - first / 2.0 - second / 2.0 + first * second / 3.0))
+	return _unit64(point)
+
+func _unit64(point: Array) -> Array:
+	var length := sqrt(float(point[0]) * point[0] + float(point[1]) * point[1] + float(point[2]) * point[2])
+	return [float(point[0]) / length, float(point[1]) / length, float(point[2]) / length]
+
+func _environment_cell64(direction: Array) -> int:
+	var mapped := _coordinates64(direction)
+	var size := int(environment.face_size)
+	return int(mapped[0]) * size * size + mini(int(float(mapped[2]) * size), size - 1) * size + mini(int(float(mapped[1]) * size), size - 1)
+
+func _river_centre(index: int) -> Array:
+	var size := int(environment.face_size)
+	return _cube_point64(index / (size * size), (float(index % size) + 0.5) * 2.0 / size - 1.0, 1.0 - (float(int(index / size) % size) + 0.5) * 2.0 / size)
+
+## Files every coarse river segment under the environment cells it crosses.
+func _index_rivers() -> void:
+	_river_segments.clear()
+	_river_cells.clear()
+	for index in environment.biomes.size():
+		var downstream := int(environment.downstream[index])
+		if int(environment.biomes[index]) != 2 or int(environment.flow[index]) < RIVER_MIN_FLOW or downstream < 0:
+			continue
+		var from := _river_centre(index)
+		var to := _river_centre(downstream)
+		var reach := clampf(RIVER_REACH_PER_FLOW_M * sqrt(float(environment.flow[index])), RIVER_REACH_MIN_M, RIVER_REACH_MAX_M)
+		var segment := _river_segments.size()
+		var chord := sqrt(pow(float(to[0]) - from[0], 2) + pow(float(to[1]) - from[1], 2) + pow(float(to[2]) - from[2], 2))
+		var samples := maxi(1, int(ceil(chord * RADIUS * 1000.0 / RIVER_INDEX_STEP_M)))
+		for step in samples + 1:
+			var t := float(step) / samples
+			var cell := _environment_cell64(_unit64([lerpf(from[0], to[0], t), lerpf(from[1], to[1], t), lerpf(from[2], to[2], t)]))
+			var listed: PackedInt32Array = _river_cells.get(cell, PackedInt32Array())
+			if listed.is_empty() or listed[listed.size() - 1] != segment:
+				listed.append(segment)
+				_river_cells[cell] = listed
+		_river_segments.append([from, to, reach])
+
+## Metres the coarse rivers carve into the ground in a unit direction (0 away from every river).
+func _river_carve_m(direction: Array) -> float:
+	if _river_segments.is_empty():
+		return 0.0
+	var reference := [0.0, 1.0, 0.0] if absf(float(direction[1])) < 0.9 else [1.0, 0.0, 0.0]
+	var east := _unit64([reference[1] * direction[2] - reference[2] * direction[1], reference[2] * direction[0] - reference[0] * direction[2], reference[0] * direction[1] - reference[1] * direction[0]])
+	var north := [direction[1] * east[2] - direction[2] * east[1], direction[2] * east[0] - direction[0] * east[2], direction[0] * east[1] - direction[1] * east[0]]
+	var probe := RIVER_REACH_MAX_M / (RADIUS * 1000.0)
+	var cells := [_environment_cell64(direction)]
+	for pair in [[east, 1.0], [east, -1.0], [north, 1.0], [north, -1.0]]:
+		var axis: Array = pair[0]
+		var sign: float = pair[1]
+		var cell := _environment_cell64(_unit64([float(direction[0]) + axis[0] * probe * sign, float(direction[1]) + axis[1] * probe * sign, float(direction[2]) + axis[2] * probe * sign]))
+		if not cells.has(cell):
+			cells.append(cell)
+	var deepest := 0.0
+	for cell: int in cells:
+		for segment_index in _river_cells.get(cell, PackedInt32Array()):
+			var segment: Array = _river_segments[segment_index]
+			var from: Array = segment[0]
+			var to: Array = segment[1]
+			var along := [float(to[0]) - from[0], float(to[1]) - from[1], float(to[2]) - from[2]]
+			var offset := [float(direction[0]) - from[0], float(direction[1]) - from[1], float(direction[2]) - from[2]]
+			var t := clampf((offset[0] * along[0] + offset[1] * along[1] + offset[2] * along[2]) / (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]), 0.0, 1.0)
+			var nearest := _unit64([from[0] + along[0] * t, from[1] + along[1] * t, from[2] + along[2] * t])
+			var distance := sqrt(pow(float(direction[0]) - nearest[0], 2) + pow(float(direction[1]) - nearest[1], 2) + pow(float(direction[2]) - nearest[2], 2)) * RADIUS * 1000.0
+			var reach: float = segment[2]
+			if distance >= reach:
+				continue
+			var x := distance / reach
+			deepest = maxf(deepest, RIVER_BED_M * (1.0 - x * x * (3.0 - 2.0 * x)))
+	return deepest
+
+## Whether a landscape patch's rectangle covers a unit direction (its ground replaces the strip there).
+func _terrain_covers(direction: Array) -> bool:
+	for patch: Dictionary in _terrain_patches:
+		if not _terrain_local(patch, direction).is_empty():
+			return true
+	return false
+
+## The surface of a coarse river's water in metres, or NAN where no channel is carved (under a patch too).
+func _river_level_m(direction: Array) -> float:
+	if _river_segments.is_empty() or _terrain_covers(direction):
+		return NAN
+	if _river_carve_m(direction) <= RIVER_LEVEL_M:
+		return NAN
+	return elevation64_base(direction) * 1000.0 - RIVER_LEVEL_M
+
+## The far-view ribbon of every coarse river, as wide as its water, discarded inside the detail disk (which draws the
+## river itself).
 func _build_rivers() -> void:
 	for child in get_children():
 		if child.name == "Rivers":
 			remove_child(child)
 			child.queue_free()
+	_index_rivers()
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var vertices := 0
-	for index in environment.biomes.size():
-		var destination := int(environment.downstream[index])
-		if int(environment.biomes[index]) != 2 or destination < 0:
-			continue
-		var start := _cell_direction(index)
-		var end := _cell_direction(destination)
+	for segment: Array in _river_segments:
+		var start := Vector3(segment[0][0], segment[0][1], segment[0][2])
+		var end := Vector3(segment[1][0], segment[1][1], segment[1][2])
 		var sideways := start.cross(end).normalized()
-		var width := minf(0.00015, 0.00002 * sqrt(float(environment.flow[index])))
+		var width := float(segment[2]) * RIVER_WATER_SHARE / (RADIUS * 1000.0)
 		for step in 16:
 			var first := start.slerp(end, step / 16.0).normalized()
 			var second := start.slerp(end, (step + 1.0) / 16.0).normalized()
 			var corners: Array[Vector3] = []
 			for direction in [first - sideways * width, first + sideways * width, second - sideways * width, second + sideways * width]:
 				var unit: Vector3 = direction.normalized()
-				var water := maxf(elevation(unit), 0.0)
+				var water := maxf(elevation64_base([unit.x, unit.y, unit.z]) - RIVER_LEVEL_M / 1000.0, 0.0)
 				var sample_index := environment_index(unit)
 				if int(environment.biomes[sample_index]) == 1:
 					water = maxf(water, environment.water_m[sample_index] / 1000.0)
@@ -487,11 +618,9 @@ func _build_rivers() -> void:
 	var rivers := MeshInstance3D.new()
 	rivers.name = "Rivers"
 	rivers.mesh = tool.commit()
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.035, 0.25, 0.38)
-	material.roughness = 0.28
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	rivers.material_override = material
+	_rivers_material = ShaderMaterial.new()
+	_rivers_material.shader = preload("res://scripts/river_ribbon.gdshader")
+	rivers.material_override = _rivers_material
 	add_child(rivers)
 
 func _cancel_objects() -> void:
@@ -516,14 +645,16 @@ func _clear_portals() -> void:
 		portals.remove_child(child)
 		child.queue_free()
 
-func _clear_objects() -> void:
+## `reuse`: the characters and props stay in place for `apply_npcs` and `apply_props` to keep those that did not change.
+func _clear_objects(reuse: bool = false) -> void:
 	placements.clear()
 	_swimmers.clear()
 	_walkers.clear()
 	objects_loaded = false
 	_memorial_entries.clear()
-	_clear_npcs()
-	_clear_props()
+	if not reuse:
+		_clear_npcs()
+		_clear_props()
 	_clear_loot()
 	for child in memorials.get_children():
 		memorials.remove_child(child)
@@ -551,6 +682,8 @@ func _clear_region(clear_objects: bool = true, keep_detail: bool = false) -> voi
 		grass.remove_child(child)
 		child.queue_free()
 	land_material.set_shader_parameter("detail_direction", Vector3.ZERO)
+	if _rivers_material != null:
+		_rivers_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_map = {}
 	water_changed.emit()
@@ -570,6 +703,12 @@ func _compute_detail_radius() -> float:
 	var radius := DETAIL_RADIUS
 	for patch: Dictionary in _terrain_patches:
 		var half_km := maxf(float(patch.extent[0]), float(patch.extent[1])) * 0.5 / 1000.0
+		# Patches announced for the far view (their rivers painted on the planet) do not widen the local disk.
+		var anchor: Variant = patch.get("anchor")
+		if anchor is Array and target != Vector3.ZERO:
+			var centre := Vector3(anchor[0], anchor[1], anchor[2]).normalized()
+			if target.normalized().distance_to(centre) * RADIUS > half_km * 1.5 + DETAIL_RADIUS_MAX:
+				continue
 		# About 70 % of the half-extent covers the walled city without dragging in the whole floodplain.
 		radius = maxf(radius, minf(DETAIL_RADIUS_MAX, half_km * 0.7))
 	return radius
@@ -701,14 +840,15 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 					plane = level if not is_finite(plane) else maxf(plane, level)
 			if not is_finite(plane):
 				continue
-			# Dry corners of a wet cell sit on the same pond plane; the shader still discards them
-			# (UV2.y = -100) so the shoreline clips cleanly instead of ramping into the bed.
+			# Dry corners of a wet cell sit on the same pond plane and carry its level, so the shader's
+			# ground-above-water test cuts the shoreline smoothly across the cell instead of in mesh-sized steps.
 			for corner in quad:
 				if is_finite(water_levels[corner]):
 					continue
 				var up: Vector3 = land_normals[corner]
 				var water_h := plane + 0.00005
 				water_vertices[corner] = _position_from(anchor, [up.x * (RADIUS + water_h) * 1000.0, up.y * (RADIUS + water_h) * 1000.0, up.z * (RADIUS + water_h) * 1000.0])
+				water_uv2[corner] = Vector2(water_uv2[corner].x, plane)
 			water_indices.append_array(PackedInt32Array([first, first + stride, first + 1, first + 1, first + stride, first + stride + 1]))
 	var tufts: Dictionary = grass_cover.compute(unit, anchor)
 	var water_image := _bake_water_image(unit, tangent, forward, float(job.map_extent))
@@ -768,6 +908,9 @@ func _finish_detail(result: Dictionary) -> void:
 	var discard_radius: float = float(job.radius) * 1.05 / RADIUS
 	land_material.set_shader_parameter("detail_direction", unit)
 	land_material.set_shader_parameter("detail_discard", discard_radius)
+	if _rivers_material != null:
+		_rivers_material.set_shader_parameter("detail_direction", unit)
+		_rivers_material.set_shader_parameter("detail_discard", discard_radius)
 	water_material.set_shader_parameter("detail_direction", unit)
 	water_material.set_shader_parameter("detail_discard", discard_radius)
 	_apply_water_map(result.water_image, unit, job.tangent, job.forward, float(job.map_extent))
@@ -880,7 +1023,7 @@ func apply_objects(data: Variant) -> bool:
 			return false
 		accepted.append(entry)
 	_clock_offset_ms = _server_offset(data.get("server_time_ms"))
-	_clear_objects()
+	_clear_objects(true)
 	for entry: Dictionary in accepted:
 		_place_object(entry)
 	if not apply_memorials(data.get("memorials", [])):
@@ -1027,9 +1170,25 @@ func apply_memorials(data: Variant) -> bool:
 
 ## Characters of the story. A malformed entry is skipped; it never spoils the region.
 func apply_npcs(data: Variant) -> bool:
-	_clear_npcs()
-	if not data is Array or data.size() > MAX_NPCS:
-		return false
+	# A region asked for again lists mostly the same characters. A character that looks the same keeps its node, its model
+	# and its animation player: building one costs several milliseconds, and thirty of them stopped the game for a fifth of a
+	# second at every refresh while walking.
+	var old := {}
+	for index in mini(_npc_entries.size(), npcs.get_child_count()):
+		old[String(_npc_entries[index].get("id", ""))] = [_npc_entries[index], npcs.get_child(index)]
+	for pair: Array in old.values():
+		npcs.remove_child(pair[1])
+	_npc_entries.clear()
+	_npc_walkers.clear()
+	var accepted_list: bool = data is Array and data.size() <= MAX_NPCS
+	var result := _apply_npcs_listed(data if accepted_list else [], old)
+	for pair: Array in old.values():
+		if is_instance_valid(pair[1]):
+			pair[1].queue_free()
+	npcs_changed.emit()
+	return accepted_list and result
+
+func _apply_npcs_listed(data: Array, old: Dictionary) -> bool:
 	var identities := {}
 	for entry: Variant in data:
 		if not entry is Dictionary or not entry.get("id") is String or entry.id.is_empty() or identities.has(entry.id) or not entry.get("name_key") is String:
@@ -1047,6 +1206,11 @@ func apply_npcs(data: Variant) -> bool:
 		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
 			continue
 		identities[entry.id] = true
+		var kept: Variant = old.get(entry.id)
+		if kept != null and is_instance_valid(kept[1]) and _same_npc(kept[0], entry):
+			if _keep_npc(kept[1], entry, point):
+				old.erase(entry.id)
+				continue
 		var model := CHARACTERS.create_model(entry.character, false)
 		if model == null:
 			continue
@@ -1086,7 +1250,46 @@ func apply_npcs(data: Variant) -> bool:
 				})
 		if entry.get("model") != null and fetch_media.is_valid() and preload("res://scripts/story_client.gd").valid_media_url(entry.model) and entry.model.ends_with(".glb"):
 			fetch_media.call(entry.model)
-	npcs_changed.emit()
+	return true
+
+## Two lists name the same character when nothing that shapes its model or its name changed.
+func _same_npc(before: Dictionary, after: Dictionary) -> bool:
+	for key in ["character", "model", "name_key", "scale_m"]:
+		if before.get(key) != after.get(key):
+			return false
+	return true
+
+## Puts a character that is already built where the new list says, with its route and health; false when it cannot be kept.
+func _keep_npc(placement: Node3D, entry: Dictionary, point: Vector3) -> bool:
+	var model: Node3D = null
+	for child in placement.get_children():
+		if child is Node3D and not child is Label3D and child.name != "HealthBar":
+			model = child
+	if model == null:
+		return false
+	placement.position = _render_position(entry.position)
+	placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
+	var label := placement.get_node_or_null("Name") as Label3D
+	if label != null:
+		label.text = _npc_name(entry.name_key)
+	var held := _npc_entries.size()
+	npcs.add_child(placement)
+	_npc_entries.append(entry.duplicate(true))
+	var head := (label.position.y / 1.08) if label != null else 1.7
+	if entry.get("health") != null or placement.get_node_or_null("HealthBar") != null:
+		_attach_health_bar(placement, entry, head)
+	if entry.has("wander"):
+		var route := _parse_route(entry.wander)
+		if not route.is_empty():
+			_npc_walkers.append({
+				"id": entry.id,
+				"index": held,
+				"route": route,
+				"walking": false,
+				"player": _npc_player(model),
+				"gesture_until": 0,
+				"gesture_clip": "",
+			})
 	return true
 
 ## A character model arrived: it replaces the pack character of the NPCs that name it.
@@ -1235,8 +1438,20 @@ func sync_npc_health(data: Variant) -> void:
 ## Landscape patches the server announces for the region (ADR 0013): their grids are the
 ## disk's own 16-bit PNGs, fetched apart from `fetch_media` (which would hand over Godot's
 ## half-float image and lose the decimetre step), and kept while the region keeps naming them.
+## Whether the announced landscape patches are the ones already held (the region asks again as the player walks): then
+## nothing changes, and above all the worker computing the detail disk is not waited for.
+func _same_patches(patches: Array) -> bool:
+	if patches.size() != _terrain_patches.size():
+		return false
+	for index in patches.size():
+		var fresh: Dictionary = patches[index]
+		var held: Dictionary = _terrain_patches[index]
+		for key in ["place", "anchor", "anchor_height_m", "extent", "offset", "feather", "heightmap_url", "water_url", "clear_url"]:
+			if fresh.get(key) != held.get(key):
+				return false
+	return true
+
 func apply_terrains(data: Variant) -> bool:
-	_stop_detail_work()
 	if not data is Array or data.size() > 8:
 		return false
 	var patches := []
@@ -1288,6 +1503,9 @@ func apply_terrains(data: Variant) -> bool:
 			"width": 0,
 			"height": 0
 		})
+	if _same_patches(patches):
+		return true
+	_stop_detail_work()
 	for patch: Dictionary in patches:
 		var old: Dictionary = {}
 		for previous: Dictionary in _terrain_patches:
@@ -1310,6 +1528,7 @@ func apply_terrains(data: Variant) -> bool:
 			_terrain_fetch(patch.water_url)
 		if patch.clear_url != "" and patch.clear_image == null:
 			_terrain_fetch(patch.clear_url)
+	_update_patch_water()
 	if rebuild:
 		_build_detail()
 	return true
@@ -1366,6 +1585,7 @@ func _terrain_received(result: int, code: int, _headers: PackedStringArray, body
 			patch.water_grid = grid[2]
 		else:
 			patch.grid = grid[2]
+	_update_patch_water()
 	_build_detail()
 
 ## A minimal 16-bit greyscale PNG decoder (no interlace): Godot's own loader keeps only a half
@@ -1523,6 +1743,52 @@ func _terrain_water_m(direction: Array) -> float:
 			return float(patch.anchor_height_m) + level * 0.1
 	return NAN
 
+## Whether a landscape patch covers this direction with dry ground (not its water mask), as the server's
+## `patch_dry`: inside the feathered rectangle, with no water grid or a dry pixel of it.
+func _terrain_dry(direction: Array) -> bool:
+	for patch: Dictionary in _terrain_patches:
+		var local: Array = _terrain_local(patch, direction)
+		if local.is_empty() or float(local[2]) <= 0.0:
+			continue
+		if patch.water_grid == null:
+			return true
+		var width := int(patch.width)
+		var height := int(patch.height)
+		var column := int(clampf((float(local[0]) + float(patch.extent[0]) * 0.5) / float(patch.extent[0]) * width, 0.0, width - 1))
+		var row := int(clampf((float(local[1]) + float(patch.extent[1]) * 0.5) / float(patch.extent[1]) * height, 0.0, height - 1))
+		if float((patch.water_grid as PackedFloat32Array)[row * width + column]) <= -32768.0:
+			return true
+	return false
+
+## Hands the water masks of the announced patches to the planet shader, which paints their rivers and ponds where
+## the detail disk does not reach (from the air, while landing, a city's river seen from afar).
+func _update_patch_water() -> void:
+	if land_material == null:
+		return
+	var masks: Array[Texture2D] = []
+	var axes_x: Array[Vector3] = []
+	var axes_z: Array[Vector3] = []
+	var rects: Array[Vector4] = []
+	for patch: Dictionary in _terrain_patches:
+		if patch.water_grid == null or masks.size() >= 4:
+			continue
+		var grid: PackedFloat32Array = patch.water_grid
+		var bytes := PackedByteArray()
+		bytes.resize(grid.size())
+		for pixel in grid.size():
+			bytes[pixel] = 255 if grid[pixel] > -32768.0 else 0
+		masks.append(ImageTexture.create_from_image(Image.create_from_data(int(patch.width), int(patch.height), false, Image.FORMAT_R8, bytes)))
+		axes_x.append(Vector3(patch.axes[0][0], patch.axes[0][1], patch.axes[0][2]))
+		axes_z.append(Vector3(patch.axes[1][0], patch.axes[1][1], patch.axes[1][2]))
+		rects.append(Vector4(patch.offset[0], patch.offset[1], patch.extent[0], patch.extent[1]))
+	land_material.set_shader_parameter("patch_count", masks.size())
+	if masks.is_empty():
+		return
+	land_material.set_shader_parameter("patch_water", masks)
+	land_material.set_shader_parameter("patch_axis_x", axes_x)
+	land_material.set_shader_parameter("patch_axis_z", axes_z)
+	land_material.set_shader_parameter("patch_rect", rects)
+
 ## A model with blend shapes for the eyes and the mouth blinks and talks.
 func _attach_face(model: Node3D) -> void:
 	var face := FACE.new()
@@ -1607,48 +1873,74 @@ func area_at(metres: Vector3) -> Dictionary:
 	return best
 
 func apply_props(data: Variant) -> bool:
-	_clear_props()
-	if not data is Array or data.size() > MAX_PROPS:
-		return false
-	for entry: Variant in data:
-		if not entry is Dictionary or not entry.get("id") is String or not entry.get("position") is Array or entry.position.size() != 3:
-			continue
-		var path := prop_path(entry.get("model"))
-		var url := structure_url(entry.get("model"))
-		var finite := not path.is_empty() or not url.is_empty()
-		for value: Variant in entry.get("position", []):
-			finite = finite and (value is float or value is int) and is_finite(float(value)) and absf(value) <= 7000000.0
-		for key in ["yaw", "scale_m"]:
-			finite = finite and (entry.get(key) is float or entry.get(key) is int) and is_finite(float(entry[key]))
-		if not finite or entry.scale_m <= 0.05 or entry.scale_m > 20:
-			continue
-		var point := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
-		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
-			continue
-		var placement := Node3D.new()
-		placement.position = _render_position(entry.position)
-		placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
-		placement.scale = Vector3.ONE * float(entry.scale_m) / 1000.0
-		if not url.is_empty():
+	# A region that only moves with the player lists mostly the same props again. Those keep their node (and the model
+	# already in it): only the new ones are built, the others are not thrown away and instantiated once more.
+	var old := {}
+	for index in mini(_prop_entries.size(), props.get_child_count()):
+		old[_prop_entries[index].get("id")] = [_prop_entries[index], props.get_child(index)]
+	for node_pair: Array in old.values():
+		props.remove_child(node_pair[1])
+	_prop_entries.clear()
+	_lamp_positions.clear()
+	for lamp in lamps.get_children():
+		lamps.remove_child(lamp)
+		lamp.queue_free()
+	var accepted: bool = data is Array and data.size() <= MAX_PROPS
+	if accepted:
+		for entry: Variant in data:
+			if not entry is Dictionary or not entry.get("id") is String or not entry.get("position") is Array or entry.position.size() != 3:
+				continue
+			var path := prop_path(entry.get("model"))
+			var url := structure_url(entry.get("model"))
+			var finite := not path.is_empty() or not url.is_empty()
+			for value: Variant in entry.get("position", []):
+				finite = finite and (value is float or value is int) and is_finite(float(value)) and absf(value) <= 7000000.0
+			for key in ["yaw", "scale_m"]:
+				finite = finite and (entry.get(key) is float or entry.get(key) is int) and is_finite(float(entry[key]))
+			if not finite or entry.scale_m <= 0.05 or entry.scale_m > 20:
+				continue
+			var point := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
+			if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1:
+				continue
+			var kept: Variant = old.get(entry.id)
+			if kept != null and kept[0] == entry and is_instance_valid(kept[1]):
+				var node := kept[1] as Node3D
+				node.position = _render_position(entry.position)
+				props.add_child(node)
+				_prop_entries.append(entry.duplicate(true))
+				old.erase(entry.id)
+				if entry.id == _followed_vehicle:
+					_place_followed_vehicle()
+				if path != "" and LAMP_MODELS.has(entry.model):
+					_add_lamp(entry)
+				continue
+			var placement := Node3D.new()
+			placement.position = _render_position(entry.position)
+			placement.quaternion = Quaternion(Vector3.UP, point.normalized()) * Quaternion(Vector3.UP, entry.yaw)
+			placement.scale = _prop_scale(entry) / 1000.0
+			if not url.is_empty():
+				props.add_child(placement)
+				_prop_entries.append(entry.duplicate(true))
+				_place_structure(placement, url)
+				continue
+			if not _prop_scenes.has(path):
+				_prop_scenes[path] = load(path)
+			var model: Node = (_prop_scenes[path] as PackedScene).instantiate()
+			if not model is Node3D:
+				model.free()
+				placement.free()
+				continue
+			_light_materials(model)
+			placement.add_child(model)
 			props.add_child(placement)
 			_prop_entries.append(entry.duplicate(true))
-			_place_structure(placement, url)
-			continue
-		if not _prop_scenes.has(path):
-			_prop_scenes[path] = load(path)
-		var model: Node = (_prop_scenes[path] as PackedScene).instantiate()
-		if not model is Node3D:
-			model.free()
-			placement.free()
-			continue
-		_light_materials(model)
-		placement.add_child(model)
-		props.add_child(placement)
-		_prop_entries.append(entry.duplicate(true))
-		if LAMP_MODELS.has(entry.model):
-			_add_lamp(entry)
+			if LAMP_MODELS.has(entry.model):
+				_add_lamp(entry)
+	for node_pair: Array in old.values():
+		if is_instance_valid(node_pair[1]):
+			node_pair[1].queue_free()
 	props_changed.emit()
-	return true
+	return accepted
 
 ## Roads and buildings of the generated places for the minimap: the position in metres (from
 ## the planet's centre), the yaw in radians, and the side lengths of the footprint in metres.
@@ -1685,6 +1977,18 @@ static func _map_prop_kind(model: Variant) -> String:
 			return "building"
 	return ""
 
+## Metres per model unit of a prop along its x, y and z: `scale_xyz` when the server sends one (a house fitted to its
+## plot, each of 0.05..20), else `scale_m` on all three axes.
+static func _prop_scale(entry: Dictionary) -> Vector3:
+	var all: Variant = entry.get("scale_xyz")
+	if all is Array and all.size() == 3:
+		var fitted := true
+		for value: Variant in all:
+			fitted = fitted and (value is float or value is int) and is_finite(float(value)) and value >= 0.05 and value <= 20.0
+		if fitted:
+			return Vector3(all[0], all[1], all[2])
+	return Vector3.ONE * float(entry.scale_m)
+
 ## The size of a prop's horizontal footprint in metres, or zero when the model is unknown yet.
 func _prop_footprint_m(entry: Dictionary) -> Vector2:
 	var units := Vector2.ZERO
@@ -1697,7 +2001,8 @@ func _prop_footprint_m(entry: Dictionary) -> Vector2:
 			units = _kit_footprint(path)
 	if units == Vector2.ZERO:
 		return Vector2.ZERO
-	return units * float(entry.scale_m)
+	var scale := _prop_scale(entry)
+	return Vector2(units.x * scale.x, units.y * scale.z)
 
 ## The x and z extents of a bundled kit model in model units, by scene path, measured from the
 ## meshes and cached: the towns are built from a few hundred pieces of a handful of models.
@@ -1760,17 +2065,29 @@ func _terrain_cleared(direction: Array) -> bool:
 
 ## Whether the minimap (and the player's eyes) should treat this direction as open water.
 ## The water surface (km) of the local patch mesh at a vertex, or NAN on dry ground. The server walks the
-## same rules (`WalkingTerrain::surface`): a river of a landscape patch is water, and a coarse river cell
-## on a flat plain is dry unless water stands at least half a metre above the ground.
+## same rules (`WalkingTerrain::water_depth`): a river of a landscape patch is water, the rest of a patch is
+## dry land (below 0 m too) unless the coarse cell is the sea, and a coarse river cell on a flat plain is
+## dry unless water stands at least half a metre above the ground.
 func _detail_water_km(direction: Array, point: Vector3, height: float) -> float:
 	var patch_water := _terrain_water_m(direction)
 	if is_finite(patch_water):
 		return patch_water / 1000.0
 	var index := environment_index(point)
+	var biome := int(environment.biomes[index])
+	if _terrain_dry(direction):
+		return 0.0 if biome == 0 else NAN
+	# A coarse river runs in its carved channel; where it meets a lake or the sea the higher surface counts.
+	var river := _river_level_m(direction) / 1000.0
+	var coarse := _coarse_water_km(index, biome, height)
+	if is_finite(river) and river > height:
+		return maxf(river, coarse) if is_finite(coarse) else river
+	return coarse
+
+## The water of the coarse cell (sea, lake or ponding above the coarse ground), or NAN.
+func _coarse_water_km(index: int, biome: int, height: float) -> float:
 	var water_m: float = float(environment.water_m[index])
 	if water_m <= -8001.0:
 		return NAN
-	var biome := int(environment.biomes[index])
 	if biome != 0 and biome != 1:
 		if water_m <= float(environment.elevation_m[index]) or water_m - height * 1000.0 < 0.5:
 			return NAN
@@ -1788,10 +2105,16 @@ func _minimap_water_at(direction: Array) -> bool:
 		return height <= 0.001
 	var point := Vector3(float(direction[0]), float(direction[1]), float(direction[2]))
 	var index := environment_index(point)
+	var biome := int(environment.biomes[index])
+	# The rest of a landscape patch is dry land, below sea level too, except over the coarse sea.
+	if _terrain_dry(direction):
+		return biome == 0 and 0.001 > height
+	var river := _river_level_m(_unit64(direction)) / 1000.0
+	if is_finite(river) and river > height:
+		return true
 	var water_m: float = float(environment.water_m[index])
 	if water_m <= -8001.0:
 		return false
-	var biome := int(environment.biomes[index])
 	# Planet water pass only draws ocean and lake; flow rivers are line meshes, not a flood.
 	if biome != 0 and biome != 1:
 		var elevation_m: float = float(environment.elevation_m[index])
@@ -1838,7 +2161,7 @@ func _apply_water_map(image: Image, unit: Vector3, tangent: Vector3, forward: Ve
 ## A datadisk building is drawn when its model is here; until then the placement stays empty.
 func _place_structure(placement: Node3D, url: String) -> void:
 	if _structure_models.has(url):
-		_fill_structure(placement, _structure_models[url])
+		_queue_fill(placement, _structure_models[url])
 		return
 	var first := not _structure_waiting.has(url)
 	if first:
@@ -1855,13 +2178,31 @@ func _fill_structure(placement: Node3D, scene: PackedScene) -> void:
 		_light_materials(model)
 		placement.add_child(model)
 
+## Buildings are put into the world a few milliseconds a frame: a region holds up to a few thousand of them and filling
+## them all at once stopped the game for seconds each time the region moved with the player.
+const FILL_BUDGET_US := 3000
+var _fill_queue: Array = []
+
+func _queue_fill(placement: Node3D, scene: PackedScene) -> void:
+	_fill_queue.append([placement, scene])
+
+## Fills queued placements until the frame's budget is spent (`all`: until the queue is empty).
+func fill_structures(all: bool = false) -> void:
+	var started := Time.get_ticks_usec()
+	while not _fill_queue.is_empty():
+		if not all and Time.get_ticks_usec() - started > FILL_BUDGET_US:
+			return
+		var job: Array = _fill_queue.pop_front()
+		if is_instance_valid(job[0]) and (job[0] as Node).get_child_count() == 0:
+			_fill_structure(job[0], job[1])
+
 ## A building model arrived: it fills the placements that waited for it.
 func _structure_ready(url: String, scene: PackedScene) -> void:
 	_structure_models[url] = scene
 	_structure_footprints[url] = _scene_footprint(scene)
 	for placement: Variant in _structure_waiting.get(url, []):
 		if is_instance_valid(placement):
-			_fill_structure(placement, scene)
+			_queue_fill(placement, scene)
 	_structure_waiting.erase(url)
 	props_changed.emit()
 
@@ -2071,6 +2412,53 @@ func nearest_readable(player_metres: Vector3, reach_m: float) -> Dictionary:
 			best_distance = distance
 	return best
 
+## The nearest vehicle (a boat of a datadisk: the prop's `vehicle`) within reach; its id is the place id the server boards it by.
+func nearest_vehicle(player_metres: Vector3, reach_m: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for entry: Dictionary in _prop_entries:
+		if not entry.get("vehicle") is Dictionary:
+			continue
+		var at := Vector3(float(entry.position[0]), float(entry.position[1]), float(entry.position[2]))
+		var distance := player_metres.distance_to(at)
+		if distance <= reach_m and distance < best_distance:
+			best = entry
+			best_distance = distance
+	return best
+
+## The vehicle a character is aboard follows them: its model is drawn under the avatar (absolute metres) and turned to
+## where it goes (`heading`, a direction in the planet's frame), whatever position the server last announced for it.
+func follow_vehicle(id: String, metres: Array, heading: Vector3) -> void:
+	_followed_vehicle = id
+	_followed_metres = metres
+	_followed_heading = heading
+	_place_followed_vehicle()
+
+## The prop entry of a vehicle by its place id, empty when it is not announced.
+func vehicle_entry(id: String) -> Dictionary:
+	for entry: Dictionary in _prop_entries:
+		if entry.get("id") == id:
+			return entry
+	return {}
+
+func stop_following_vehicle() -> void:
+	_followed_vehicle = ""
+
+func _place_followed_vehicle() -> void:
+	if _followed_vehicle.is_empty() or _followed_metres.size() != 3:
+		return
+	for index in mini(_prop_entries.size(), props.get_child_count()):
+		if _prop_entries[index].get("id") != _followed_vehicle:
+			continue
+		var node := props.get_child(index) as Node3D
+		node.position = _render_position(_followed_metres)
+		var up := Vector3(_followed_metres[0], _followed_metres[1], _followed_metres[2]).normalized()
+		var base := Quaternion(Vector3.UP, up)
+		var local := base.inverse() * _followed_heading
+		if Vector2(local.x, local.z).length() > 0.001:
+			node.quaternion = base * Quaternion(Vector3.UP, atan2(local.x, local.z))
+		return
+
 ## The nearest player memorial (headstone / monument / mausoleum) within reach, for examine / loot.
 func nearest_memorial(player_metres: Vector3, reach_m: float) -> Dictionary:
 	var best := {}
@@ -2173,9 +2561,10 @@ func set_render_origin(coordinates_metres: Array) -> void:
 	for index in _portal_entries.size():
 		portals.get_child(index).position = _render_position(_portal_entries[index].position)
 	for index in _npc_entries.size():
-		npcs.get_child(index).position = _render_position(_npc_entries[index].position)
+		npcs.get_child(index).position = _npc_render_position(_npc_entries[index].position)
 	for index in _prop_entries.size():
 		props.get_child(index).position = _render_position(_prop_entries[index].position)
+	_place_followed_vehicle()
 	for index in _placed_entries.size():
 		placed.get_child(index).position = _render_position(_placed_entries[index].position)
 	for index in _lamp_positions.size():
@@ -2190,6 +2579,19 @@ func set_render_origin(coordinates_metres: Array) -> void:
 ## Where a point (metres from the planet's centre) is in the scene, relative to the render origin.
 func render_position(metres: Array) -> Vector3:
 	return _render_position(metres)
+
+## Where a character stands: the server's route and home heights come from the height map (waypoints up to 18 m apart, joined
+## by straight lines), but the ground is drawn as the triangles of the detail disk, so a character left at the server's height
+## walks sunk in a rise or hangs over a dip. As the player's avatar does, a character is set on the drawn ground. One that the
+## server holds clearly off the ground (a stair, a roof, a bridge deck: more than a metre from it) stays where it was told.
+func _npc_render_position(metres: Array) -> Vector3:
+	var point := _render_position(metres)
+	if _origin_metres.size() != 3:
+		return point
+	var grounded := ground_position64(metres)
+	if grounded.is_finite() and grounded.distance_to(point) <= 0.001:
+		return grounded
+	return point
 
 func _render_position(metres: Array) -> Vector3:
 	var anchor: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
@@ -2405,7 +2807,7 @@ func _walk_npcs(delta: float) -> void:
 		var sample := _route_sample(walker.route, now)
 		var metres: Vector3 = sample[0]
 		var velocity: Vector3 = sample[1]
-		node.position = _render_position([metres.x, metres.y, metres.z])
+		node.position = _npc_render_position([metres.x, metres.y, metres.z])
 		_npc_entries[index].position = [metres.x, metres.y, metres.z]
 		var speed := velocity.length()
 		var walking := speed > 0.05

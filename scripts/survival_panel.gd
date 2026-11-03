@@ -9,6 +9,7 @@ const MIN_PENDING_MS := 400
 const MAX_PENDING_MS := 10000
 
 signal eat_requested(item_id: String)
+signal waterskin_requested(action: String)
 signal new_character_requested
 signal loot_requested(id: String, item_id: String)
 signal equip_requested(item_id: String)
@@ -148,12 +149,21 @@ func _spells_list() -> void:
 		_center_buttons(row)
 
 func set_profile(profile: Dictionary) -> void:
+	var unchanged := not profile.is_empty() and _shown_part(profile) == _shown_part(_profile)
 	_profile = profile.duplicate(true)
 	if profile.is_empty():
 		_obituary = {}
 		_grave = {}
 		hide()
+	# Stats arrive with every step and survival tick. Rebuilding the list then would replace the buttons under the
+	# mouse, and a click pressed on one button and released on its replacement is lost: redraw only on a real change.
+	if unchanged:
+		return
 	_render()
+
+## The part of a profile the panel shows (stats change with every step; of them only the gold is listed).
+func _shown_part(profile: Dictionary) -> Array:
+	return [profile.get("inventory"), profile.get("equipment"), profile.get("life", {}).get("alive"), profile.get("stats", {}).get("gold")]
 
 func set_busy(value: bool) -> void:
 	_busy = value
@@ -232,6 +242,13 @@ func set_grave(data: Dictionary) -> void:
 	show()
 	_render()
 
+## Whether the memorial's stored belongings include the item.
+func _grave_holds(item_id: String) -> bool:
+	for item: Variant in _grave.get("items", []):
+		if item is Dictionary and item.get("item_id") == item_id:
+			return true
+	return false
+
 func _alive() -> bool:
 	return _profile.get("life", {}).get("alive", false) == true
 
@@ -281,6 +298,9 @@ func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
 		var water: int = int(item.get("water", 0))
 		if water > 0:
 			name_text += ", " + tr("water +%s") % water
+	var skin: bool = grave_id.is_empty() and item.get("capacity_ml") != null and item.get("fill_ml") != null
+	if skin:
+		name_text += "\n" + tr("Water %s / %s l") % ["%.1f" % (float(item.fill_ml) / 1000.0), "%.1f" % (float(item.capacity_ml) / 1000.0)]
 	var equippable: bool = grave_id.is_empty() and item.get("category") in ["tool", "weapon", "shield", "armor"]
 	var shield: bool = item.get("category") == "shield"
 	var worn_slot := _worn_slot(id) if equippable and item.get("category") == "armor" else ""
@@ -307,6 +327,15 @@ func _item(list: VBoxContainer, item: Dictionary, grave_id := "") -> void:
 		read.disabled = _busy or not _alive()
 		row.add_child(read)
 		_action(read, "Learn:" + id, func() -> void: learn_requested.emit(id))
+	if skin:
+		for action: String in ["Drink", "Fill"]:
+			var button := Button.new()
+			button.name = "Skin" + action
+			button.text = tr(action)
+			button.custom_minimum_size = Vector2(72, 40)
+			button.disabled = _busy or not _alive() or (action == "Drink" and int(item.fill_ml) <= 0) or (action == "Fill" and int(item.fill_ml) >= int(item.capacity_ml))
+			row.add_child(button)
+			_action(button, "Skin:" + action, func() -> void: waterskin_requested.emit(action.to_lower()))
 	var placeable: bool = grave_id.is_empty() and item.get("category") == "placeable"
 	var seed: bool = grave_id.is_empty() and id.begins_with("seed_")
 	if placeable or seed:
@@ -436,6 +465,12 @@ func _render() -> void:
 			var statistic := _label(grave_list, tr(entry[0]) % value)
 			statistic.name = entry[1]
 			statistic.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		# A traveller who died of thirst without a waterskin has it carved on the stone. The text is a key; the
+		# server stores the cause only, never a language.
+		if str(_grave.get("cause", notice.get("death_cause", ""))) == "dehydration" and not _grave_holds("waterskin"):
+			var epitaph := _label(grave_list, "„" + tr("He did not buy a waterskin") + "“")
+			epitaph.name = "Epitaph"
+			epitaph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if not _obituary.is_empty():
 		var create := Button.new()
 		create.name = "NewCharacter"

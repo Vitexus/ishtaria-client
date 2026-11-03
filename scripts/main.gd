@@ -7,6 +7,7 @@ const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
 const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 const MIN_SERVER_VERSION := "0.1.0"
 const APPROACH_SECONDS := 14.0
 ## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
@@ -26,6 +27,8 @@ const MILK_REACH_M := 3.0
 const GRAVE_REACH_M := 2.8
 ## Reach to read an inscribed structure; the server allows 3 m.
 const READ_REACH_M := 2.8
+## Within this a boat is boarded (the server allows 8 m).
+const VEHICLE_REACH_M := 7.0
 
 static func parse_version(text: String) -> Array[int]:
 	return preload("res://scripts/server_history.gd").parse_version(text)
@@ -45,6 +48,8 @@ var _disconnect_button: Button
 var _reconnect: Timer
 var _request: HTTPRequest
 var _request_pending := false
+## Connect, Test servers and Sign out wait for the server with a spinner.
+var _connection_pending := PendingActions.new(self)
 var _connected_world := ""
 var _server_url := DEFAULT_SERVER_URL
 var _connection_enabled := false
@@ -129,6 +134,9 @@ var _portal_poll := 0.0
 var _player_metres := Vector3.ZERO
 var _prompt_elapsed := 0.0
 var _swimming := false
+## The vehicle (place id) the character is aboard, and its speed and clip as the server announced the prop.
+var _vehicle_id := ""
+var _vehicle_clip := ""
 var _survival: CanvasLayer
 var _crafting: CanvasLayer
 var _startup_pending := true
@@ -198,6 +206,10 @@ func _ready() -> void:
 	_terrain_material.set_shader_parameter("persia_blend", 0.35)
 	_terrain_material.set_shader_parameter("use_persia_textures", true)
 	_terrain_material.set_shader_parameter("use_textures", true)
+	# Ground sets of datadisks (the manifest's `ground`): the layers wait here until /world names one.
+	for layer: String in ["grass_path_2", "dry_mud_field_001", "aerial_sand", "dirt_aerial_03", "mud_cracked_dry_03"]:
+		var parameter: String = {"grass_path_2": "tex_alluvial_steppe", "dry_mud_field_001": "tex_alluvial_silt", "aerial_sand": "tex_alluvial_sand", "dirt_aerial_03": "tex_alluvial_dirt", "mud_cracked_dry_03": "tex_alluvial_cracked"}[layer]
+		_terrain_material.set_shader_parameter(parameter, load("res://assets/terrain/%s/%s_diff_1k.jpg" % [layer, layer]))
 	add_child(planet)
 	var ocean := MeshInstance3D.new()
 	ocean.name = "Ocean"
@@ -296,6 +308,8 @@ func _ready() -> void:
 			_sync_flag())
 	_session.position_changed.connect(_on_player_position)
 	_session.swimming_changed.connect(_on_swimming_changed)
+	_session.vehicle_changed.connect(_on_vehicle_changed)
+	_session.vehicle_moved.connect(_on_vehicle_moved)
 	_session.stats_changed.connect(_on_player_stats)
 	_session.failed.connect(_on_player_failed)
 	_session.harvested.connect(_on_harvested)
@@ -307,6 +321,7 @@ func _ready() -> void:
 	add_child(_toast)
 	_survival = preload("res://scripts/survival_panel.gd").new()
 	_survival.eat_requested.connect(_eat_item)
+	_survival.waterskin_requested.connect(_waterskin_action)
 	_survival.new_character_requested.connect(_new_character)
 	_survival.loot_requested.connect(_loot_item)
 	_survival.equip_requested.connect(_equip_item)
@@ -351,6 +366,7 @@ func _ready() -> void:
 	_session.portal_closed.connect(_session.fetch_portals)
 	_session.profile_changed.connect(_portals.set_profile)
 	_session.busy_changed.connect(_portals.set_busy)
+	_portals.pending.in_flight = func() -> bool: return _session.busy
 	_session.failed.connect(_portals.set_feedback)
 	add_child(_portals)
 	_escape_menu = preload("res://scripts/escape_menu.gd").new()
@@ -390,6 +406,8 @@ func _ready() -> void:
 	_trading.exchange_changed.connect(_trade_panel.show_exchange)
 	_trading.exchange_ended.connect(_on_exchange_ended)
 	_trading.changed.connect(_session.refresh)
+	_trade_panel.pending.in_flight = _trading.is_busy
+	_trading.busy_changed.connect(_trade_panel.pending.set_busy)
 	_trading.failed.connect(_on_trading_failed)
 	_placed = preload("res://scripts/placed_client.gd").new()
 	_placed.player_metres = func() -> Vector3: return _player_metres
@@ -431,6 +449,8 @@ func _ready() -> void:
 	_social.friends_changed.connect(_friends.set_friends)
 	_social.requests_changed.connect(_friends.set_requests)
 	_social.failed.connect(_friends.set_feedback)
+	_friends.pending.in_flight = _social.is_busy
+	_social.busy_changed.connect(_friends.pending.set_busy)
 	_social.event_received.connect(_on_friend_event)
 	_story = preload("res://scripts/story_client.gd").new()
 	add_child(_story)
@@ -458,6 +478,10 @@ func _ready() -> void:
 	_dialogue.choice_made.connect(_on_dialogue_choice)
 	_dialogue.about_requested.connect(_story.fetch_about)
 	_dialogue.trade_requested.connect(_on_npc_trade)
+	# Answers and "tell me about yourself" go to the story, Trade to the merchants: one spinner waits for both.
+	_dialogue.pending.in_flight = func() -> bool: return _story.is_busy() or _trading.is_busy()
+	_story.busy_changed.connect(func(_busy: bool) -> void: _dialogue.pending.set_busy(_story.is_busy() or _trading.is_busy()))
+	_trading.busy_changed.connect(func(_busy: bool) -> void: _dialogue.pending.set_busy(_story.is_busy() or _trading.is_busy()))
 	_story.about_ready.connect(_dialogue.show_about)
 	_story.reading_ready.connect(_on_reading_ready)
 	_dialogue.closed.connect(_on_dialogue_closed)
@@ -510,6 +534,10 @@ func _ready() -> void:
 	_creator.selection_changed.connect(func() -> void: _audio.play("click"))
 	_creator.dismissed.connect(_disconnect_server)
 	_session.busy_changed.connect(_creator.set_busy)
+	_connection_pending.in_flight = _connection_in_flight
+	_session.busy_changed.connect(_sync_connection_pending)
+	_history.probing_changed.connect(_sync_connection_pending)
+	_creator.pending.in_flight = func() -> bool: return _session.busy
 	add_child(_creator)
 	_player_model = DISK_PLAYER_MODEL.new()
 	_player_model.changed.connect(_on_player_model_changed)
@@ -676,7 +704,7 @@ func _build_connection_controls() -> void:
 	column.add_child(history_commands)
 	_history_test_button = UiKit.button("", &"GhostButton")
 	_history_test_button.name = "TestServers"
-	_history_test_button.pressed.connect(_on_history_test_pressed)
+	_connection_pending.register(_history_test_button, "TestServers", _on_history_test_pressed, true)
 	history_commands.add_child(_history_test_button)
 	_history_forget_button = UiKit.button("", &"GhostButton")
 	_history_forget_button.name = "ForgetServer"
@@ -689,7 +717,7 @@ func _build_connection_controls() -> void:
 	_connect_button = connect_button
 	connect_button.name = "Connect"
 	connect_button.custom_minimum_size = Vector2(0, 50)
-	connect_button.pressed.connect(_connect_server)
+	_connection_pending.register(connect_button, "Connect", _connect_server, true)
 	column.add_child(connect_button)
 	var commands := GridContainer.new()
 	_connection_commands = commands
@@ -704,7 +732,7 @@ func _build_connection_controls() -> void:
 	_disconnect_button.pressed.connect(_on_disconnect_pressed)
 	_sign_out_button = UiKit.button("Sign out", &"", "back")
 	_sign_out_button.disabled = true
-	_sign_out_button.pressed.connect(_session.sign_out)
+	_connection_pending.register(_sign_out_button, "SignOut", _session.sign_out, true)
 	var controls_button := UiKit.button("Controls")
 	controls_button.pressed.connect(_control_settings.open)
 	for button: Button in [_player_button, controls_button, _disconnect_button, _sign_out_button]:
@@ -1185,6 +1213,13 @@ func _on_history_selected(index: int) -> void:
 	_server_input.text = _history_list.get_item_metadata(index)
 	_history_forget_button.disabled = false
 
+## The connection window's requests: the world of the server, the probes of the history, signing out.
+func _connection_in_flight() -> bool:
+	return _request_pending or _history.is_probing() or _session.busy
+
+func _sync_connection_pending(_value: bool = false) -> void:
+	_connection_pending.set_busy(_connection_in_flight())
+
 func _on_history_test_pressed() -> void:
 	_audio.play("click")
 	_history.probe_all()
@@ -1257,6 +1292,7 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	if generation != _connection_generation or not _connection_enabled:
 		return
 	_request_pending = false
+	_sync_connection_pending()
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		_show_disconnected("network %s / HTTP %s", [result, response_code])
 		return
@@ -1287,6 +1323,7 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	_system_messages.apply(world.get("messages", []))
 	_set_status("%s | %s | seed %s", [world.server_name, world.ruleset, world.get("seed", "-")])
 	_world_metadata = world.duplicate(true)
+	_terrain_material.set_shader_parameter("use_alluvial", _disk_ground(world) == "alluvial")
 	var given: Array = DISK_PLAYER_MODEL.announced(world.get("datadisks", []))
 	_player_model.use(_server_url, given[0], given[1], given[2])
 	_creator.lock_character(_disk_player_character(world))
@@ -1336,6 +1373,14 @@ func _disk_player_character(world: Dictionary) -> String:
 	for disk: Variant in world.get("datadisks", []):
 		if disk is Dictionary and disk.get("player_character") is String:
 			return disk.player_character
+	return ""
+
+## The ground set a datadisk of the world asks for (`ground` of its manifest); the first disk that names a set
+## the client knows wins. Empty for the default ground.
+func _disk_ground(world: Dictionary) -> String:
+	for disk: Variant in world.get("datadisks", []):
+		if disk is Dictionary and disk.get("ground") is String and disk.ground in ["alluvial"]:
+			return disk.ground
 	return ""
 
 func _load_terrain(world: Dictionary) -> void:
@@ -1542,6 +1587,16 @@ func _on_blocked(reply: Dictionary) -> void:
 
 ## E picks up a dropped pile, opens a memorial, talks to a character, harvests a crop, or gathers / drinks.
 func _interact() -> void:
+	# Aboard a boat E gets off at the nearest shore; at a boat it boards.
+	if not _vehicle_id.is_empty():
+		_session.leave_vehicle()
+		_audio.play("click")
+		return
+	var vehicle: Dictionary = _environment.nearest_vehicle(_player_metres, VEHICLE_REACH_M) if _player_metres != Vector3.ZERO else {}
+	if not vehicle.is_empty():
+		_session.board_vehicle(str(vehicle.id))
+		_audio.play("click")
+		return
 	# Loose packs on the ground come before crops, gathering and dialogue.
 	var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0) if _player_metres != Vector3.ZERO else {}
 	if not pile.is_empty():
@@ -1909,6 +1964,18 @@ func _eat_item(item_id: String) -> void:
 	if not _session.busy:
 		_survival.cancel_pending()
 
+## Fills the waterskin at the water or drinks from it.
+func _waterskin_action(action: String) -> void:
+	if _session.busy:
+		_toast.show_toast(tr("Too many actions"), 1.2)
+		_audio.play("warning")
+		_survival.cancel_pending()
+		return
+	_drinking = action == "drink"
+	_session.waterskin(action)
+	if not _session.busy:
+		_survival.cancel_pending()
+
 func _loot_item(grave_id: String, item_id: String) -> void:
 	if _session.busy:
 		_toast.show_toast(tr("Too many actions"), 1.2)
@@ -2099,6 +2166,9 @@ func _on_placed_failed(message: String) -> void:
 
 func _update_prompt() -> void:
 	var text := ""
+	if not _vehicle_id.is_empty() and _controls.active:
+		_toast.set_prompt(tr("E: Get off at the shore"))
+		return
 	if _swimming and _controls.active:
 		# Whoever is in water drowns until they reach a dry shore; nothing else matters now.
 		_toast.set_prompt(tr("You are swimming and drowning: get to the shore!"))
@@ -2109,7 +2179,10 @@ func _update_prompt() -> void:
 		var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M) if _story.is_running() else {}
 		var readable: Dictionary = _environment.nearest_readable(_player_metres, READ_REACH_M) if _story.is_running() else {}
 		var target: Dictionary = _environment.nearest_harvestable(_player_metres, HARVEST_REACH_M)
-		if not pile.is_empty():
+		var boat: Dictionary = _environment.nearest_vehicle(_player_metres, VEHICLE_REACH_M)
+		if not boat.is_empty():
+			text = tr("E: Board the boat")
+		elif not pile.is_empty():
 			text = tr("E: Pick up %s") % tr(str(pile.name))
 		elif not memorial.is_empty():
 			text = tr("E: Examine grave of %s") % str(memorial.player_name)
@@ -2248,6 +2321,32 @@ func _update_area_music(delta: float) -> void:
 		return
 	var found: Dictionary = _environment.area_at(_player_metres)
 	_area_music.set_target(found.get("area", {}), found.get("level", 0.0))
+
+## The server says the character is aboard a vehicle (or no longer): the avatar sits on the water and rows, and the boat
+## follows it.
+func _on_vehicle_changed(id: String) -> void:
+	_vehicle_id = id
+	_vehicle_clip = ""
+	if id.is_empty():
+		_environment.stop_following_vehicle()
+		_controls.set_aboard(false)
+		return
+	_controls.set_aboard(true, _vehicle_clip_of(id))
+	_toast.show_toast(tr("You board the boat"), 1.5)
+
+func _vehicle_clip_of(id: String) -> String:
+	var vehicle: Dictionary = _environment.vehicle_entry(id)
+	var info: Variant = vehicle.get("vehicle")
+	if info is Dictionary and info.get("clip") is String:
+		return str(info.clip)
+	return ""
+
+func _on_vehicle_moved(position: Array) -> void:
+	_controls.snap_to(position)
+	_remember_position({"x": position[0], "y": position[1], "z": position[2]})
+	_surface_direction = _controls.direction
+	if _environment.target.distance_to(_surface_direction) * PLANET_RADIUS > 0.10:
+		_environment.show_region(_surface_direction)
 
 func _on_swimming_changed(swimming: bool) -> void:
 	_controls.set_swimming(swimming)
@@ -2687,6 +2786,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_environment.set_night(1.0 - _sky.daylight)
+	if not _vehicle_id.is_empty() and _controls.active:
+		_environment.follow_vehicle(_vehicle_id, _controls.avatar_metres(), _controls.heading())
 	if _blocking:
 		if not _controls.active or _game_ui_open() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			_blocking = false

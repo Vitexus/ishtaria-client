@@ -5,6 +5,7 @@ extends CanvasLayer
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 
 signal build_requested(portal_name: String)
 signal refresh_requested
@@ -29,6 +30,8 @@ var _details: Dictionary = {}
 var _owned: Dictionary = {}
 var _pasted: Dictionary = {}
 var _busy := false
+## Building, delivering, linking and closing wait for the server with a spinner.
+var pending := PendingActions.new(self)
 var _feedback_key := ""
 var _wanted: Array[String] = []
 
@@ -66,11 +69,11 @@ func _ready() -> void:
 	name_input = _line(row, "PortalName", "brana-sever")
 	var build := Button.new()
 	build.name = "Build"
-	build.pressed.connect(func() -> void:
+	row.add_child(build)
+	pending.register(build, "Build", func() -> void:
 		set_feedback("")
 		build_requested.emit(name_input.text.strip_edges())
-	)
-	row.add_child(build)
+	, true)
 	link_output = _line(content, "ShareLink", "")
 	link_output.editable = false
 	portal_list = VBoxContainer.new()
@@ -132,6 +135,7 @@ func set_profile(profile: Dictionary) -> void:
 func set_busy(value: bool) -> void:
 	_busy = value
 	_render()
+	pending.set_busy(value)
 
 func set_feedback(message: String) -> void:
 	_feedback_key = message
@@ -227,6 +231,7 @@ func _render() -> void:
 	for child in portal_list.get_children():
 		portal_list.remove_child(child)
 		child.queue_free()
+	pending.forget_buttons()
 	if _portals.is_empty():
 		_label(portal_list, tr("No portals yet"))
 		return
@@ -240,16 +245,16 @@ func _render() -> void:
 		_actions(box, portal, detail)
 		box.add_child(HSeparator.new())
 
-func _button(parent: Node, name: String, text: String, action: Callable) -> Button:
+func _button(parent: Node, name: String, text: String, key: String, action: Callable) -> Button:
 	var button := Button.new()
 	button.name = name
 	button.text = text
 	button.disabled = _busy
-	button.pressed.connect(func() -> void:
+	parent.add_child(button)
+	pending.register(button, key, func() -> void:
 		set_feedback("")
 		action.call()
 	)
-	parent.add_child(button)
 	return button
 
 func _actions(box: VBoxContainer, portal: Dictionary, detail: Dictionary) -> void:
@@ -259,19 +264,19 @@ func _actions(box: VBoxContainer, portal: Dictionary, detail: Dictionary) -> voi
 				_requirement_row(box, portal, requirement)
 		"built":
 			# The two things a finished portal offers: its own link, and another portal's link.
-			_button(box, "CopyLink", tr("Copy share link"), func() -> void: link_requested.emit(portal.id))
+			_button(box, "CopyLink", tr("Copy share link"), "CopyLink:" + portal.id, func() -> void: link_requested.emit(portal.id))
 			var row := HBoxContainer.new()
 			box.add_child(row)
 			var paste := _line(row, "PasteLink", "ishtaria-portal:v1.…")
 			paste.text = _pasted.get(portal.id, "")
 			paste.text_changed.connect(func(text: String) -> void: _pasted[portal.id] = text)
-			_button(row, "Connect", tr("Connect"), func() -> void: connect_requested.emit(portal.id, paste.text.strip_edges()))
+			_button(row, "Connect", tr("Connect"), "Connect:" + portal.id, func() -> void: connect_requested.emit(portal.id, paste.text.strip_edges()))
 		"pending", "open":
 			var peer := "%s (%s)" % [portal.get("peer_portal_name", ""), portal.get("peer_host", "")]
 			_label(box, tr("Linked with %s") % peer)
-			_button(box, "Disconnect", tr("Break the link"), func() -> void: disconnect_requested.emit(portal.id))
+			_button(box, "Disconnect", tr("Break the link"), "Disconnect:" + portal.id, func() -> void: disconnect_requested.emit(portal.id))
 	if portal.state != "closed":
-		_button(box, "CloseRuin", tr("Close the portal"), func() -> void: close_requested.emit(portal.id))
+		_button(box, "CloseRuin", tr("Close the portal"), "CloseRuin:" + portal.id, func() -> void: close_requested.emit(portal.id))
 
 func _requirement_row(box: VBoxContainer, portal: Dictionary, requirement: Dictionary) -> void:
 	var row := HBoxContainer.new()
@@ -288,7 +293,7 @@ func _requirement_row(box: VBoxContainer, portal: Dictionary, requirement: Dicti
 	_label(row, "%s: %s / %s" % [_item_name(requirement), requirement.contributed, requirement.required])
 	var offer := deliverable(requirement)
 	if not offer.is_empty():
-		_button(row, "Deliver", tr("Deliver %s") % offer.quantity, func() -> void: deliver_requested.emit(portal.id, offer.item_id, offer.quantity))
+		_button(row, "Deliver", tr("Deliver %s") % offer.quantity, "Deliver:%s:%s" % [portal.id, offer.item_id], func() -> void: deliver_requested.emit(portal.id, offer.item_id, offer.quantity))
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED:

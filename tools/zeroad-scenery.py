@@ -144,7 +144,9 @@ def authored(positions, faces, normals, uvs, z_up, centre: bool = True):
                 (points[:, 2].min() + points[:, 2].max()) / 2,
             ]
         )
-    flat = faces.reshape(-1)
+    # 0 A.D. meshes (.pmd) wind their triangles clockwise (Direct3D); glTF wants counter-clockwise, so the three
+    # corners of every face are taken in reverse. Without it the faces seen from outside are culled (hollow houses).
+    flat = faces[:, ::-1].reshape(-1)
     return (
         points[flat].astype("<f4"),
         up(normals)[flat].astype("<f4"),

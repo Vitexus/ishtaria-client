@@ -94,6 +94,18 @@ func _init() -> void:
 		panel.cancel_pending()
 		_check(not seed_button.has_node("PendingSpinner") and not seed_button.disabled, "cancel_pending drops the hourglass")
 	_check(panel.inventory_list.find_children("Place", "Button", true, false).size() == 1, "plain materials have no place button")
+	# Stats come with every step and survival tick: the list must keep its buttons, or a click pressed on one and
+	# released on its replacement is lost (a snare's Place needed seconds of clicking).
+	var before: Button = panel.inventory_list.find_child("Place", true, false) as Button
+	var stepped: Dictionary = panel._profile.duplicate(true)
+	stepped.stats.health = 97
+	stepped.stats.water = 81
+	panel.set_profile(stepped)
+	_check(panel.inventory_list.find_child("Place", true, false) == before and is_instance_valid(before), "new stats keep the inventory's buttons")
+	var spent: Dictionary = stepped.duplicate(true)
+	spent.inventory.items.remove_at(0)
+	panel.set_profile(spent)
+	_check(panel.inventory_list.find_children("Place", "Button", true, false).is_empty(), "a changed inventory is drawn again")
 
 	# Icons of the new foods exist.
 	var icons := preload("res://scripts/item_icons.gd")

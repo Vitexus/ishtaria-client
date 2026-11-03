@@ -173,8 +173,10 @@ func _run() -> void:
 	scene.pack(sample)
 	sample.free()
 	environment.media_ready(url, scene)
+	environment.fill_structures(true)   # buildings are filled a few milliseconds a frame in the game
 	_check(environment.props.get_child(0).get_child_count() == 1, "the model fills the waiting placement")
 	environment.apply_props([ziggurat])
+	environment.fill_structures(true)
 	_check(environment.props.get_child(0).get_child_count() == 1 and requested.size() == 1, "a known model is drawn at once")
 	_check(environment.structure_url("disk:gilgamesh:media/models/a.glb") == "/story/media/gilgamesh/media/models/a.glb" and environment.structure_url("town.wall") == "", "structure_url separates datadisk models from kit models")
 	environment.fetch_media = Callable()

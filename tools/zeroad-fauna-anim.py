@@ -308,7 +308,9 @@ def build_glb(
         ibm[i] = np.linalg.inv(m).T  # store column-major via later reshape order
 
     # Flatten triangles (indexed mesh).
-    flat_i = indices.reshape(-1)
+    # 0 A.D. meshes (.pmd) wind their triangles clockwise (Direct3D); glTF wants counter-clockwise, so the three
+    # corners of every face are taken in reverse. Without it the faces seen from outside are culled (hollow houses).
+    flat_i = indices[:, ::-1].reshape(-1)
     pos = positions[flat_i].astype("<f4")
     nor = normals[flat_i].astype("<f4")
     uv = np.stack([uvs[flat_i, 0], 1.0 - uvs[flat_i, 1]], axis=1).astype("<f4")
