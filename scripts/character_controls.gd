@@ -4,17 +4,17 @@ extends Node3D
 const ACTIONS := [
 	"walk_forward", "walk_backward", "walk_left", "walk_right", "jump", "run",
 	"inventory", "crafting", "quest_log", "chat", "friends", "pickup", "portals", "interact", "minimap",
-	"spell_1", "spell_2", "spell_3", "spell_4", "spell_5", "spell_6", "spell_7", "spell_8", "spell_9",
+	"spell_1", "spell_2", "spell_3", "spell_4", "spell_5", "spell_6", "spell_7", "spell_8", "spell_9", "character",
 ]
 const DEFAULT_KEYS := [
 	KEY_W, KEY_S, KEY_A, KEY_D, KEY_SPACE, KEY_SHIFT,
 	KEY_I, KEY_C, KEY_J, KEY_ENTER, KEY_F, KEY_G, KEY_P, KEY_E, KEY_M,
-	KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+	KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_K,
 ]
 const LABELS := [
 	"Forward", "Backward", "Left", "Right", "Jump", "Run",
 	"Inventory", "Crafting", "Quest log", "Chat", "Friends", "Pick up", "Portals", "Interact", "Minimap",
-	"Spell 1", "Spell 2", "Spell 3", "Spell 4", "Spell 5", "Spell 6", "Spell 7", "Spell 8", "Spell 9",
+	"Spell 1", "Spell 2", "Spell 3", "Spell 4", "Spell 5", "Spell 6", "Spell 7", "Spell 8", "Spell 9", "Character",
 ]
 const JUMP := 4
 const RUN := 5
@@ -28,6 +28,8 @@ const PORTALS := 12
 const INTERACT := 13
 const MINIMAP := 14
 const SPELL_1 := 15
+## The window of the character (statistics and achievements); appended after the nine spell slots.
+const CHARACTER := 24
 ## Only Escape cannot be assigned; every other functional key is listed in Settings.
 const RESERVED_KEYS := [KEY_ESCAPE]
 const RADIUS := 6371.0

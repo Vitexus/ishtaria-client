@@ -2,6 +2,7 @@ extends CanvasLayer
 
 signal sound_toggled(enabled: bool)
 signal inventory_requested
+signal character_requested
 signal connection_requested
 
 const ICONS := "res://assets/kenney/game-icons/"
@@ -27,6 +28,7 @@ var grid: GridContainer
 var meters: Dictionary = {}
 var player_name: Label
 var level_label: Label
+var character_button: Button
 var age_label: Label
 var experience_label: Label
 var gold_label: Label
@@ -116,6 +118,10 @@ func _ready() -> void:
 	gold_label.add_theme_font_size_override("font_size", 15)
 	gold_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
 	purse.add_child(gold_label)
+	character_button = UiKit.icon_button(load(ICONS + "singleplayer.png"), "click", 28)
+	character_button.name = "Character"
+	character_button.pressed.connect(func() -> void: character_requested.emit())
+	header.add_child(character_button)
 	inventory_button = UiKit.icon_button(load(ICONS + "basket.png"), "click", 28)
 	inventory_button.name = "Inventory"
 	inventory_button.pressed.connect(func() -> void: inventory_requested.emit())
@@ -130,7 +136,7 @@ func _ready() -> void:
 	sound_checkbox.button_pressed = sound_enabled
 	sound_checkbox.toggled.connect(_on_sound_toggled)
 	header.add_child(sound_checkbox)
-	for button: Button in [inventory_button, connection_button, sound_checkbox]:
+	for button: Button in [character_button, inventory_button, connection_button, sound_checkbox]:
 		# The ghost style shows no plate until hovered; here a quiet clay plate stays visible.
 		button.add_theme_stylebox_override("normal", UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.7), Color(UiTheme.GOLD_DIM, 0.8), 1, 3, 4.0))
 		button.add_theme_stylebox_override("pressed", UiTheme.flat_style(Color(UiTheme.CLAY_DARK, 0.7), Color(UiTheme.GOLD_DIM, 0.8), 1, 3, 4.0))
@@ -408,6 +414,7 @@ func _update_labels() -> void:
 	_update_clock()
 	connection_button.tooltip_text = tr("Connection settings")
 	inventory_button.tooltip_text = tr("Inventory")
+	character_button.tooltip_text = tr("Character")
 	sound_checkbox.icon = load(ICONS + ("audioOn.png" if sound_enabled else "audioOff.png"))
 	sound_checkbox.tooltip_text = tr("Interface sounds")
 	for key in _labels:

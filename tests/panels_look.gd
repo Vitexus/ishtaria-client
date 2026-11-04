@@ -61,6 +61,15 @@ func _run() -> void:
 	root.add_child(portals)
 	portals.set_profile(_profile())
 
+	var character: CanvasLayer = preload("res://scripts/character_panel.gd").new()
+	root.add_child(character)
+	character.set_profile({"username": "Enkidu", "ordinal": 1, "life": {"age_days": "12"}, "stats": {"level": 4, "experience": 230, "level_experience": 200,
+		"next_level_experience": 300, "score": "520", "gold": "1250", "health": 80, "stamina": 55, "food": 100, "water": 62, "mana": 30}})
+	var catalog: Array = []
+	for index in 14:
+		catalog.append({"id": "step_%d" % index, "category": "progress", "icon": "star_coin", "title": "Úspěch %d" % (index + 1), "description": "Popis", "hidden": false})
+	character.show_data({"achievements": catalog, "earned": [{"id": "step_0", "unlocked_at": 1792678589}, {"id": "step_1", "unlocked_at": 1792778589}, {"id": "step_2", "unlocked_at": 1792878589}]})
+
 	var dialogue: CanvasLayer = preload("res://scripts/dialogue_panel.gd").new()
 	dialogue.story = story
 	root.add_child(dialogue)
@@ -94,12 +103,15 @@ func _run() -> void:
 			portals.set_portals([{"id": ID1, "state": "built", "portal_name": "brana-jih", "peer_host": null, "peer_portal_name": null}, {"id": ID2, "state": "open", "portal_name": "brana-sever", "peer_host": "svet-a.example.org", "peer_portal_name": "brana-vychod"}])
 			portals.open()
 			return portals.panel,
+		"character": func() -> Control:
+			character.open()
+			return character.panel,
 		"dialogue": func() -> Control:
 			dialogue.show_reply({"npc_id": "endland:kragg", "name_key": "endland:npc.kragg", "seq": 3, "open": true, "player": {},
 				"node": {"node": "greet", "text_key": "endland:kragg.greet", "choices": [{"index": 0, "text_key": "endland:kragg.ask_gossip"}, {"index": 2, "text_key": "endland:kragg.leave"}]}})
 			return dialogue.panel,
 	}
-	var layers := {"crafting": crafting, "crafting_pending": crafting, "shop": trade, "exchange": trade, "friends": friends, "quests": quests, "portals": portals, "dialogue": dialogue}
+	var layers := {"crafting": crafting, "crafting_pending": crafting, "shop": trade, "exchange": trade, "friends": friends, "quests": quests, "portals": portals, "character": character, "dialogue": dialogue}
 	for name: String in shows:
 		for dimensions in [Vector2i(1600, 900), Vector2i(640, 480)]:
 			root.size = dimensions

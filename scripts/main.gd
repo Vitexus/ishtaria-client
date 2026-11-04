@@ -104,6 +104,7 @@ var _placed: Node
 var _magic: Node
 var _achievements: Node
 var _achievements_panel: CanvasLayer
+var _character_panel: CanvasLayer
 var _achievement_toast: CanvasLayer
 var _love: Node
 var _love_overlay: Node3D
@@ -395,10 +396,17 @@ func _ready() -> void:
 	add_child(_achievements)
 	_achievements_panel = preload("res://scripts/achievements_panel.gd").new()
 	add_child(_achievements_panel)
+	_character_panel = preload("res://scripts/character_panel.gd").new()
+	add_child(_character_panel)
+	_character_panel.achievements_requested.connect(func() -> void:
+		_character_panel.close()
+		_open_achievements()
+	)
 	_achievement_toast = preload("res://scripts/achievement_toast.gd").new()
 	_achievement_toast.audio = _audio
 	add_child(_achievement_toast)
 	_achievements.loaded.connect(_achievements_panel.show_data)
+	_achievements.loaded.connect(_character_panel.show_data)
 	_achievements.unlocked.connect(_achievement_toast.show_achievement)
 	_social = preload("res://scripts/social.gd").new()
 	add_child(_social)
@@ -478,8 +486,12 @@ func _ready() -> void:
 	# Achievements of datadisks are named by the disk's strings.
 	_achievements.story = _story
 	_achievements_panel.texts = _achievements.text
+	_character_panel.texts = _achievements.text
 	_achievement_toast.texts = _achievements.text
-	_story.strings_changed.connect(func() -> void: _achievements_panel.show_data(_achievements.data))
+	_story.strings_changed.connect(func() -> void:
+		_achievements_panel.show_data(_achievements.data)
+		_character_panel.show_data(_achievements.data)
+	)
 	_dialogue = preload("res://scripts/dialogue_panel.gd").new()
 	_dialogue.story = _story
 	_dialogue.music_enabled = _audio.enabled
@@ -546,6 +558,7 @@ func _ready() -> void:
 	_environment.water_changed.connect(_refresh_minimap_water)
 	add_child(_minimap)
 	_hud.inventory_requested.connect(_survival.open)
+	_hud.character_requested.connect(_open_character)
 	_hud.connection_requested.connect(_toggle_connection_panel)
 	add_child(_survival)
 	add_child(_crafting)
@@ -931,6 +944,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 		_story.stop()
 		_dialogue.close()
 		_quest_log.hide()
+		_character_panel.hide()
 		_quest_indicator.set_quests([])
 		if _tablet != null:
 			_tablet.hide()
@@ -955,6 +969,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 	if not was_empty and profile.get("life", {}).get("uuid", "") == _player_profile.get("life", {}).get("uuid", ""):
 		previous_level = int(_player_profile.get("stats", {}).get("level", 0))
 	_player_profile = profile.duplicate(true)
+	_character_panel.set_profile(_player_profile)
 	_environment.auth_token = _session.token()
 	_controls.set_sitting(profile.get("sitting") == true)
 	_story.player_name = str(profile.get("username", ""))
@@ -2505,12 +2520,21 @@ func _set_render_origin(origin: Vector3) -> void:
 	_environment.set_render_origin(_controls._anchor_metres if origin != Vector3.ZERO else [])
 
 func _game_ui_open() -> bool:
-	return _chat.is_typing() or _connection_panel.visible or _trade_panel.visible or _creator.visible or _survival.visible or _crafting.visible or _control_settings.visible or _portals.visible or _friends.visible or _escape_menu.visible or _achievements_panel.visible or _dialogue.visible or _quest_log.visible or (_tablet != null and _tablet.visible)
+	return _chat.is_typing() or _connection_panel.visible or _trade_panel.visible or _creator.visible or _survival.visible or _crafting.visible or _control_settings.visible or _portals.visible or _friends.visible or _escape_menu.visible or _achievements_panel.visible or _character_panel.visible or _dialogue.visible or _quest_log.visible or (_tablet != null and _tablet.visible)
 
 func _open_friends() -> void:
 	_escape_menu.close()
 	_controls.release_mouse()
 	_friends.open()
+
+## The window of the character: its statistics and a summary of its achievements.
+func _open_character() -> void:
+	if _session.token().is_empty() or _game_ui_open():
+		return
+	_controls.release_mouse()
+	_achievements.refresh()
+	_character_panel.set_profile(_player_profile)
+	_character_panel.open()
 
 func _open_achievements() -> void:
 	_escape_menu.close()
@@ -2790,6 +2814,8 @@ func _escape_pressed() -> void:
 		_escape_menu.close()
 	elif _achievements_panel.visible:
 		_achievements_panel.close()
+	elif _character_panel.visible:
+		_character_panel.close()
 	elif _survival.visible:
 		_survival.hide()
 	elif _crafting.visible:
@@ -2823,6 +2849,10 @@ func _input(event: InputEvent) -> void:
 		if event.pressed and not event.echo:
 			_controls.release_mouse()
 			_crafting.open()
+		get_viewport().set_input_as_handled()
+	elif _controls.matches_action(event, _controls.CHARACTER) and _controls.active and not _game_ui_open() and not _session.token().is_empty():
+		if event.pressed and not event.echo:
+			_open_character()
 		get_viewport().set_input_as_handled()
 	elif _controls.matches_action(event, _controls.QUEST_LOG) and _controls.active and not _game_ui_open() and _story.is_running():
 		if event.pressed and not event.echo:

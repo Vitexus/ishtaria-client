@@ -109,6 +109,9 @@ test-sky-ships:
 test-default-server:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/default_server.gd
 
+test-character-panel:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/character_panel.gd
+
 test-loading-bar:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/loading_bar.gd
 
