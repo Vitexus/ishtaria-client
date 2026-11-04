@@ -59,8 +59,9 @@ const WATER_MAP_PIXELS := 256
 const WATER_MAP_EXTENT_M := 420.0
 const WATER_MAP_EXTENT_MAX_M := 3500.0
 ## Water on the minimap: the same colour the map legend shows.
-## The largest side of a footprint the minimap draws as a building (the wall of Uruk, 2.5 km across, is none).
-const MAP_MAX_FOOTPRINT_M := 150.0
+## The largest side of a footprint the minimap draws as a building: a wall, a precinct, a palace court or a market is none, the map
+## picture of the place shows those.
+const MAP_MAX_FOOTPRINT_M := 60.0
 const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 ## Built / tilled ground from a datadisk clear mask (streets, houses, fields).
 const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
