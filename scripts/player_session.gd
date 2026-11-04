@@ -8,7 +8,7 @@ signal busy_changed(busy: bool)
 signal obituary_received(obituary: Dictionary)
 signal grave_changed(grave: Dictionary)
 signal position_changed(position: Dictionary, moving: bool, sitting: bool)
-## The server says whether the character is in water (swimming, and drowning until a dry shore).
+## The server says whether the character is in deep water (swimming, which tires; drowning only at low stamina).
 signal swimming_changed(swimming: bool)
 ## The vehicle (a place id) the character is aboard, empty when none; sent with every move acknowledgement.
 signal vehicle_changed(id: String)

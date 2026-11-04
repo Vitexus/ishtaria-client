@@ -45,6 +45,8 @@ const DISK_CLIPS := {
 	"run": "Run",
 	"jump": "Jump",
 	"sit": "Sit",
+	"sit2": "Sit2",
+	"sit3": "Sit3",
 	"swim": "Swim",
 	"die": "Die",
 	"die2": "Die2",

@@ -5,11 +5,15 @@ extends Node3D
 const PLANET_RADIUS := 6371.0 # scene units = km in this preview
 const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
 const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
+const LifeOrdinal := preload("res://scripts/life_ordinal.gd")
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
 const PendingActions := preload("res://scripts/ui/pending_actions.gd")
+const GroundLayers := preload("res://scripts/ground_layers.gd")
 const MIN_SERVER_VERSION := "0.1.0"
 const APPROACH_SECONDS := 14.0
+## Stamina at or below which a character in deep water drowns (mirrors the server's `DROWNING_STAMINA`).
+const DROWNING_STAMINA := 20.0
 ## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
 ## looking straight down, so that the plan of a city (streets, walls) can be seen before the landing.
 const APPROACH_FALL_SHARE := 0.4
@@ -73,10 +77,14 @@ var _audio: Node
 var _hud: CanvasLayer
 var _system_messages: CanvasLayer
 var _disk_cover: CanvasLayer
+var _loading: CanvasLayer
+## The furthest the loading bar has got in this approach: a detail disk that is built again must not pull it back.
+var _loading_peak := 0.0
 var _session: Node
 var _creator: CanvasLayer
 ## The model a story datadisk draws for its players, fetched when the world announces it.
 var _player_model: Node
+var _life_ordinal: Node
 var _player_button: Button
 var _sign_out_button: Button
 var _player_profile: Dictionary = {}
@@ -93,6 +101,7 @@ var _achievements_panel: CanvasLayer
 var _achievement_toast: CanvasLayer
 var _love: Node
 var _love_overlay: Node3D
+var _sky_ships: Node3D
 var _known_spells: Array = []
 var _cast_target: Dictionary = {}
 var _merchant_name := ""
@@ -162,6 +171,7 @@ var _connection_title: Label
 var _connection_dividers: Array[Control] = []
 var _environment: Node3D
 var _environment_request: HTTPRequest
+var _rivers_request: HTTPRequest
 var _world_metadata: Dictionary = {}
 var _water_material: ShaderMaterial
 var _controls: Node3D
@@ -195,9 +205,9 @@ func _ready() -> void:
 	_terrain_material.shader = preload("res://scripts/planet_surface.gdshader")
 	planet.material_override = _terrain_material
 	# Poly Haven CC0 ground layers for the local detail disk (assets/terrain, credited in the README).
-	for layer: String in ["grass_ground", "forest_ground_06", "gravelly_sand", "gravel_ground_01", "gray_rocks"]:
-		var parameter: String = {"grass_ground": "tex_grass", "forest_ground_06": "tex_soil", "gravelly_sand": "tex_sand", "gravel_ground_01": "tex_gravel", "gray_rocks": "tex_rock"}[layer]
-		_terrain_material.set_shader_parameter(parameter, load("res://assets/terrain/%s/%s_diff_1k.jpg" % [layer, layer]))
+	# Every layer of the catalogue waits in the material; the biomes' table is the default until /world names a ground set.
+	GroundLayers.load_textures(_terrain_material)
+	GroundLayers.apply(_terrain_material, GroundLayers.table_for("", null))
 	_terrain_material.set_shader_parameter("tex_rock_normal", load("res://assets/terrain/gray_rocks/gray_rocks_nor_gl_1k.jpg"))
 	# 0 A.D. Persia albedos (CC BY-SA) blended into dry sand/soil and rock — see assets/zeroad/terrain/.
 	_terrain_material.set_shader_parameter("tex_sand_persia", load("res://assets/zeroad/terrain/desert_dirt_persia_1.png"))
@@ -206,10 +216,6 @@ func _ready() -> void:
 	_terrain_material.set_shader_parameter("persia_blend", 0.35)
 	_terrain_material.set_shader_parameter("use_persia_textures", true)
 	_terrain_material.set_shader_parameter("use_textures", true)
-	# Ground sets of datadisks (the manifest's `ground`): the layers wait here until /world names one.
-	for layer: String in ["grass_path_2", "dry_mud_field_001", "aerial_sand", "dirt_aerial_03", "mud_cracked_dry_03"]:
-		var parameter: String = {"grass_path_2": "tex_alluvial_steppe", "dry_mud_field_001": "tex_alluvial_silt", "aerial_sand": "tex_alluvial_sand", "dirt_aerial_03": "tex_alluvial_dirt", "mud_cracked_dry_03": "tex_alluvial_cracked"}[layer]
-		_terrain_material.set_shader_parameter(parameter, load("res://assets/terrain/%s/%s_diff_1k.jpg" % [layer, layer]))
 	add_child(planet)
 	var ocean := MeshInstance3D.new()
 	ocean.name = "Ocean"
@@ -301,11 +307,14 @@ func _ready() -> void:
 	add_child(_system_messages)
 	_disk_cover = preload("res://scripts/disk_cover.gd").new()
 	add_child(_disk_cover)
+	_loading = preload("res://scripts/loading_overlay.gd").new()
+	add_child(_loading)
 	_session = preload("res://scripts/player_session.gd").new()
 	_session.profile_changed.connect(_on_player_profile)
 	_session.busy_changed.connect(func(busy: bool) -> void:
 		if not busy:
 			_sync_flag())
+	_controls.seat_finder = _find_seat
 	_session.position_changed.connect(_on_player_position)
 	_session.swimming_changed.connect(_on_swimming_changed)
 	_session.vehicle_changed.connect(_on_vehicle_changed)
@@ -430,6 +439,11 @@ func _ready() -> void:
 	_love_overlay.top_level = true
 	_environment.add_child(_love_overlay)
 	_love_overlay.setup(_love, _environment)
+	_sky_ships = preload("res://scripts/sky_ships.gd").new()
+	_sky_ships.top_level = true
+	# Like the other players: the environment frees unmarked children when it is cleared on connecting.
+	_sky_ships.set_meta("persistent", true)
+	_environment.add_child(_sky_ships)
 	_survival.learn_requested.connect(_learn_scroll)
 	_survival.cast_requested.connect(_cast_spell)
 	_remote_players = preload("res://scripts/remote_players.gd").new()
@@ -453,6 +467,7 @@ func _ready() -> void:
 	_social.busy_changed.connect(_friends.pending.set_busy)
 	_social.event_received.connect(_on_friend_event)
 	_story = preload("res://scripts/story_client.gd").new()
+	_sky_ships.setup(_environment, _story)
 	add_child(_story)
 	# Achievements of datadisks are named by the disk's strings.
 	_achievements.story = _story
@@ -542,6 +557,9 @@ func _ready() -> void:
 	_player_model = DISK_PLAYER_MODEL.new()
 	_player_model.changed.connect(_on_player_model_changed)
 	add_child(_player_model)
+	_life_ordinal = LifeOrdinal.new()
+	add_child(_life_ordinal)
+	_life_ordinal.font_changed.connect(func() -> void: _hud.refresh_labels())
 	_build_connection_controls()
 	# Per-host default (never hardcoded to a public world): desktop `ISHTARIA_SERVER_URL`, browser
 	# `window.ISHTARIA_SERVER_URL` from ishtaria-config.js (webserver /etc), then `?server=` on the page.
@@ -975,6 +993,7 @@ func _on_player_profile(profile: Dictionary) -> void:
 		if was_empty or identity_changed:
 			_landing_prologue = true
 		_story.start_session(_session.server_url, _session.token())
+		_sky_ships.refresh()
 	if playable_changed:
 		_apply_story_playable(profile)
 	if not identity_changed:
@@ -1266,6 +1285,8 @@ func _disconnect_server() -> void:
 	_disconnect_button.disabled = true
 	_system_messages.apply([])
 	_disk_cover.dismiss()
+	_loading.forget()
+	_loading.hide_progress()
 	_set_status("Disconnected")
 
 func _refresh_world() -> void:
@@ -1323,10 +1344,12 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 	_system_messages.apply(world.get("messages", []))
 	_set_status("%s | %s | seed %s", [world.server_name, world.ruleset, world.get("seed", "-")])
 	_world_metadata = world.duplicate(true)
-	_terrain_material.set_shader_parameter("use_alluvial", _disk_ground(world) == "alluvial")
+	GroundLayers.apply(_terrain_material, GroundLayers.table_for(_disk_ground(world), _disk_ground_layers(world)))
 	var given: Array = DISK_PLAYER_MODEL.announced(world.get("datadisks", []))
 	_player_model.use(_server_url, given[0], given[1], given[2])
+	_life_ordinal.use(_server_url, world.get("datadisks", []))
 	_creator.lock_character(_disk_player_character(world))
+	_request_rivers(world)
 	_load_terrain(world)
 	if _terrain_loaded:
 		_load_environment()
@@ -1336,12 +1359,34 @@ func _on_world_received(result: int, response_code: int, _headers: PackedStringA
 		_audio.play("confirmation")
 		_connected_world = world.server_name
 		_disk_cover.present(_server_url, world.get("datadisks", []))
+		_loading.use(_server_url, world.get("datadisks", []))
 		_area_music.set_ambient(world.get("datadisks", []))
 		if _history.record_connection(_server_url, world) != OK:
 			_set_feedback("Could not save server history")
 		print("Connected to Ishtaria server %s (version %s): world %s, ruleset %s, seed %s" % [_server_url, server_version, world.server_name, world.ruleset, world.get("seed", "-")])
 	if _startup_pending and _player_profile.is_empty():
 		_open_player()
+
+## The camera has arrived above the landing site and waits for the world: the bar shows how many of the five things
+## it needs are there (terrain strip, environment, scenery, avatar, the local ground); the strip counts by the bytes
+## already received and the ground by the rows of it computed.
+func _show_loading_progress() -> void:
+	var strip := 0.0
+	if _terrain_loaded:
+		strip = 1.0
+	elif is_instance_valid(_terrain_request) and _terrain_request.get_body_size() > 0:
+		strip = float(_terrain_request.get_downloaded_bytes()) / float(_terrain_request.get_body_size())
+	var done := strip
+	done += 1.0 if not _environment.environment.is_empty() else 0.0
+	done += 1.0 if _environment.objects_loaded else 0.0
+	done += 1.0 if is_instance_valid(_controls.avatar) else 0.0
+	done += _environment.detail_fraction()
+	# From the moment the planet is drawn until the world is ready; when that is quick, the bar only runs through.
+	if done >= 5.0 - 0.0001 and _environment.objects_loaded and not _environment.is_detail_pending():
+		_loading.finish()
+	else:
+		_loading_peak = maxf(_loading_peak, minf(done, 4.99) / 5.0)
+		_loading.show_progress(_loading_peak)
 
 ## The model of the players arrived (or was withdrawn): everything that draws one is drawn again.
 func _on_player_model_changed() -> void:
@@ -1383,6 +1428,13 @@ func _disk_ground(world: Dictionary) -> String:
 			return disk.ground
 	return ""
 
+## The ground layers a datadisk names per biome (`ground_layers` of its manifest); the first disk that has them wins.
+func _disk_ground_layers(world: Dictionary) -> Variant:
+	for disk: Variant in world.get("datadisks", []):
+		if disk is Dictionary and disk.get("ground_layers") is Dictionary:
+			return disk.ground_layers
+	return null
+
 func _load_terrain(world: Dictionary) -> void:
 	var size: Variant = world.get("face_size")
 	if _terrain_loaded or is_instance_valid(_terrain_request) or not (size is int or size is float):
@@ -1396,7 +1448,6 @@ func _load_terrain(world: Dictionary) -> void:
 	_terrain_request.body_size_limit = 16 * 1024 * 1024
 	_terrain_request.request_completed.connect(_on_terrain_received.bind(_connection_generation, int(size)))
 	add_child(_terrain_request)
-	_disk_cover.track_download(_terrain_request)
 	if _terrain_request.request(_server_url + "/world/heightmap") != OK:
 		_terrain_request.queue_free()
 		_terrain_request = null
@@ -1458,6 +1509,36 @@ func _on_environment_received(result: int, code: int, _headers: PackedStringArra
 	if _environment.apply_environment(JSON.parse_string(body.get_string_from_utf8()), sha256, seed):
 		_environment.show_region(_surface_direction)
 
+## The rivers a datadisk tells (the Euphrates, the Tigris and their network): a few hundred kilobytes, fetched once per world
+## and carved and drawn like the server's. A world without a datadisk has none and asks for nothing.
+func _request_rivers(world: Dictionary) -> void:
+	if is_instance_valid(_rivers_request):
+		_rivers_request.cancel_request()
+		_rivers_request.queue_free()
+	_rivers_request = null
+	if not world.get("datadisks") is Array or world.datadisks.is_empty():
+		_environment.set_disk_rivers([])
+		return
+	_rivers_request = HTTPRequest.new()
+	_rivers_request.timeout = 30.0
+	_rivers_request.max_redirects = 0
+	_rivers_request.body_size_limit = 8 * 1024 * 1024
+	_rivers_request.request_completed.connect(_on_rivers_received.bind(_connection_generation))
+	add_child(_rivers_request)
+	if _rivers_request.request(_server_url + "/world/rivers") != OK:
+		_rivers_request.queue_free()
+		_rivers_request = null
+
+func _on_rivers_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, generation: int) -> void:
+	if generation != _connection_generation or not _connection_enabled:
+		return
+	if is_instance_valid(_rivers_request):
+		_rivers_request.queue_free()
+	_rivers_request = null
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	_environment.set_disk_rivers(JSON.parse_string(body.get_string_from_utf8()))
+
 func _start_approach(position: Variant) -> bool:
 	if not position is Dictionary:
 		return false
@@ -1476,6 +1557,8 @@ func _start_approach(position: Variant) -> bool:
 	_approach_up = _camera.basis.y
 	_approach_rotation = Quaternion(_approach_start.normalized(), _surface_direction)
 	_approach_elapsed = 0.0
+	_loading_peak = 0.0
+	_loading.begin()
 	_settle_elapsed = -1.0
 	_landing_prologue = true
 	_environment.show_region(_surface_direction)
@@ -1627,11 +1710,11 @@ func _interact() -> void:
 		_harvest_nearby()
 		return
 	_controls.release_mouse()
-	if npc.get("shop") is String and _trading.is_running():
-		# A merchant opens the shop instead of a conversation.
-		_merchant_name = str(_story.text(npc.name_key))
-		_trading.open_shop(npc.id)
-		return
+	# A merchant talks first and the conversation offers a Trade button that opens the shop. One the player has struck
+	# (a red health bar) talks without it: the paid apology that ends the grudge is offered in the conversation only.
+	var health: Variant = npc.get("health")
+	var angry: bool = health is Dictionary and str(health.get("relation", "")) == "foe"
+	_dialogue.shop_npc_id = str(npc.id) if npc.get("shop") is String and _trading.is_running() and not angry else ""
 	_story.start(npc.id)
 
 ## The player read an inscription; an achievement it earns arrives as an event.
@@ -1644,16 +1727,20 @@ func _on_dialogue_choice(npc_id: String, seq: int, choice: int) -> void:
 	_pending_apology = choice == 65000
 	_story.choose(npc_id, seq, choice)
 
-## An NPC that scooped ground loot offers trade from the dialogue panel.
+## The Trade button of the dialogue panel: a merchant opens its shop; an NPC that scooped ground loot offers that.
 func _on_npc_trade(npc_id: String) -> void:
 	if not _trading.is_running():
 		return
+	var merchant: bool = _dialogue.shop_npc_id == npc_id
 	_dialogue.close()
 	var npc: Dictionary = _environment.nearest_npc(_player_metres, TALK_REACH_M * 2.0) if _player_metres != Vector3.ZERO else {}
 	if npc.get("id") == npc_id and npc.get("name_key") is String:
 		_merchant_name = str(_story.text(npc.name_key))
 	else:
 		_merchant_name = tr("Trade")
+	if merchant:
+		_trading.open_shop(npc_id)
+		return
 	_trading.open_found(npc_id)
 
 func _on_dialogue_changed(reply: Dictionary) -> void:
@@ -1895,6 +1982,10 @@ func _harvest_nearby() -> void:
 		_session.sit(target.id)
 		return
 	_session.harvest(target.id)
+
+## The rock the character sits on, for the seated pose (see `character_controls.gd`).
+func _find_seat() -> Dictionary:
+	return _environment.rock_seat(_player_metres, HARVEST_REACH_M)
 
 func _hand_is_pickaxe() -> bool:
 	return str(_player_profile.get("equipment", {}).get("hand", "")) == "pickaxe"
@@ -2170,8 +2261,12 @@ func _update_prompt() -> void:
 		_toast.set_prompt(tr("E: Get off at the shore"))
 		return
 	if _swimming and _controls.active:
-		# Whoever is in water drowns until they reach a dry shore; nothing else matters now.
-		_toast.set_prompt(tr("You are swimming and drowning: get to the shore!"))
+		# Swimming tires; with the stamina low (the server's `DROWNING_STAMINA`) the character drowns until it recovers.
+		var stamina := float(_player_profile.get("stats", {}).get("stamina", 100.0))
+		if stamina <= DROWNING_STAMINA:
+			_toast.set_prompt(tr("You are drowning: get to the shore!"))
+		else:
+			_toast.set_prompt(tr("You are swimming: it tires you, mind your stamina"))
 		return
 	if _controls.active and not _game_ui_open() and _environment.objects_loaded and _player_metres != Vector3.ZERO:
 		var pile: Dictionary = _environment.nearest_loot(_player_metres, 3.0)
@@ -2454,6 +2549,10 @@ func _on_friend_event(event: Dictionary) -> void:
 		_on_love_event(event)
 	elif event.kind == "achievement":
 		_achievements.announce(event.subject)
+	elif event.kind == "sky_flyover":
+		# A character told of the gods' ships: one flies low over the player. Its sound follows the sound setting.
+		_sky_ships.sound_enabled = _audio.enabled
+		_sky_ships.flyover(str(event.subject), _player_metres, int(event.id))
 
 ## Love minigame: hearts / zones / humanization of Enkidu.
 func _on_love_event(event: Dictionary) -> void:
@@ -2826,6 +2925,7 @@ func _process(delta: float) -> void:
 		return
 	_area_music.set_target({}, 0.0)
 	if _surface_direction == Vector3.ZERO:
+		_loading.hide_progress()
 		_camera.near = 1.0
 		_camera.far = PLANET_RADIUS * 10.0
 		_yaw += delta * 0.1
@@ -2838,6 +2938,7 @@ func _process(delta: float) -> void:
 		_settle_into_view(delta)
 		return
 	_approach_elapsed = minf(_approach_elapsed + delta, APPROACH_SECONDS)
+	_show_loading_progress()
 	var time_share := _approach_elapsed / APPROACH_SECONDS
 	var fall := smoothstep(0.0, 1.0, minf(time_share / APPROACH_FALL_SHARE, 1.0))
 	var descent := smoothstep(0.0, 1.0, clampf((time_share - APPROACH_FALL_SHARE) / (1.0 - APPROACH_FALL_SHARE), 0.0, 1.0))
@@ -2858,7 +2959,7 @@ func _process(delta: float) -> void:
 	_camera.look_at(Vector3.ZERO, rotation * _approach_up)
 	_sky.set_altitude((distance - PLANET_RADIUS) * 1000.0)
 	_sky.set_observer(direction)
-	if _approach_elapsed == APPROACH_SECONDS and _terrain_loaded and not _environment.environment.is_empty() and _environment.objects_loaded and is_instance_valid(_controls.avatar):
+	if _approach_elapsed == APPROACH_SECONDS and _terrain_loaded and not _environment.environment.is_empty() and _environment.objects_loaded and not _environment.is_detail_pending() and is_instance_valid(_controls.avatar):
 		# The view behind the character is not switched to: the camera flies there (`_settle_into_view`) and only then do the controls start.
 		_set_render_origin(_controls.avatar.position)
 		_settle_from = _camera.transform

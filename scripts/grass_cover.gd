@@ -84,7 +84,7 @@ func _density(point: Vector3) -> float:
 
 ## Worker-safe (reads terrain data only). Returns {chunk key: PackedFloat32Array of MultiMesh buffer rows},
 ## 16 floats per tuft: a 3x4 transform and an RGBA tint, positioned relative to `anchor` (metres).
-func compute(unit: Vector3, anchor: Array) -> Dictionary:
+func compute(unit: Vector3, anchor: Array, lush_field := {}, part := 0, parts := 1, generation := -1, notify := Callable()) -> Dictionary:
 	var radius_m: float = surface.RADIUS * 1000.0
 	var axis := 0
 	for index in 3:
@@ -97,7 +97,19 @@ func compute(unit: Vector3, anchor: Array) -> Dictionary:
 	var centre_b := float(unit[plane_b]) * radius_m
 	var salt := int(str(surface.environment.seed).hash()) ^ (axis * 7919)
 	var gathered := {}
-	for cell_a in range(int(floor((centre_a - HALF_M) / CELL_M)), int(floor((centre_a + HALF_M) / CELL_M)) + 1):
+	# `part` of `parts` takes a band of the cell columns, so that several workers can share the disk; the bands
+	# joined in order (`merge`) hold the tufts in the order one worker would have gathered them.
+	var first_a := int(floor((centre_a - HALF_M) / CELL_M))
+	var columns := int(floor((centre_a + HALF_M) / CELL_M)) + 1 - first_a
+	var band_first := first_a + columns * part / parts
+	var band_last := first_a + columns * (part + 1) / parts
+	if notify.is_valid():
+		notify.call(band_last - band_first, 0)
+	for cell_a in range(band_first, band_last):
+		if generation >= 0 and generation != surface._detail_generation:
+			return {}
+		if notify.is_valid():
+			notify.call(0, 1)
 		for cell_b in range(int(floor((centre_b - HALF_M) / CELL_M)), int(floor((centre_b + HALF_M) / CELL_M)) + 1):
 			var bits := _mix(cell_a, cell_b, salt)
 			var plane_x := (float(cell_a) + float(bits & 255) / 256.0) * CELL_M
@@ -110,41 +122,87 @@ func compute(unit: Vector3, anchor: Array) -> Dictionary:
 				continue
 			var point := Vector3(direction[0], direction[1], direction[2])
 			var density := _density(point)
-			if density <= 0.0 or float((bits >> 16) & 255) / 256.0 >= density:
+			# Near water the cover is thick: grass grows on any dry ground within 500 m of it, and the cells close to
+			# the water carry one or two more tufts each (`lush`, as the shader's green ground).
+			var lush := _lush_at(point, lush_field)
+			density = maxf(density, lush)
+			if density <= 0.0:
 				continue
-			var height: float = surface.elevation64(direction)
-			var water: float = surface._detail_water_km(direction, point, height)
-			if is_finite(water) and water >= height - 0.0001:
-				continue
-			var east: Array = _direction(axis, side, plane_a, plane_b, plane_x + SLOPE_SAMPLE_M, plane_y, radius_m)
-			var north: Array = _direction(axis, side, plane_a, plane_b, plane_x, plane_y + SLOPE_SAMPLE_M, radius_m)
-			if east.is_empty() or north.is_empty():
-				continue
-			var rise_east: float = (float(surface.elevation64(east)) - height) * 1000.0 / SLOPE_SAMPLE_M
-			var rise_north: float = (float(surface.elevation64(north)) - height) * 1000.0 / SLOPE_SAMPLE_M
-			if Vector2(rise_east, rise_north).length() > MAX_SLOPE:
-				continue
-			var variation := float((bits >> 24) & 255) / 255.0
-			var scale := (0.55 + 0.9 * variation) * 0.001
-			var up := point
-			var tangent := up.cross(Vector3.UP if absf(up.y) < 0.9 else Vector3.RIGHT).normalized()
-			var basis := Basis(up, float(bits & 1023) / 1023.0 * TAU) * Basis(tangent, up, tangent.cross(up))
-			basis = basis.scaled_local(Vector3(scale, scale, scale))
-			var position: Vector3 = surface._position_from(anchor, [direction[0] * (radius_m + height * 1000.0), direction[1] * (radius_m + height * 1000.0), direction[2] * (radius_m + height * 1000.0)])
-			var shade := 0.75 + 0.5 * float((bits >> 4) & 255) / 255.0
-			var key := Vector2i(int(floor(plane_x / CHUNK_M)), int(floor(plane_y / CHUNK_M)))
-			if not gathered.has(key):
-				gathered[key] = []
-			(gathered[key] as Array).append_array([
-				basis.x.x, basis.y.x, basis.z.x, position.x,
-				basis.x.y, basis.y.y, basis.z.y, position.y,
-				basis.x.z, basis.y.z, basis.z.z, position.z,
-				shade, shade, shade * (0.9 + 0.2 * variation), 1.0,
-			])
+			var tufts_here := 1 + (1 if lush > 0.35 else 0) + (1 if lush > 0.8 else 0)
+			for extra in tufts_here:
+				var drawn := bits if extra == 0 else _mix(cell_a, cell_b, salt + 101 * extra)
+				if float((drawn >> 16) & 255) / 256.0 >= density:
+					continue
+				_add_tuft(gathered, drawn, extra, plane_x, plane_y, axis, side, plane_a, plane_b, radius_m, anchor)
 	var chunks := {}
 	for key: Vector2i in gathered:
 		chunks[key] = PackedFloat32Array(gathered[key])
 	return chunks
+
+## Joins the bands `compute` returned, in band order, into one chunk dictionary.
+static func merge(bands: Array) -> Dictionary:
+	var joined := {}
+	for band: Variant in bands:
+		if not band is Dictionary:
+			continue
+		for key: Vector2i in band:
+			var rows: PackedFloat32Array = joined.get(key, PackedFloat32Array())
+			rows.append_array(band[key])
+			joined[key] = rows
+	return joined
+
+## How green the ground is at a point, 0 to 1, from the disk's `lush_field` (see surface_environment.gd `_lush_colors`).
+func _lush_at(point: Vector3, field: Dictionary) -> float:
+	if field.is_empty():
+		return 0.0
+	var radius_km: float = field.radius_km
+	var segments: int = field.segments
+	var column := int(round((point.dot(field.tangent) * surface.RADIUS / radius_km * 0.5 + 0.5) * segments))
+	var row := int(round((point.dot(field.forward) * surface.RADIUS / radius_km * 0.5 + 0.5) * segments))
+	if column < 0 or row < 0 or column > segments or row > segments:
+		return 0.0
+	return (field.colors as PackedColorArray)[row * (segments + 1) + column].r
+
+## One tuft of the cell (`extra` > 0: a further one in the same cell, jittered by its own bits).
+func _add_tuft(gathered: Dictionary, bits: int, extra: int, cell_x: float, cell_y: float, axis: int, side: float, plane_a: int, plane_b: int, radius_m: float, anchor: Array) -> void:
+	var plane_x := cell_x
+	var plane_y := cell_y
+	if extra > 0:
+		plane_x += (float(bits & 255) / 256.0 - 0.5) * CELL_M
+		plane_y += (float((bits >> 8) & 255) / 256.0 - 0.5) * CELL_M
+	var direction := _direction(axis, side, plane_a, plane_b, plane_x, plane_y, radius_m)
+	if direction.is_empty():
+		return
+	var point := Vector3(direction[0], direction[1], direction[2])
+	var height: float = surface.elevation64(direction)
+	var water: float = surface._detail_water_km(direction, point, height)
+	if is_finite(water) and water >= height - 0.0001:
+		return
+	var east: Array = _direction(axis, side, plane_a, plane_b, plane_x + SLOPE_SAMPLE_M, plane_y, radius_m)
+	var north: Array = _direction(axis, side, plane_a, plane_b, plane_x, plane_y + SLOPE_SAMPLE_M, radius_m)
+	if east.is_empty() or north.is_empty():
+		return
+	var rise_east: float = (float(surface.elevation64(east)) - height) * 1000.0 / SLOPE_SAMPLE_M
+	var rise_north: float = (float(surface.elevation64(north)) - height) * 1000.0 / SLOPE_SAMPLE_M
+	if Vector2(rise_east, rise_north).length() > MAX_SLOPE:
+		return
+	var variation := float((bits >> 24) & 255) / 255.0
+	var scale := (0.55 + 0.9 * variation) * 0.001
+	var up := point
+	var tangent := up.cross(Vector3.UP if absf(up.y) < 0.9 else Vector3.RIGHT).normalized()
+	var basis := Basis(up, float(bits & 1023) / 1023.0 * TAU) * Basis(tangent, up, tangent.cross(up))
+	basis = basis.scaled_local(Vector3(scale, scale, scale))
+	var position: Vector3 = surface._position_from(anchor, [direction[0] * (radius_m + height * 1000.0), direction[1] * (radius_m + height * 1000.0), direction[2] * (radius_m + height * 1000.0)])
+	var shade := 0.75 + 0.5 * float((bits >> 4) & 255) / 255.0
+	var key := Vector2i(int(floor(plane_x / CHUNK_M)), int(floor(plane_y / CHUNK_M)))
+	if not gathered.has(key):
+		gathered[key] = []
+	(gathered[key] as Array).append_array([
+		basis.x.x, basis.y.x, basis.z.x, position.x,
+		basis.x.y, basis.y.y, basis.z.y, position.y,
+		basis.x.z, basis.y.z, basis.z.z, position.z,
+		shade, shade, shade * (0.9 + 0.2 * variation), 1.0,
+	])
 
 ## The planet-fixed unit direction of a point of the plane lattice, or empty when it is off the sphere.
 func _direction(axis: int, side: float, plane_a: int, plane_b: int, plane_x: float, plane_y: float, radius_m: float) -> Array:

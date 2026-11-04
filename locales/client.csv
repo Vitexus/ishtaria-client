@@ -114,7 +114,7 @@ Inventory %s / %s,Inventory %s / %s,Inventář %s / %s
 %s kcal,%s kcal,%s kcal
 Player is dead,Player is dead,Hráč je mrtvý
 You have died,You have died,Zemřeli jste
-Your journey ends here, %s.,Your journey ends here, %s.,Tvá cesta zde končí, %s.
+"Your journey ends here, %s.","Your journey ends here, %s.","Tvá cesta zde končí, %s."
 You were slain in combat.,You were slain in combat.,Byl jsi zabit v boji.
 The quest returns to its beginning — try again,The quest returns to its beginning — try again,Výprava se vrací na začátek — zkus to znovu
 You fell to your death.,You fell to your death.,Zahynul jsi pádem.
@@ -626,7 +626,8 @@ Opens the article in your web browser,Opens the article in your web browser,Otev
 Open this page in your web browser?,Open this page in your web browser?,Otevřít tuto stránku ve webovém prohlížeči?
 Open in browser,Open in browser,Otevřít v prohlížeči
 Active quest,Active quest,Aktivní úkol
-You are swimming and drowning: get to the shore!,You are swimming and drowning: get to the shore!,Plavete a topíte se: doplavte ke břehu!
+You are drowning: get to the shore!,You are drowning: get to the shore!,Topíš se: doplav ke břehu!
+You are swimming: it tires you, mind your stamina,You are swimming: it tires you, mind your stamina,Plaveš: unavuje tě to, hlídej si výdrž
 Left hand,Left hand,Levá ruka
 Right hand,Right hand,Pravá ruka
 Worn — repair at a blacksmith,Worn — repair at a blacksmith,Opotřebené — opravte u kováře
@@ -697,3 +698,4 @@ Fill,Fill,Naplnit
 You have no waterskin,You have no waterskin,Nemáš měch na vodu
 The waterskin is empty,The waterskin is empty,Měch na vodu je prázdný
 You are not thirsty,You are not thirsty,Nemáš žízeň
+Loading the world,Loading the world,Načítání světa

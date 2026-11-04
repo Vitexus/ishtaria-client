@@ -5,6 +5,7 @@ signal inventory_requested
 signal connection_requested
 
 const ICONS := "res://assets/kenney/game-icons/"
+const LifeOrdinal := preload("res://scripts/life_ordinal.gd")
 const ITEM_ICONS := preload("res://scripts/item_icons.gd")
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
@@ -353,6 +354,10 @@ func clear_player() -> void:
 	_update_hands()
 	_update_labels()
 
+## Draws the labels again, for example when the font of the datadisk's numerals has arrived.
+func refresh_labels() -> void:
+	_update_labels()
+
 func set_player(profile: Dictionary) -> bool:
 	if not profile.get("username") is String or not profile.get("stats") is Dictionary:
 		return false
@@ -408,8 +413,10 @@ func _update_labels() -> void:
 	for key in _labels:
 		_labels[key].text = tr(METERS[key][0])
 		meters[key].tooltip_text = tr(METERS[key][0])
-	player_name.text = _player.username if not _player.is_empty() else tr("Not signed in")
+	player_name.text = LifeOrdinal.with_name(str(_player.username), _player.get("ordinal")) if not _player.is_empty() else tr("Not signed in")
 	player_name.tooltip_text = player_name.text
+	# The number of a later life may be cuneiform, which the theme font lacks: the datadisk's numerals font fills in.
+	player_name.add_theme_font_override("font", LifeOrdinal.with_fallback(UiTheme.font(false)))
 	level_label.text = tr("Level %s") % (int(_player.stats.level) if not _player.is_empty() else "-")
 	level_label.tooltip_text = level_label.text
 	age_label.text = tr("Age: %s days") % _player.get("life", {}).get("age_days", "-")

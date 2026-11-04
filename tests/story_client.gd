@@ -326,6 +326,21 @@ func _run() -> void:
 	dialogue.show_about("endland:kragg", card)
 	dialogue.close()
 	_check(not dialogue._card_mode and not dialogue.visible, "closing the conversation leaves the card")
+
+	# A merchant talks first and its conversation offers a Trade button for the shop; nobody else's conversation does.
+	var trades: Array = []
+	dialogue.trade_requested.connect(func(npc_id: String) -> void: trades.append(npc_id))
+	dialogue.shop_npc_id = ""
+	dialogue.show_reply(_reply())
+	_check(not dialogue.choices_box.has_node("Trade"), "a character that keeps no shop offers no trade")
+	dialogue.shop_npc_id = "endland:somebody"
+	dialogue.show_reply(_reply())
+	_check(not dialogue.choices_box.has_node("Trade"), "the shop of another merchant is not offered here")
+	dialogue.shop_npc_id = "endland:kragg"
+	dialogue.show_reply(_reply())
+	_check(dialogue.choices_box.has_node("Trade"), "a merchant's conversation offers its shop")
+	dialogue.choices_box.get_node("Trade").pressed.emit()
+	_check(trades == ["endland:kragg"], "the Trade button asks for the merchant's shop: %s" % [trades])
 	dialogue.queue_free()
 
 	if _failures > 0:

@@ -2,6 +2,7 @@ extends CanvasLayer
 
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
 const UiKit := preload("res://scripts/ui/ui_kit.gd")
+const LifeOrdinal := preload("res://scripts/life_ordinal.gd")
 
 ## The spinner stays at least this long, so an answer from a near server is still seen.
 const MIN_PENDING_MS := 400
@@ -452,9 +453,13 @@ func _render() -> void:
 	if memorial:
 		summary.text = tr("In Memoriam")
 		var notice: Dictionary = _grave.get("obituary", _obituary)
-		var name_label := _label(grave_list, notice.get("name", ""))
+		# From the second life under a login the name carries its number, in the system of the world's datadisk.
+		var name_label := _label(grave_list, LifeOrdinal.with_name(str(notice.get("name", "")), notice.get("ordinal")))
 		name_label.name = "MemorialName"
 		name_label.theme_type_variation = &"TitleLabel"
+		var name_font := LifeOrdinal.with_fallback(name_label.get_theme_font(&"font", &"TitleLabel"))
+		if name_font != null:
+			name_label.add_theme_font_override(&"font", name_font)
 		name_label.add_theme_font_size_override("font_size", 30)
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_preview(_grave.get("kind", "headstone"))

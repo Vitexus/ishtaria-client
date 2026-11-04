@@ -130,6 +130,9 @@ static func valid_event(data: Variant) -> bool:
 				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))
 		"achievement":
 			return preload("res://scripts/achievements_client.gd").valid_id(data.subject)
+		"sky_flyover":
+			# subject: the id of a ship kind of the world's datadisk.
+			return data.subject.length() <= 48 and data.subject == data.subject.to_lower() and not data.subject.contains(" ")
 		"love":
 			return data.subject in ["zone", "hit", "won", "miss"] \
 				and (data.get("body") == null or (data.body is String and data.body.length() <= 500))

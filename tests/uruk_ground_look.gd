@@ -70,6 +70,7 @@ func _run() -> void:
 		push_error("controls never became active")
 		quit(1)
 		return
+	var min_filled := 20 if OS.get_environment("ISHTARIA_MIN_FILLED").is_empty() else int(OS.get_environment("ISHTARIA_MIN_FILLED"))
 	# Prop Node3Ds appear at once; the disk GLBs arrive later through fetch_media.
 	waited = 0.0
 	while waited < 120.0:
@@ -80,7 +81,7 @@ func _run() -> void:
 		print("structures filled=%d/%d waiting_urls=%d pending_media=%d terrain=%s (%.1fs)" % [
 			filled, client._environment.props.get_child_count(), waiting, pending, str(patches_ready), waited,
 		])
-		if waiting == 0 and pending == 0 and filled >= 20 and patches_ready and client._environment.detail.get_child_count() > 0:
+		if waiting == 0 and pending == 0 and filled >= min_filled and patches_ready and client._environment.detail.get_child_count() > 0:
 			break
 		await create_timer(1.0).timeout
 		waited += 1.0
@@ -90,20 +91,17 @@ func _run() -> void:
 		client._environment._structure_models.size(),
 		client._environment.npcs.get_child_count(),
 	])
-	if _filled_structures(client) < 20:
+	if _filled_structures(client) < min_filled:
 		push_error("too few city models arrived; aerial shot would be empty")
 		quit(1)
 		return
 	# Freeze the client so approach / third-person follow cannot steal the camera.
 	client.set_process(false)
 	client._controls.set_process(false)
-	var alluvial := OS.get_environment("ISHTARIA_ALLUVIAL")
 	for child in client._environment.detail.get_children():
 		if child is MeshInstance3D and child.material_override is ShaderMaterial:
 			var material: ShaderMaterial = child.material_override
-			print("detail material: is_detail=%s use_textures=%s use_alluvial=%s" % [material.get_shader_parameter("is_detail"), material.get_shader_parameter("use_textures"), material.get_shader_parameter("use_alluvial")])
-			if not alluvial.is_empty():
-				material.set_shader_parameter("use_alluvial", alluvial == "1")
+			print("detail material: is_detail=%s use_textures=%s biome_layers=%s" % [material.get_shader_parameter("is_detail"), material.get_shader_parameter("use_textures"), material.get_shader_parameter("biome_layers")])
 	client._hud.hide()
 	client._tablet.hide()
 	client._minimap.hide()
@@ -144,7 +142,14 @@ func _run() -> void:
 				last = now
 			print("refresh %d: longest frame %.0f ms, %d props, %d fills waiting" % [round_number, worst, client._environment.props.get_child_count(), client._environment._fill_queue.size()])
 	# Low and oblique: the houses of the city, their plots and the ground of the alluvial set.
-	for shot: Array in [["house", 22.0, 0.45], ["house2", 80.0, 0.5], ["close", 22.0, 0.8], ["ground", 5.0, 2.2], ["street", 70.0, 0.9], ["quarter", 420.0, 0.7]]:
+	var shots: Array = [["house", 22.0, 0.45], ["house2", 80.0, 0.5], ["close", 22.0, 0.8], ["ground", 5.0, 2.2], ["street", 70.0, 0.9], ["quarter", 420.0, 0.7]]
+	# ISHTARIA_SHOTS="name:height_m:tilt,...": other views, e.g. "horizon:3:8" looks far across the ground from 3 m.
+	if not OS.get_environment("ISHTARIA_SHOTS").is_empty():
+		shots = []
+		for text: String in OS.get_environment("ISHTARIA_SHOTS").split(","):
+			var fields := text.split(":")
+			shots.append([fields[0], float(fields[1]), float(fields[2])])
+	for shot: Array in shots:
 		_aim_oblique(client, shot[1], shot[2])
 		for _frame in 14:
 			await process_frame

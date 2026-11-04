@@ -37,6 +37,9 @@ var voice_volume := 1.0
 var story: Node
 ## The area music; a dialogue whose track is already playing there does not start it a second time.
 var area_music: Node
+## The merchant whose conversation offers the Trade button for its shop (set by `main.gd` when the player starts it); the
+## button belongs to that character's conversation only.
+var shop_npc_id := ""
 var _npc_id := ""
 var _seq := 0
 var _music: Node
@@ -173,7 +176,7 @@ func _fill_node(reply: Dictionary) -> void:
 		about.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		choices_box.add_child(about)
 		pending.register(about, "About", _ask_about)
-	if reply.get("can_trade") == true:
+	if reply.get("can_trade") == true or (not shop_npc_id.is_empty() and str(reply.get("npc_id", "")) == shop_npc_id):
 		var trade := Button.new()
 		trade.name = "Trade"
 		trade.text = tr("Trade")

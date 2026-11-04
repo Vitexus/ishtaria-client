@@ -17,3 +17,14 @@ Ground set "alluvial" (a datadisk's `ground`, e.g. the Gilgamesh disk), diffuse 
   mud_cracked_dry_03 Dario Barresi, Dimitrios Savva      cracked dry mud
 
 Only the files used by scripts/planet_surface.gdshader are bundled.
+
+More layers for the biomes of the default ground and of datadisks' `ground_layers` (scripts/ground_layers.gd), diffuse only:
+
+  brown_mud_leaves_01       Poly Haven     forest floor, mud and leaves
+  forest_leaves_02          Poly Haven     fallen leaves
+  dry_ground_01             Poly Haven     dry earth
+  red_laterite_soil_stones  Poly Haven     red soil with stones
+  snow_02                   Poly Haven     snow
+  rocky_terrain_02          Poly Haven     rocky ground
+  coast_sand_rocks_02       Poly Haven     coast sand and rocks
+  grass_path_3              Poly Haven     grass and path

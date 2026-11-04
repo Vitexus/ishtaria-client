@@ -180,6 +180,19 @@ var _shown_segments := DETAIL_SEGMENTS
 var async_detail := false
 var _detail_generation := 0
 var _detail_pending := false
+## Rows of the detail disk the worker has computed and the rows it has to (read by the main thread for the loading bar).
+var _detail_rows := 0
+## Bands of the grass and of the water picture finished (see `detail_fraction`); counted under the mutex.
+var _detail_grass_done := 0
+var _detail_grass_total := 0
+var _detail_water_done := 0
+var _detail_water_total := 0
+var _detail_parts := 1
+var _detail_mutex := Mutex.new()
+## Landscape rasters being decoded on workers (their tasks, and how many have not reported back yet).
+var _decode_tasks: Array = []
+var _decoding := 0
+var _detail_rows_total := 1
 var _detail_tasks: Array = []
 var _detail_anchor: Array = []
 var _memorial_entries: Array = []
@@ -190,9 +203,56 @@ var _memorial_elapsed := 0.0
 
 func _exit_tree() -> void:
 	_stop_detail_work()
+	for id: int in _decode_tasks:
+		WorkerThreadPool.wait_for_task_completion(id)
+	_decode_tasks.clear()
+
+## Whether the local detail disk, or a landscape patch it is built from, is still on its way.
+func is_detail_pending() -> bool:
+	return _detail_pending or _decoding > 0 or not _terrain_requests.is_empty()
+
+## How far the detail disk is (0 to 1); 1 when none is being computed. The worker counts rows, the rest of its work
+## (grass, water image) is the last few per cent.
+func detail_fraction() -> float:
+	if not _detail_pending:
+		return 0.0 if (_decoding > 0 or not _terrain_requests.is_empty()) else 1.0
+	# What each part costs on one core: rows 3.6 s, grass 22 s, water 14 s; the last two are shared by `parts` workers.
+	_detail_mutex.lock()
+	# The totals grow as the bands start; until all have, the share is of what is known (the water bands start first).
+	var grass := float(_detail_grass_done) / float(maxi(_detail_grass_total, 1)) if _detail_grass_total > 0 else 0.0
+	var water := float(_detail_water_done) / float(maxi(_detail_water_total, 1)) if _detail_water_total > 0 else 0.0
+	_detail_mutex.unlock()
+	var rows := clampf(float(_detail_rows) / float(maxi(_detail_rows_total, 1)), 0.0, 1.0)
+	return 0.95 * (0.3 * rows + 0.45 * grass + 0.25 * water)
+
+## Worker: one band of the water picture. Each band writes only its own slot of `bands`.
+func _water_band(part: int, unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float, generation: int, parts: int, bands: Array) -> void:
+	bands[part] = _bake_water_image(unit, tangent, forward, extent_m, generation, part, parts, _detail_note.bind(2))
+
+## Worker: one band of the grass tufts.
+func _grass_band(part: int, unit: Vector3, anchor: Array, lush_field: Dictionary, generation: int, parts: int, bands: Array) -> void:
+	bands[part] = grass_cover.compute(unit, anchor, lush_field, part, parts, generation, _detail_note.bind(1))
+
+## How many bands the detail disk's grass and water picture are split into: half the cores, so that the main thread
+## (drawing, input) and the other threads of the process keep theirs while the world is being prepared.
+func _detail_workers() -> int:
+	return clampi(OS.get_processor_count() / 2, 1, 6)
+
+## Worker: units of work (grass cell columns, rows of the water picture) found (`total`) and finished (`done`).
+func _detail_note(which: int, total: int, done: int) -> void:
+	_detail_mutex.lock()
+	if which == 1:
+		_detail_grass_total += total
+		_detail_grass_done += done
+	else:
+		_detail_water_total += total
+		_detail_water_done += done
+	_detail_mutex.unlock()
 
 ## Drops any detail disk still being computed and waits for its worker: the workers read the heightmap,
-## environment and landscape patches, so those may only change while none runs.
+## environment and landscape patches, so those may only change while none runs. The worker looks at the
+## generation once per row, so a superseded disk ends within a row instead of being computed to the end
+## (a landscape patch of a city used to hold the main thread for half a minute here).
 func _stop_detail_work() -> void:
 	_detail_generation += 1
 	_detail_pending = false
@@ -450,7 +510,7 @@ func elevation64(direction: Array) -> float:
 		return metres / 1000.0
 	var unit: Array = [float(direction[0]) / length, float(direction[1]) / length, float(direction[2]) / length]
 	# A coarse river's channel is carved where no landscape patch replaces the ground (the server's `height`).
-	if not _river_segments.is_empty() and not _terrain_covers(unit):
+	if (not _river_segments.is_empty() or not _disk_segments.is_empty()) and not _terrain_covers(unit):
 		return (metres - _river_carve_m(unit)) / 1000.0
 	return (metres + _terrain_offset_m(unit, metres)) / 1000.0
 
@@ -478,6 +538,22 @@ const RIVER_INDEX_STEP_M := 5000.0
 const RIVER_WATER_SHARE := 0.63
 
 var _river_segments: Array = []
+## The rivers a datadisk tells (`rivers` of GET /world): {points: unit directions of the course, widths_m}. They are carved
+## and drawn like the coarse rivers, as the server's `movement::disk_river_carve` has them.
+var _disk_rivers: Array = []
+## The water of a river is this part of its carved reach wide, as the server has it (`DISK_RIVER_WATER_SHARE`).
+const DISK_RIVER_REACH_PER_WIDTH := 1.0 / 1.3
+## What a datadisk may tell (the server's limits): its widest water, how many rivers and points.
+const DISK_RIVER_WIDTH_MAX_M := 400.0
+const DISK_RIVERS_MAX := 6000
+const DISK_RIVER_POINTS_MAX := 200000
+## Cells of the grid that files the segments of those rivers: a cube face in this many parts (about 5 km each).
+const DISK_RIVER_GRID := 2048
+var _disk_rivers_key := ""
+var _disk_segments: Array = []
+var _disk_river_cells: Dictionary = {}
+## A probe looks this far over a cell edge for a channel (the widest reach of any segment).
+var _disk_widest_reach_m := DISK_RIVER_WIDTH_MAX_M * DISK_RIVER_REACH_PER_WIDTH
 var _river_cells: Dictionary = {}
 var _rivers_material: ShaderMaterial = null
 
@@ -534,8 +610,121 @@ func _index_rivers() -> void:
 				_river_cells[cell] = listed
 		_river_segments.append([from, to, reach])
 
-## Metres the coarse rivers carve into the ground in a unit direction (0 away from every river).
+## Takes the rivers of the world's datadisks (GET /world/rivers: `[{id, points: [[latitude, longitude, width_m], ...]}]`),
+## checked, files them in a grid and draws them. They replace those of a world visited before.
+func set_disk_rivers(rivers: Variant) -> void:
+	var lines: Array = []
+	var total := 0
+	if rivers is Array and rivers.size() <= DISK_RIVERS_MAX:
+		for river: Variant in rivers:
+			if not river is Dictionary or not river.get("points") is Array:
+				continue
+			var points: Array = river.points
+			total += points.size()
+			if points.size() < 2 or points.size() > 4000 or total > DISK_RIVER_POINTS_MAX:
+				break
+			var units: Array = []
+			var widths: Array = []
+			var valid := true
+			for point: Variant in points:
+				if not point is Array or point.size() != 3:
+					valid = false
+					break
+				var latitude: Variant = point[0]
+				var longitude: Variant = point[1]
+				var width: Variant = point[2]
+				if not (latitude is float or latitude is int) or not (longitude is float or longitude is int) or not (width is float or width is int):
+					valid = false
+					break
+				if absf(float(latitude)) > 90.0 or absf(float(longitude)) > 180.0 or float(width) < 10.0 or float(width) > DISK_RIVER_WIDTH_MAX_M:
+					valid = false
+					break
+				var lat := deg_to_rad(float(latitude))
+				var lon := deg_to_rad(float(longitude))
+				units.append([cos(lat) * cos(lon), sin(lat), -cos(lat) * sin(lon)])
+				widths.append(float(width))
+			if valid:
+				lines.append({"points": units, "widths_m": widths})
+	var key := "%d:%d" % [lines.size(), total]
+	if lines.size() > 0:
+		key += ":%s" % [lines[0].points[0]]
+	if key == _disk_rivers_key:
+		return
+	_disk_rivers_key = key
+	_disk_rivers = lines
+	_disk_segments.clear()
+	_disk_river_cells.clear()
+	for line: Dictionary in _disk_rivers:
+		var points: Array = line.points
+		var widths: Array = line.widths_m
+		for index in points.size() - 1:
+			var from: Array = points[index]
+			var to: Array = points[index + 1]
+			var reach := (float(widths[index]) + float(widths[index + 1])) / 2.0 * DISK_RIVER_REACH_PER_WIDTH
+			var segment := _disk_segments.size()
+			var chord := sqrt(pow(float(to[0]) - from[0], 2) + pow(float(to[1]) - from[1], 2) + pow(float(to[2]) - from[2], 2))
+			var samples := maxi(1, int(ceil(chord * RADIUS * 1000.0 / (RIVER_INDEX_STEP_M * 0.5))))
+			for step in samples + 1:
+				var t := float(step) / samples
+				var bucket := _river_bucket(_unit64([lerpf(from[0], to[0], t), lerpf(from[1], to[1], t), lerpf(from[2], to[2], t)]))
+				var listed: PackedInt32Array = _disk_river_cells.get(bucket, PackedInt32Array())
+				if listed.is_empty() or listed[listed.size() - 1] != segment:
+					listed.append(segment)
+					_disk_river_cells[bucket] = listed
+			_disk_segments.append([from, to, reach])
+	if environment != null and not environment.is_empty():
+		_build_rivers()
+
+## The cell of the grid (about 5 km) that files the segments of the datadisk's rivers.
+func _river_bucket(direction: Array) -> int:
+	var mapped := _coordinates64(direction)
+	var cell_h := mini(int(float(mapped[1]) * DISK_RIVER_GRID), DISK_RIVER_GRID - 1)
+	var cell_v := mini(int(float(mapped[2]) * DISK_RIVER_GRID), DISK_RIVER_GRID - 1)
+	return int(mapped[0]) * DISK_RIVER_GRID * DISK_RIVER_GRID + cell_v * DISK_RIVER_GRID + cell_h
+
+## Metres the datadisk's rivers carve into the ground in a unit direction (0 away from every river): the server's
+## `movement::disk_river_carve`.
+func _disk_river_carve_m(direction: Array) -> float:
+	if _disk_segments.is_empty():
+		return 0.0
+	var reference := [0.0, 1.0, 0.0] if absf(float(direction[1])) < 0.9 else [1.0, 0.0, 0.0]
+	var east := _unit64([reference[1] * direction[2] - reference[2] * direction[1], reference[2] * direction[0] - reference[0] * direction[2], reference[0] * direction[1] - reference[1] * direction[0]])
+	var north := [direction[1] * east[2] - direction[2] * east[1], direction[2] * east[0] - direction[0] * east[2], direction[0] * east[1] - direction[1] * east[0]]
+	var probe := _disk_widest_reach_m / (RADIUS * 1000.0)
+	var buckets := [_river_bucket(direction)]
+	for pair in [[east, 1.0], [east, -1.0], [north, 1.0], [north, -1.0]]:
+		var axis: Array = pair[0]
+		var sign: float = pair[1]
+		var bucket := _river_bucket(_unit64([float(direction[0]) + axis[0] * probe * sign, float(direction[1]) + axis[1] * probe * sign, float(direction[2]) + axis[2] * probe * sign]))
+		if not buckets.has(bucket):
+			buckets.append(bucket)
+	var deepest := 0.0
+	for bucket: int in buckets:
+		for segment_index in _disk_river_cells.get(bucket, PackedInt32Array()):
+			var segment: Array = _disk_segments[segment_index]
+			var from: Array = segment[0]
+			var to: Array = segment[1]
+			var along := [float(to[0]) - from[0], float(to[1]) - from[1], float(to[2]) - from[2]]
+			var offset := [float(direction[0]) - from[0], float(direction[1]) - from[1], float(direction[2]) - from[2]]
+			var length_squared: float = along[0] * along[0] + along[1] * along[1] + along[2] * along[2]
+			if length_squared <= 0.0:
+				continue
+			var t := clampf((offset[0] * along[0] + offset[1] * along[1] + offset[2] * along[2]) / length_squared, 0.0, 1.0)
+			var nearest := _unit64([from[0] + along[0] * t, from[1] + along[1] * t, from[2] + along[2] * t])
+			var distance := sqrt(pow(float(direction[0]) - nearest[0], 2) + pow(float(direction[1]) - nearest[1], 2) + pow(float(direction[2]) - nearest[2], 2)) * RADIUS * 1000.0
+			var reach: float = segment[2]
+			if distance >= reach:
+				continue
+			var x := distance / reach
+			deepest = maxf(deepest, RIVER_BED_M * (1.0 - x * x * (3.0 - 2.0 * x)))
+	return deepest
+
+## Metres the rivers (the coarse map's and the datadisk's) carve into the ground in a unit direction.
 func _river_carve_m(direction: Array) -> float:
+	return maxf(_coarse_river_carve_m(direction), _disk_river_carve_m(direction))
+
+## Metres the coarse rivers carve into the ground in a unit direction (0 away from every river).
+func _coarse_river_carve_m(direction: Array) -> float:
 	if _river_segments.is_empty():
 		return 0.0
 	var reference := [0.0, 1.0, 0.0] if absf(float(direction[1])) < 0.9 else [1.0, 0.0, 0.0]
@@ -576,7 +765,7 @@ func _terrain_covers(direction: Array) -> bool:
 
 ## The surface of a coarse river's water in metres, or NAN where no channel is carved (under a patch too).
 func _river_level_m(direction: Array) -> float:
-	if _river_segments.is_empty() or _terrain_covers(direction):
+	if (_river_segments.is_empty() and _disk_segments.is_empty()) or _terrain_covers(direction):
 		return NAN
 	if _river_carve_m(direction) <= RIVER_LEVEL_M:
 		return NAN
@@ -593,14 +782,19 @@ func _build_rivers() -> void:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var vertices := 0
-	for segment: Array in _river_segments:
+	var ribbons: Array = _river_segments.duplicate()
+	ribbons.append_array(_disk_segments)
+	for ribbon_index in ribbons.size():
+		var segment: Array = ribbons[ribbon_index]
 		var start := Vector3(segment[0][0], segment[0][1], segment[0][2])
 		var end := Vector3(segment[1][0], segment[1][1], segment[1][2])
 		var sideways := start.cross(end).normalized()
 		var width := float(segment[2]) * RIVER_WATER_SHARE / (RADIUS * 1000.0)
-		for step in 16:
-			var first := start.slerp(end, step / 16.0).normalized()
-			var second := start.slerp(end, (step + 1.0) / 16.0).normalized()
+		# The coarse rivers are cut in sixteen; a datadisk's stream is one piece unless it is long.
+		var slices := 16 if ribbon_index < _river_segments.size() else clampi(int(ceil(start.distance_to(end) * RADIUS * 1000.0 / 2000.0)), 1, 16)
+		for step in slices:
+			var first := start.slerp(end, float(step) / slices).normalized()
+			var second := start.slerp(end, (step + 1.0) / slices).normalized()
 			var corners: Array[Vector3] = []
 			for direction in [first - sideways * width, first + sideways * width, second - sideways * width, second + sideways * width]:
 				var unit: Vector3 = direction.normalized()
@@ -754,6 +948,15 @@ func _build_detail() -> void:
 		_finish_detail(_compute_detail(job))
 		return
 	_detail_pending = true
+	_detail_rows = 0
+	_detail_rows_total = int(job.segments) + 1
+	_detail_mutex.lock()
+	_detail_grass_done = 0
+	_detail_grass_total = 0
+	_detail_water_done = 0
+	_detail_water_total = 0
+	_detail_parts = _detail_workers()
+	_detail_mutex.unlock()
 	# A task must be waited for once to release it, so finished ones are collected here, not just forgotten.
 	var running: Array = []
 	for id: int in _detail_tasks:
@@ -774,6 +977,11 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 	var feather: float = job.feather
 	var anchor: Array = job.anchor
 	var count := (segments + 1) * (segments + 1)
+	# The picture of the water does not depend on the rows below, so its bands bake on other workers meanwhile.
+	var parts := _detail_workers()
+	var water_bands: Array = []
+	water_bands.resize(parts)
+	var water_group := WorkerThreadPool.add_group_task(_water_band.bind(unit, tangent, forward, float(job.map_extent), int(job.generation), parts, water_bands), parts, -1, true)
 	var land := PackedVector3Array()
 	var land_normals := PackedVector3Array()
 	var land_uv2 := PackedVector2Array()
@@ -787,6 +995,10 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 	water_uv2.resize(count)
 	water_levels.resize(count)
 	for row in segments + 1:
+		_detail_rows = row
+		if int(job.generation) != _detail_generation:
+			WorkerThreadPool.wait_for_group_task_completion(water_group)
+			return {"job": job}
 		for column in segments + 1:
 			var horizontal: float = (float(column) / segments * 2.0 - 1.0) * radius_km
 			var vertical: float = (float(row) / segments * 2.0 - 1.0) * radius_km
@@ -820,6 +1032,10 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 			water_uv2[index] = Vector2(height, water_level if is_finite(water_level) else -100.0)
 			water_levels[index] = water_level if is_finite(water_level) else NAN
 			water_vertices[index] = _position_from(anchor, [direction[0] * (RADIUS + water) * 1000.0, direction[1] * (RADIUS + water) * 1000.0, direction[2] * (RADIUS + water) * 1000.0])
+	if int(job.generation) != _detail_generation:
+		WorkerThreadPool.wait_for_group_task_completion(water_group)
+		return {"job": job}
+	var lush := _lush_colors(water_levels, segments, radius_km)
 	# A disk, not a square: the old axis-aligned patch looked like a huge floating tile from above.
 	var indices := PackedInt32Array()
 	var water_indices := PackedInt32Array()
@@ -850,13 +1066,81 @@ func _compute_detail(job: Dictionary) -> Dictionary:
 				water_vertices[corner] = _position_from(anchor, [up.x * (RADIUS + water_h) * 1000.0, up.y * (RADIUS + water_h) * 1000.0, up.z * (RADIUS + water_h) * 1000.0])
 				water_uv2[corner] = Vector2(water_uv2[corner].x, plane)
 			water_indices.append_array(PackedInt32Array([first, first + stride, first + 1, first + 1, first + stride, first + stride + 1]))
-	var tufts: Dictionary = grass_cover.compute(unit, anchor)
-	var water_image := _bake_water_image(unit, tangent, forward, float(job.map_extent))
-	return {"job": job, "grass": tufts, "water_image": water_image, "land": land, "normals": land_normals, "uv2": land_uv2, "water": water_vertices, "water_uv2": water_uv2, "indices": indices, "water_indices": water_indices}
+	var lush_field := {"colors": lush, "segments": segments, "radius_km": radius_km, "tangent": tangent, "forward": forward}
+	var grass_bands: Array = []
+	grass_bands.resize(parts)
+	var grass_group := WorkerThreadPool.add_group_task(_grass_band.bind(unit, anchor, lush_field, int(job.generation), parts, grass_bands), parts, -1, true)
+	WorkerThreadPool.wait_for_group_task_completion(grass_group)
+	WorkerThreadPool.wait_for_group_task_completion(water_group)
+	if int(job.generation) != _detail_generation:
+		return {"job": job}
+	var tufts: Dictionary = grass_cover.merge(grass_bands)
+	var water_image := _join_water_image(water_bands)
+	return {"job": job, "grass": tufts, "water_image": water_image, "lush": lush, "land": land, "normals": land_normals, "uv2": land_uv2, "water": water_vertices, "water_uv2": water_uv2, "indices": indices, "water_indices": water_indices}
 
-func _build_detail_mesh(vertices: PackedVector3Array, normals: PackedVector3Array, uv2: PackedVector2Array, indices: PackedInt32Array) -> ArrayMesh:
+## Green cover within this distance of water (full up to LUSH_FULL_M), unless the shader finds a stony shore.
+const LUSH_FULL_M := 300.0
+const LUSH_EDGE_M := 500.0
+
+## Worker-safe: per vertex of the detail disk how green the ground is (red channel), from its distance to the nearest
+## vertex with water (pond, lake, river or sea), by a two-pass chamfer distance over the grid. A disk without water
+## stays 0. Beach sand, scree and bare rock are decided later by the shader, which draws them over the green.
+func _lush_colors(water_levels: PackedFloat32Array, segments: int, radius_km: float) -> PackedColorArray:
+	var stride := segments + 1
+	var count := stride * stride
+	var cell_m := 2.0 * radius_km * 1000.0 / segments
+	var far := 1.0e9
+	var steps := PackedFloat32Array()
+	steps.resize(count)
+	var any_water := false
+	for index in count:
+		if is_finite(water_levels[index]):
+			steps[index] = 0.0
+			any_water = true
+		else:
+			steps[index] = far
+	var colors := PackedColorArray()
+	colors.resize(count)
+	if not any_water:
+		colors.fill(Color(0.0, 0.0, 0.0, 1.0))
+		return colors
+	var diagonal := 1.4142
+	for row in stride:
+		for column in stride:
+			var index := row * stride + column
+			var best := steps[index]
+			if column > 0:
+				best = minf(best, steps[index - 1] + 1.0)
+			if row > 0:
+				best = minf(best, steps[index - stride] + 1.0)
+				if column > 0:
+					best = minf(best, steps[index - stride - 1] + diagonal)
+				if column < segments:
+					best = minf(best, steps[index - stride + 1] + diagonal)
+			steps[index] = best
+	for row in range(segments, -1, -1):
+		for column in range(segments, -1, -1):
+			var index := row * stride + column
+			var best := steps[index]
+			if column < segments:
+				best = minf(best, steps[index + 1] + 1.0)
+			if row < segments:
+				best = minf(best, steps[index + stride] + 1.0)
+				if column < segments:
+					best = minf(best, steps[index + stride + 1] + diagonal)
+				if column > 0:
+					best = minf(best, steps[index + stride - 1] + diagonal)
+			steps[index] = best
+	for index in count:
+		var metres: float = steps[index] * cell_m
+		colors[index] = Color(1.0 - smoothstep(LUSH_FULL_M, LUSH_EDGE_M, metres), 0.0, 0.0, 1.0)
+	return colors
+
+func _build_detail_mesh(vertices: PackedVector3Array, normals: PackedVector3Array, uv2: PackedVector2Array, indices: PackedInt32Array, colors := PackedColorArray()) -> ArrayMesh:
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
+	if not colors.is_empty():
+		arrays[Mesh.ARRAY_COLOR] = colors
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_TEX_UV2] = uv2
@@ -879,7 +1163,7 @@ func _finish_detail(result: Dictionary) -> void:
 	grass_cover.apply(grass, result.grass)
 	_detail_anchor = job.anchor
 	var unit: Vector3 = job.unit
-	var mesh := _build_detail_mesh(result.land, result.normals, result.uv2, result.indices)
+	var mesh := _build_detail_mesh(result.land, result.normals, result.uv2, result.indices, result.get("lush", PackedColorArray()))
 	_detail_vertices = result.land
 	_shown_unit = unit
 	_shown_radius = float(job.radius)
@@ -1026,6 +1310,7 @@ func apply_objects(data: Variant) -> bool:
 	_clear_objects(true)
 	for entry: Dictionary in accepted:
 		_place_object(entry)
+	_apply_far(data.get("far"))
 	if not apply_memorials(data.get("memorials", [])):
 		return false
 	apply_npcs(data.get("npcs", []))
@@ -1564,15 +1849,37 @@ func _terrain_received(result: int, code: int, _headers: PackedStringArray, body
 			patch.clear_image = image
 			clear_only = true
 	if clear_only:
-		if target != Vector3.ZERO:
+		if async_detail:
+			# The detail worker bakes this picture as part of its own job: baking it here froze the main thread.
+			_build_detail()
+		elif target != Vector3.ZERO:
 			var unit := target.normalized()
 			var reference := Vector3.UP if absf(unit.y) < 0.9 else Vector3.RIGHT
 			var tangent := reference.cross(unit).normalized()
 			_bake_water_map(unit, tangent, unit.cross(tangent).normalized())
 		return
-	var grid := _terrain_decode_png16(body)
+	if not async_detail:
+		_terrain_apply(url, _terrain_decode_png16(body))
+		return
+	# Decoding a raster of a few million samples in GDScript takes seconds: a worker does it and the grid is
+	# applied on the main thread when it is ready, so the picture does not freeze while the client waits.
+	_decoding += 1
+	_decode_tasks.append(WorkerThreadPool.add_task(func() -> void: _terrain_decoded.call_deferred(url, _terrain_decode_png16(body))))
+
+func _terrain_decoded(url: String, grid: Array) -> void:
+	_decoding = maxi(_decoding - 1, 0)
+	if _decoding == 0:
+		for id: int in _decode_tasks:
+			WorkerThreadPool.wait_for_task_completion(id)
+		_decode_tasks.clear()
+	if is_inside_tree():
+		_terrain_apply(url, grid)
+
+## Puts a decoded raster into the patches that asked for `url` and builds the detail disk from them.
+func _terrain_apply(url: String, grid: Array) -> void:
 	if grid.is_empty():
 		return
+	_stop_detail_work()
 	for patch: Dictionary in _terrain_patches:
 		var water: bool = url == String(patch.water_url)
 		if not water and url != String(patch.heightmap_url):
@@ -2129,12 +2436,22 @@ func _bake_water_map(unit: Vector3, tangent: Vector3, forward: Vector3) -> void:
 	_apply_water_map(_bake_water_image(unit, tangent, forward, _map_extent_m()), unit, tangent, forward, _map_extent_m())
 
 ## Worker-safe: only reads terrain data, and returns the picture.
-func _bake_water_image(unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float) -> Image:
+func _bake_water_image(unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float, generation := -1, part := 0, parts := 1, notify := Callable()) -> Image:
 	var pixels := WATER_MAP_PIXELS
 	var step := extent_m * 2.0 / float(pixels)
-	var image := Image.create(pixels, pixels, false, Image.FORMAT_RGBA8)
+	# `part` of `parts` bakes a band of rows (an image of just those rows), the bands are joined by `_join_water_image`.
+	var first_row := pixels * part / parts
+	var last_row := pixels * (part + 1) / parts
+	var image := Image.create(pixels, last_row - first_row, false, Image.FORMAT_RGBA8)
 	image.fill(Color.TRANSPARENT)
-	for row in pixels:
+	if notify.is_valid():
+		notify.call(last_row - first_row, 0)
+	for row in range(first_row, last_row):
+		if notify.is_valid():
+			notify.call(0, 1)
+		# A superseded job (`generation` is the worker's) stops here instead of finishing a picture nobody takes.
+		if generation >= 0 and generation != _detail_generation:
+			return image
 		for column in pixels:
 			var horizontal := (float(column) + 0.5 - pixels * 0.5) * step
 			# Image row 0 is the top of the map: the `forward` direction of the bake frame.
@@ -2142,9 +2459,20 @@ func _bake_water_image(unit: Vector3, tangent: Vector3, forward: Vector3, extent
 			var direction: Vector3 = (unit * RADIUS + tangent * horizontal / 1000.0 + forward * vertical / 1000.0).normalized()
 			var dir := [direction.x, direction.y, direction.z]
 			if _terrain_cleared(dir):
-				image.set_pixel(column, row, SETTLEMENT_MAP_COLOR)
+				image.set_pixel(column, row - first_row, SETTLEMENT_MAP_COLOR)
 			if _minimap_water_at(dir):
-				image.set_pixel(column, row, WATER_MAP_COLOR)
+				image.set_pixel(column, row - first_row, WATER_MAP_COLOR)
+	return image
+
+## The picture of the whole map from the bands `_bake_water_image` baked, top to bottom.
+static func _join_water_image(bands: Array) -> Image:
+	var image := Image.create(WATER_MAP_PIXELS, WATER_MAP_PIXELS, false, Image.FORMAT_RGBA8)
+	image.fill(Color.TRANSPARENT)
+	var top := 0
+	for band: Variant in bands:
+		if band is Image:
+			image.blit_rect(band, Rect2i(0, 0, band.get_width(), band.get_height()), Vector2i(0, top))
+			top += band.get_height()
 	return image
 
 func _apply_water_map(image: Image, unit: Vector3, tangent: Vector3, forward: Vector3, extent_m: float) -> void:
@@ -3050,6 +3378,31 @@ func nearest_harvestable(player_metres: Vector3, reach_m: float) -> Dictionary:
 			best_distance = distance
 	return best
 
+## The seat a sitting character takes on the nearest rock: the top of the rock above its middle, in global coordinates, or an
+## empty dictionary when no rock is within reach (the character then sits where it stands).
+func rock_seat(player_metres: Vector3, reach_m: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for placement: Dictionary in placements:
+		if placement.harvest.is_empty() or placement.harvest.get("kind") != "rock":
+			continue
+		var coordinates: Array = placement.coordinates
+		var distance := player_metres.distance_to(Vector3(coordinates[0], coordinates[1], coordinates[2]))
+		if distance <= reach_m + float(placement.collision_radius_m) and distance < best_distance:
+			best = placement
+			best_distance = distance
+	if best.is_empty():
+		return {}
+	var node := objects.get_node_or_null(NodePath(String(best.id).validate_node_name())) as Node3D
+	if node == null or not node.is_inside_tree():
+		return {}
+	var box := _combined_aabb(node, Transform3D.IDENTITY)
+	if box == AABB():
+		return {}
+	# A little under the highest point: the rocks are lumpy and the seat is the broad part of the top.
+	var local_top := Vector3(box.position.x + box.size.x * 0.5, box.position.y + box.size.y * 0.92, box.position.z + box.size.z * 0.5)
+	return {"top": node.global_transform * local_top, "id": best.id}
+
 ## Requests the objects again, for example after a tree was felled or an item dropped.
 func refresh_objects() -> void:
 	if server_url.is_empty() or target == Vector3.ZERO:
@@ -3058,6 +3411,88 @@ func refresh_objects() -> void:
 		_objects_refresh_pending = true
 		return
 	_request_objects(target.normalized())
+
+## Most far objects the client takes from one region (the server sends at most 1800).
+const FAR_MAX := 2500
+## Per model id the meshes of its scene with their transform inside the model, for the far ring.
+var _far_parts_cache := {}
+
+## The ring of static scenery beyond the near objects (`far` of /world/objects): trees, rocks and shrubs drawn as
+## one MultiMesh per mesh of a model, with no shadows, collision or harvest, out to the edge of the detail disk. As the
+## player walks they appear at the edge as small things and grow; the near list takes them over as real objects.
+func _apply_far(data: Variant) -> void:
+	if not data is Array or data.size() > FAR_MAX or target == Vector3.ZERO:
+		return
+	var limit_km := _detail_radius * 0.97
+	var groups := {}
+	for entry: Variant in data:
+		if not entry is Dictionary or not entry.get("model") is String or not _models.has(entry.model) or not entry.get("position") is Array or entry.position.size() != 3:
+			continue
+		var valid := true
+		for value: Variant in entry.position:
+			valid = valid and (value is float or value is int) and is_finite(float(value)) and absf(value) <= 7000000.0
+		var scale_m: Variant = entry.get("scale_m")
+		var yaw: Variant = entry.get("yaw")
+		if not valid or not (scale_m is float or scale_m is int) or not (yaw is float or yaw is int) or scale_m <= 0 or scale_m > 20:
+			continue
+		var point := Vector3(entry.position[0] / 1000.0, entry.position[1] / 1000.0, entry.position[2] / 1000.0)
+		if point.length() < RADIUS - 8.1 or point.length() > RADIUS + 8.1 or point.normalized().distance_to(target.normalized()) * RADIUS > limit_km:
+			continue
+		if not groups.has(entry.model):
+			groups[entry.model] = []
+		groups[entry.model].append(entry)
+	for model_key: String in groups:
+		var parts := _far_parts(model_key)
+		var list: Array = groups[model_key]
+		for part: Dictionary in parts:
+			var multimesh := MultiMesh.new()
+			multimesh.transform_format = MultiMesh.TRANSFORM_3D
+			multimesh.mesh = part.mesh
+			multimesh.instance_count = list.size()
+			for index in list.size():
+				var entry: Dictionary = list[index]
+				var up := Vector3(entry.position[0], entry.position[1], entry.position[2]).normalized()
+				var basis := Basis(Quaternion(Vector3.UP, up) * Quaternion(Vector3.UP, float(entry.yaw))) * Basis.from_scale(Vector3.ONE * float(entry.scale_m) / 1000.0)
+				var lift := Vector3(0.0, float(entry.get("ground_offset_m", 0.0)) / float(entry.scale_m), 0.0)
+				var placed := Transform3D(basis, _render_position(entry.position)) * Transform3D(Basis(), lift) * (part.transform as Transform3D)
+				multimesh.set_instance_transform(index, placed)
+			var instance := MultiMeshInstance3D.new()
+			instance.name = "Far_%s" % model_key.validate_node_name()
+			instance.multimesh = multimesh
+			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			objects.add_child(instance)
+
+## The meshes of a model (static ones only) and where each sits inside the model, cached.
+func _far_parts(model_key: String) -> Array:
+	if _far_parts_cache.has(model_key):
+		return _far_parts_cache[model_key]
+	var parts: Array = []
+	var selected: Dictionary = _models[model_key]
+	if not _scenes.has(selected.id):
+		_scenes[selected.id] = load(selected.scene)
+	if selected.has("animation") or selected.has("swim_radius_m") or not _scenes[selected.id] is PackedScene:
+		_far_parts_cache[model_key] = parts
+		return parts
+	var root: Node = _scenes[selected.id].instantiate()
+	var meshes := root.find_children("*", "MeshInstance3D", true, false)
+	if root is MeshInstance3D:
+		meshes.append(root)
+	for mesh_instance: MeshInstance3D in meshes:
+		if mesh_instance.mesh == null or mesh_instance.skin != null:
+			continue
+		var transform := mesh_instance.transform if mesh_instance != root else Transform3D()
+		var parent := mesh_instance.get_parent()
+		while parent != null and parent != root and mesh_instance != root:
+			if parent is Node3D:
+				transform = (parent as Node3D).transform * transform
+			parent = parent.get_parent()
+		if mesh_instance != root and root is Node3D:
+			transform = (root as Node3D).transform * transform
+		var mesh: Mesh = mesh_instance.mesh
+		parts.append({"mesh": mesh, "transform": transform})
+	root.free()
+	_far_parts_cache[model_key] = parts
+	return parts
 
 func _place_object(entry: Dictionary) -> void:
 	var selected: Dictionary = _models[entry.model]

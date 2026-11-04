@@ -21,6 +21,8 @@ signal about_ready(npc_id: String, card: Dictionary)
 signal busy_changed(busy: bool)
 ## What the player read at a structure of a place (a knowledge card).
 signal reading_ready(place_id: String, card: Dictionary)
+## The kinds of sky ship and the flights now and in the next hour (see `sky_ships.gd`).
+signal sky_flights_ready(data: Dictionary)
 
 const MAX_STRINGS_BYTES := 4194304
 const MAX_IMAGE_BYTES := 2097152
@@ -209,6 +211,47 @@ func load_strings() -> void:
 
 ## Asks for the quest log; the server also moves on quests that wait for the player to reach a place.
 ## `lang` only selects the narrator voice for a new quest's tablet intro; it is never stored.
+func fetch_sky_flights() -> void:
+	_send("/story/sky_flights", HTTPClient.METHOD_GET, "", _on_sky_flights)
+
+func _on_sky_flights(result: int, code: int, reply: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	var data: Variant = JSON.parse_string(reply.get_string_from_utf8())
+	if valid_sky(data):
+		sky_flights_ready.emit(data)
+
+## The answer of `/story/sky_flights`: kinds of ship (id, media key of the model, scale) and flights between two points
+## in metres from the planet's centre.
+static func valid_sky(data: Variant) -> bool:
+	if not data is Dictionary or not data.get("ships") is Array or not data.get("flights") is Array or data.ships.size() > 8 or data.flights.size() > 8:
+		return false
+	var ids := {}
+	for ship: Variant in data.ships:
+		if not ship is Dictionary or not ship.get("id") is String or not ship.get("model") is String or not _number(ship.get("scale")):
+			return false
+		if ship.id.length() > 48 or ship.scale <= 0 or ship.scale > 100 or not valid_media_url("/story/media/" + ship.model) or not ship.model.ends_with(".glb"):
+			return false
+		ids[ship.id] = true
+	for flight: Variant in data.flights:
+		if not flight is Dictionary or not flight.get("id") is String or not flight.get("ship") is String or not ids.has(flight.ship):
+			return false
+		for key: String in ["start_ms", "duration_ms", "altitude_m"]:
+			if not _number(flight.get(key)):
+				return false
+		if flight.duration_ms <= 0 or flight.duration_ms > 3600000 or flight.altitude_m < 0 or flight.altitude_m > 100000:
+			return false
+		for key: String in ["from", "to"]:
+			if not flight.get(key) is Array or flight[key].size() != 3:
+				return false
+			for value: Variant in flight[key]:
+				if not _number(value) or absf(value) > 7000000.0:
+					return false
+	return true
+
+static func _number(value: Variant) -> bool:
+	return (value is float or value is int) and is_finite(float(value))
+
 func load_quests() -> void:
 	_send("/story/quests?lang=" + _language(), HTTPClient.METHOD_GET, "", _on_quests)
 

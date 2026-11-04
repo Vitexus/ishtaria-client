@@ -8,7 +8,7 @@ ifneq ($(strip $(SERVER_URL)),)
 export ISHTARIA_SERVER_URL := $(SERVER_URL)
 endif
 
-.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-controls build build-arm64 build-windows build-macos build-web serve-web build-all help
+.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls build build-arm64 build-windows build-macos build-web serve-web build-all help
 
 run:
 	"$(GODOT)" --path "$(CURDIR)" $(GODOT_ARGS)
@@ -91,11 +91,20 @@ test-story:
 test-cuneiform:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/cuneiform.gd
 
+test-life-ordinal:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/life_ordinal.gd
+
 test-tablet:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/tablet_panel.gd
 
 test-controls:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/character_controls.gd
+
+test-sky-ships:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/sky_ships.gd
+
+test-loading-bar:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/loading_bar.gd
 
 test-day-night:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/day_night.gd

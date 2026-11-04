@@ -19,7 +19,7 @@ var _backdrop: ColorRect
 var _picture: TextureRect
 var _caption: Label
 var _hint: Label
-var _progress: ProgressBar
+var _progress: Control
 var _tracked: HTTPRequest
 var _timer: Timer
 var _jingle: AudioStreamPlayer
@@ -62,16 +62,14 @@ func _ready() -> void:
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint.offset_top = -30.0
 	_hint.offset_bottom = -8.0
-	_progress = ProgressBar.new()
+	_progress = preload("res://scripts/loading_bar.gd").new()
 	_progress.name = "Loading"
-	_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_progress.show_percentage = true
 	_progress.visible = false
 	_backdrop.add_child(_progress)
 	_progress.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_progress.offset_left = 160.0
 	_progress.offset_right = -160.0
-	_progress.offset_top = -96.0
+	_progress.offset_top = -120.0
 	_progress.offset_bottom = -72.0
 	set_process(false)
 	_timer = Timer.new()

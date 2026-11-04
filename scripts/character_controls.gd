@@ -78,6 +78,13 @@ var _ground_surface: Node
 var airborne := false
 var on_object := false
 var sitting := false
+## The seated clip of this sitting: a model may have several (`sit`, `sit2`, `sit3`), one is chosen each time the character sits.
+var _sit_clip := "sit"
+## Finds the rock under a sitting character: returns {"top": global point} or an empty dictionary (set by the main scene).
+var seat_finder := Callable()
+var _seat: Variant = null
+## Metres the hip joint of a seated model rides above the surface it sits on (the seat bones are about this much lower).
+const SEAT_HIP_RISE_M := 0.09
 var swimming := false
 ## Aboard a vehicle (a boat): the avatar floats on the water's surface and plays the vehicle's clip while it moves.
 var aboard := false
@@ -456,9 +463,40 @@ func _wants_walk() -> bool:
 func _process(delta: float) -> void:
 	_update_glow()
 	if active and is_instance_valid(avatar):
+		if sitting and _seat_avatar():
+			_play_animation(false)
+			return
 		avatar.position = avatar.position.lerp(_position_target, 1.0 - exp(-18.0 * delta))
 		_ground_avatar(_ground_surface)
 	_play_animation(_wants_walk())
+
+## Seats the avatar on its rock: the hip joint of the seated pose goes to the top of the rock, so the body rests on it instead of
+## hovering beside it. False when there is no rock or no skeleton, and the character sits on the ground where it stands.
+func _seat_avatar() -> bool:
+	if _seat == null and seat_finder.is_valid():
+		var found: Variant = seat_finder.call()
+		if found is Dictionary and found.has("top"):
+			_seat = found.top
+	if _seat == null or not is_instance_valid(avatar) or not avatar.is_inside_tree():
+		return false
+	var skeletons := avatar.find_children("*", "Skeleton3D", true, false)
+	if skeletons.is_empty():
+		return false
+	var skeleton := skeletons[0] as Skeleton3D
+	var hips := -1
+	for bone in skeleton.get_bone_count():
+		var bone_name := skeleton.get_bone_name(bone).to_lower()
+		if bone_name.contains("hips") or bone_name.contains("pelvis"):
+			hips = bone
+			break
+	if hips < 0:
+		return false
+	# The hip joint inside the avatar (its own units), which the clip moves back and down into the pose.
+	var hip_local: Vector3 = avatar.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(hips).origin
+	var up: Vector3 = avatar.global_transform.basis.y.normalized()
+	var rise := SEAT_HIP_RISE_M / 1000.0 * preload("res://scripts/character_catalog.gd").body_scale(_character)
+	avatar.global_position = (_seat as Vector3) + up * rise - avatar.global_transform.basis * hip_local
+	return true
 
 func _ground_avatar(surface: Node) -> void:
 	if airborne or on_object or not is_instance_valid(surface) or not is_instance_valid(avatar) or origin == Vector3.ZERO:
@@ -562,6 +600,13 @@ func set_sitting(value: bool) -> void:
 	if value == sitting:
 		return
 	sitting = value
+	_seat = null
+	if value:
+		var variants: Array[String] = []
+		for name: String in ["sit", "sit2", "sit3"]:
+			if _has_clip(name):
+				variants.append(name)
+		_sit_clip = variants[randi() % variants.size()] if not variants.is_empty() else "sit"
 	_play_animation(false if value else _wants_walk())
 
 ## Takes the avatar's player and, for a datadisk's model, how fast its walking clip walks: the feet
@@ -613,10 +658,10 @@ func _play_animation(walking: bool) -> void:
 		return
 	if _swinging or Time.get_ticks_msec() < _combat_until:
 		return
-	if sitting and _has_clip("sit"):
+	if sitting and _has_clip(_sit_clip):
 		_animation.speed_scale = 1.0
-		if _animation.current_animation != "sit":
-			_animation.play("sit", 0.15)
+		if _animation.current_animation != _sit_clip:
+			_animation.play(_sit_clip, 0.15)
 		return
 	if airborne:
 		if _has_clip("jump"):
