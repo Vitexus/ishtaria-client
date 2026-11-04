@@ -1,5 +1,9 @@
 # ishtaria-client
 
+<!-- source-notice -->
+> **Primary source:** <https://git.vitexsoftware.com/Ishtaria/ishtaria-client> (development happens there). **GitHub** (<https://github.com/Vitexus/ishtaria-client>) is a secondary mirror; packages and binaries are **not built from GitHub**.
+<!-- /source-notice -->
+
 ![Ishtaria](assets/branding/emblem.png)
 
 Godot 4 client of Ishtaria. Distributed as a Debian package (Debian/Ubuntu x86-64); unsigned Windows and macOS builds are exported on request.
