@@ -1,3 +1,17 @@
+ishtaria-client (0.5.0) unstable; urgency=medium
+
+  * Loading progress bar with the datadisk's marker, shown as soon as
+    the planet is drawn.
+  * The detail terrain is baked in parallel; the world no longer stalls
+    after the first choice.
+  * City map on the minimap (walls, streets, houses, canals); characters
+    can follow the player; the camera looks up in dialogues with sky
+    ships.
+  * Fixed a crash when refreshing sky ships; sheep and pigs face the way
+    they walk.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Wed, 04 Nov 2026 05:44:40 +0100
+
 ishtaria-client (0.4.2) unstable; urgency=medium
 
   * Natural walk for every Kenney character (retargeted Quaternius walk
