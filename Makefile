@@ -1,6 +1,9 @@
 .DEFAULT_GOAL := run
 
 GODOT ?= godot4
+## The world the desktop builds connect to out of the box (written into the package as release_server.txt; saved settings,
+## ISHTARIA_SERVER_URL and --server= still win). Build a source-only client with RELEASE_SERVER= (empty).
+RELEASE_SERVER ?= https://ishtaria.vitexsoftware.com/api
 GODOT_ARGS ?=
 SERVER_URL ?=
 
@@ -103,27 +106,42 @@ test-controls:
 test-sky-ships:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/sky_ships.gd
 
+test-default-server:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/default_server.gd
+
 test-loading-bar:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/loading_bar.gd
 
 test-day-night:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/day_night.gd
 
+define write_release_server
+@if [ -n "$(RELEASE_SERVER)" ]; then printf '%s\n' '$(RELEASE_SERVER)' > "$(CURDIR)/release_server.txt"; else rm -f "$(CURDIR)/release_server.txt"; fi
+endef
+
 build:
 	mkdir -p "$(CURDIR)/build"
+	$(call write_release_server)
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release Linux "$(CURDIR)/build/ishtaria-client.x86_64"
+	@rm -f "$(CURDIR)/release_server.txt"
 
 build-arm64:
 	mkdir -p "$(CURDIR)/build"
+	$(call write_release_server)
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release "Linux arm64" "$(CURDIR)/build/ishtaria-client.linux-arm64"
+	@rm -f "$(CURDIR)/release_server.txt"
 
 build-windows:
 	mkdir -p "$(CURDIR)/build"
+	$(call write_release_server)
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release Windows "$(CURDIR)/build/ishtaria-client.windows-x86_64.exe"
+	@rm -f "$(CURDIR)/release_server.txt"
 
 build-macos:
 	mkdir -p "$(CURDIR)/build"
+	$(call write_release_server)
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release macOS "$(CURDIR)/build/ishtaria-client.macos.zip"
+	@rm -f "$(CURDIR)/release_server.txt"
 
 ## The browser build (HTML5 / WebAssembly, no threads) into build/web/. Needs the Godot web export template web_nothreads_release.zip in
 ## ~/.local/share/godot/export_templates/4.5.stable/ (the Debian templates package has only the Linux ones).

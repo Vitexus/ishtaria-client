@@ -4,6 +4,9 @@ extends Node3D
 
 const PLANET_RADIUS := 6371.0 # scene units = km in this preview
 const DEFAULT_SERVER_URL := "http://127.0.0.1:7400"
+## Written when a release is built (Makefile `build*`, debian/rules): the world the release is meant for, so that a fresh install
+## can be played at once. A source checkout has no such file and keeps the local development server.
+const RELEASE_SERVER_FILE := "res://release_server.txt"
 const DISK_PLAYER_MODEL := preload("res://scripts/disk_player_model.gd")
 const LifeOrdinal := preload("res://scripts/life_ordinal.gd")
 const UiTheme := preload("res://scripts/ui/ui_theme.gd")
@@ -58,7 +61,7 @@ var _request_pending := false
 ## Connect, Test servers and Sign out wait for the server with a spinner.
 var _connection_pending := PendingActions.new(self)
 var _connected_world := ""
-var _server_url := DEFAULT_SERVER_URL
+var _server_url := default_server_url()
 var _connection_enabled := false
 var _connection_generation := 0
 var _settings_path := "user://client.cfg"
@@ -279,7 +282,7 @@ func _ready() -> void:
 	var settings := ConfigFile.new()
 	var language := "en"
 	if settings.load(_settings_path) == OK:
-		var saved_url: Variant = settings.get_value("connection", "server_url", DEFAULT_SERVER_URL)
+		var saved_url: Variant = settings.get_value("connection", "server_url", default_server_url())
 		if saved_url is String and not _normalize_server_url(saved_url).is_empty():
 			_server_url = _normalize_server_url(saved_url)
 		var saved_language: Variant = settings.get_value("interface", "language", "en")
@@ -704,7 +707,7 @@ func _build_connection_controls() -> void:
 	column.add_child(address_label)
 	_server_input = LineEdit.new()
 	_server_input.name = "ServerAddress"
-	_server_input.placeholder_text = DEFAULT_SERVER_URL
+	_server_input.placeholder_text = default_server_url()
 	_server_input.tooltip_text = "Server URL"
 	_server_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_server_input.custom_minimum_size.y = 40
@@ -1095,6 +1098,15 @@ func _set_feedback(message: String) -> void:
 
 ## The `--server=URL` (or `--server URL`) user argument, an empty string when absent. User arguments follow `--` on the
 ## command line; the value is normalized the same way as every other source.
+## The address a new install connects to when nothing else has been chosen: the server of the release (see
+## `RELEASE_SERVER_FILE`), else the local development server. The saved setting, `ISHTARIA_SERVER_URL` and `--server=` all win over it.
+static func default_server_url() -> String:
+	if FileAccess.file_exists(RELEASE_SERVER_FILE):
+		var bundled := _normalize_server_url(FileAccess.get_file_as_string(RELEASE_SERVER_FILE))
+		if not bundled.is_empty():
+			return bundled
+	return DEFAULT_SERVER_URL
+
 static func server_url_from_arguments() -> String:
 	var args := OS.get_cmdline_user_args()
 	var index := 0

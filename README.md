@@ -85,7 +85,7 @@ The page takes the server in this order (nothing public is hardcoded in the clie
 1. `?server=https://world.example` or a same-origin path `?server=/server` / `?server=/`
 2. `window.ISHTARIA_SERVER_URL` from `ishtaria-config.js` — each host sets this in
    `/etc/ishtaria/client-web-config.js` (Apache/nginx Alias; see `ishtaria-web` site examples)
-3. Otherwise the saved address, then `http://127.0.0.1:7400`
+3. Otherwise the saved address, then the server of the release, then `http://127.0.0.1:7400`
 
 A reverse proxy can forward a path to the game server so that no CORS is needed (the game server
 itself sends no CORS headers). A page served over https can only reach servers over https. The
@@ -611,3 +611,12 @@ rarely give) are read with the **Read** button of the inventory and teach a spel
 with their mana cost and cast with the number keys **1-9** (in the order of the list) or the **Cast** button. *Firebolt* flies to the
 nearest animal in range, *Healing hands* restores health, *Refresh* stamina, *Ward* halves what creatures can bite for a minute. The
 spell effects are only a short light; the server decides everything (ADR 0010).
+
+## Out-of-the-box server of a release
+
+A release (the Debian packages and the standalone builds) connects to a world on first start, so that a fresh install can
+be played at once. The address is not in the sources: `make build*` and `debian/rules` write it into `release_server.txt`
+(git-ignored, packed into the export) from `RELEASE_SERVER`, by default `https://ishtaria.vitexsoftware.com/api`. A saved
+address, `ISHTARIA_SERVER_URL` and `--server=` all win over it, and a client run from the sources has no such file and keeps
+`http://127.0.0.1:7400`. Build for another world with `make build RELEASE_SERVER=https://world.example`, or without a preset
+server with `RELEASE_SERVER=`. `make test-default-server` checks the reading of the file.

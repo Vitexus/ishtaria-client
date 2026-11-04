@@ -9,3 +9,4 @@
 debian/web-templates/*.zip
 /tools/__pycache__/
 /debian/ishtaria-client-web/
+/release_server.txt

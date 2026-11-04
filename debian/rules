@@ -2,6 +2,9 @@
 # Needs Godot 4.5 and its Linux export templates from the godot4 and
 # godot4-export-templates packages (nothing is downloaded during the build).
 GODOT ?= /usr/bin/godot4
+# The world a fresh install connects to (release_server.txt, read by scripts/main.gd `default_server_url`); override with
+# RELEASE_SERVER=https://... when building for another world.
+RELEASE_SERVER ?= https://ishtaria.vitexsoftware.com/api
 export XDG_DATA_HOME = $(CURDIR)/build/xdg
 # The developer's own editor settings (~/.config/godot) must not mix with the build's data:
 # with both, a headless import crashes on exit. Keep the build self-contained.
@@ -21,7 +24,9 @@ override_dh_auto_build:
 	mkdir -p build $(XDG_DATA_HOME)/godot/export_templates/4.5.stable
 	for f in /usr/share/godot4/export_templates/4.5.stable/*; do ln -sf $$f $(XDG_DATA_HOME)/godot/export_templates/4.5.stable/; done
 	$(GODOT) --headless --import
+	printf '%s\n' '$(RELEASE_SERVER)' > release_server.txt
 	$(GODOT) --headless --export-release Linux build/ishtaria-client.x86_64
+	rm -f release_server.txt
 ifneq ($(WEB_TEMPLATE),)
 	mkdir -p build/web
 	ln -sf $(WEB_TEMPLATE) $(XDG_DATA_HOME)/godot/export_templates/4.5.stable/$(WEB_TEMPLATE_NAME)
