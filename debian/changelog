@@ -1,3 +1,11 @@
+ishtaria-client (0.5.1) unstable; urgency=medium
+
+  * The packages and standalone builds connect to the Ishtaria world
+    server out of the box: a fresh install can be played at once (saved
+    address, ISHTARIA_SERVER_URL and --server still win).
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Wed, 04 Nov 2026 14:04:40 +0100
+
 ishtaria-client (0.5.0) unstable; urgency=medium
 
   * Loading progress bar with the datadisk's marker, shown as soon as
