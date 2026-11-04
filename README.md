@@ -620,3 +620,13 @@ be played at once. The address is not in the sources: `make build*` and `debian/
 address, `ISHTARIA_SERVER_URL` and `--server=` all win over it, and a client run from the sources has no such file and keeps
 `http://127.0.0.1:7400`. Build for another world with `make build RELEASE_SERVER=https://world.example`, or without a preset
 server with `RELEASE_SERVER=`. `make test-default-server` checks the reading of the file.
+
+## Windows and macOS builds
+
+`make build-windows` and `make build-macos` export from Linux (no Windows or Mac needed), after
+`PLATFORMS="windows macos" tools/fetch-godot.sh` has fetched the export templates. For the Windows icon and the version
+resources of the `.exe` (product, company, copyright, file version: `export_presets.cfg`) the script also fetches `rcedit`
+and, when `XDG_CONFIG_HOME` points to a private directory, tells Godot where it and Wine are; run it as
+`XDG_DATA_HOME=$PWD/build/xdg XDG_CONFIG_HOME=$PWD/build/xdg-config PLATFORMS="windows macos" tools/fetch-godot.sh` and build with the same
+two variables. Both builds are unsigned: Windows (SmartScreen) and macOS (Gatekeeper) warn about an unknown publisher. Keep the
+versions in `export_presets.cfg` (`application/version`, `file_version`, `product_version`) in step with `debian/changelog`.

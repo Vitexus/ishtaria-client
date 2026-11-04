@@ -131,6 +131,10 @@ build-arm64:
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release "Linux arm64" "$(CURDIR)/build/ishtaria-client.linux-arm64"
 	@rm -f "$(CURDIR)/release_server.txt"
 
+## Needs `PLATFORMS=windows tools/fetch-godot.sh` (with the build's XDG_CONFIG_HOME, see README) for the icon and version resources.
+build-windows: export WINEPREFIX ?= $(CURDIR)/build/wine
+build-windows: export WINEDEBUG ?= -all
+build-windows: export WINEDLLOVERRIDES ?= mscoree,mshtml=
 build-windows:
 	mkdir -p "$(CURDIR)/build"
 	$(call write_release_server)

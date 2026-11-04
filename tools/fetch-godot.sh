@@ -35,4 +35,28 @@ if [ "$missing" = 1 ]; then
     unzip -oqj "$DIR/templates.tpz" $files -d "$TPL"
     rm "$DIR/templates.tpz"
 fi
+# The Windows build puts the icon and the version resources into the .exe with rcedit (run by Wine). Godot learns where both
+# are from its editor settings; they are written only into a private XDG_CONFIG_HOME (the build's), never into ~/.config.
+case " $PLATFORMS " in
+    *" windows "*)
+        RCEDIT_DIR="$(cd "$(dirname "$0")" && pwd)/rcedit"
+        mkdir -p "$RCEDIT_DIR"
+        [ -f "$RCEDIT_DIR/rcedit-x64.exe" ] || curl -fsSL -o "$RCEDIT_DIR/rcedit-x64.exe" \
+            "https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe"
+        if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+            SETTINGS="$XDG_CONFIG_HOME/godot/editor_settings-${VER}.tres"
+            mkdir -p "$(dirname "$SETTINGS")"
+            if ! grep -qs 'export/windows/rcedit' "$SETTINGS"; then
+                if [ -s "$SETTINGS" ]; then
+                    printf 'export/windows/rcedit = "%s"\nexport/windows/wine = "%s"\n' "$RCEDIT_DIR/rcedit-x64.exe" "$(command -v wine || echo wine)" >> "$SETTINGS"
+                else
+                    printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/windows/rcedit = "%s"\nexport/windows/wine = "%s"\n' \
+                        "$RCEDIT_DIR/rcedit-x64.exe" "$(command -v wine || echo wine)" > "$SETTINGS"
+                fi
+            fi
+        else
+            echo "Set XDG_CONFIG_HOME to a private directory to have the Windows icon written into the .exe (see README)." >&2
+        fi
+        ;;
+esac
 echo "Godot ${VER} ready: $DIR/godot"
