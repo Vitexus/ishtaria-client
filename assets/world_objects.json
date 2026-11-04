@@ -3908,7 +3908,8 @@
       "scale_m": 2.25,
       "max_slope": 0.35,
       "fauna": true,
-      "animation": "Idle"
+      "animation": "Idle",
+      "face_z": -1
     },
     {
       "id": "zeroad.cow",
@@ -3951,7 +3952,8 @@
       "scale_m": 0.49,
       "max_slope": 0.35,
       "fauna": true,
-      "animation": "Idle"
+      "animation": "Idle",
+      "face_z": -1
     },
     {
       "id": "zeroad.chicken",

@@ -14,6 +14,9 @@ const MIN_SERVER_VERSION := "0.1.0"
 const APPROACH_SECONDS := 14.0
 ## Stamina at or below which a character in deep water drowns (mirrors the server's `DROWNING_STAMINA`).
 const DROWNING_STAMINA := 20.0
+## The pitch (radians above the horizon) and the time the camera looks up for a ship of the gods that flies over (an Easter egg).
+const SKY_VIEW_PITCH := 0.8
+const SKY_VIEW_SECONDS := 22.0
 ## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
 ## looking straight down, so that the plan of a city (streets, walls) can be seen before the landing.
 const APPROACH_FALL_SHARE := 0.4
@@ -1869,6 +1872,7 @@ func _refresh_minimap_props() -> void:
 func _refresh_minimap_water() -> void:
 	if _minimap != null:
 		_minimap.set_water_map(_environment.water_map)
+		_minimap.set_patch_map(_environment.patch_map)
 
 func _update_minimap_entities(markers: Array) -> void:
 	# Collect entities from NPCs, other players, pickups and quest markers.
@@ -2553,6 +2557,8 @@ func _on_friend_event(event: Dictionary) -> void:
 		# A character told of the gods' ships: one flies low over the player. Its sound follows the sound setting.
 		_sky_ships.sound_enabled = _audio.enabled
 		_sky_ships.flyover(str(event.subject), _player_metres, int(event.id))
+		# The ship crosses the sky ahead of the player; in a dialogue the camera cannot be turned, so it looks up by itself.
+		_controls.lift_view(SKY_VIEW_PITCH, SKY_VIEW_SECONDS)
 
 ## Love minigame: hearts / zones / humanization of Enkidu.
 func _on_love_event(event: Dictionary) -> void:
@@ -2884,6 +2890,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_controls.zoom(event.factor)
 
 func _process(delta: float) -> void:
+	_environment.follow_target = _player_metres
 	_environment.set_night(1.0 - _sky.daylight)
 	if not _vehicle_id.is_empty() and _controls.active:
 		_environment.follow_vehicle(_vehicle_id, _controls.avatar_metres(), _controls.heading())

@@ -80,6 +80,8 @@ var _minimap_viewport: SubViewport
 var _render_node: Node2D
 var _background: Sprite2D
 var _water_sprite: Sprite2D
+var _patch_sprite: Sprite2D
+var _patch_map: Dictionary = {}
 var _prop_overlay: PropOverlay
 var _legend: Control
 var _player_marker: Sprite2D
@@ -187,6 +189,11 @@ func _ready() -> void:
 	_water_sprite.z_index = -8
 	_water_sprite.visible = false
 	_render_node.add_child(_water_sprite)
+	_patch_sprite = Sprite2D.new()
+	_patch_sprite.name = "PlaceMap"
+	_patch_sprite.z_index = -7
+	_patch_sprite.visible = false
+	_render_node.add_child(_patch_sprite)
 
 	# Roads and buildings of the generated places.
 	_prop_overlay = PropOverlay.new()
@@ -294,6 +301,13 @@ func set_water_map(map: Dictionary) -> void:
 	_water_map = map
 	_water_sprite.texture = map.get("texture") if not map.is_empty() else null
 	_water_sprite.visible = not map.is_empty()
+
+
+## The map picture of a datadisk's place (houses, streets, canals, walls), see `surface_environment.patch_map`.
+func set_patch_map(map: Dictionary) -> void:
+	_patch_map = map
+	_patch_sprite.texture = map.get("texture") if not map.is_empty() else null
+	_patch_sprite.visible = not map.is_empty()
 
 
 func set_player_position(pos: Vector3) -> void:
@@ -475,6 +489,11 @@ func _now() -> float:
 ## frame's tangent axis decides the rotation, its centre the position, and one baked metre
 ## is `scale_px` screen pixels.
 func _update_water(size: Vector2, centre: Vector2, scale_px: float, basis: Dictionary) -> void:
+	if not _patch_map.is_empty() and is_instance_valid(_patch_sprite.texture):
+		var patch_centre: Vector3 = _patch_map.centre
+		_patch_sprite.position = centre + _to_map(patch_centre - player_position, basis) * scale_px
+		_patch_sprite.rotation = _to_map(_patch_map.tangent, basis).angle()
+		_patch_sprite.scale = Vector2.ONE * scale_px * float(_patch_map.metres_per_pixel)
 	if _water_map.is_empty() or not is_instance_valid(_water_sprite.texture):
 		return
 	var world_centre: Vector3 = _water_map.centre

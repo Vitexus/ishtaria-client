@@ -57,6 +57,14 @@ var invert_y := false
 var distance_m := 5.0
 var yaw := 0.0
 var pitch := -0.25
+## The view lifted to the sky for a while (see `lift_view`): where it was, where it goes and until when it stays there.
+var _lifted := false
+var _lift_from := 0.0
+var _lift_target := 0.0
+var _lift_until_ms := 0
+var _lift_distance_from := 0.0
+## Close to the character the orbit of the camera is not squeezed against the ground, so the view really points up.
+const LIFT_DISTANCE_M := 1.8
 var active := false
 var moving := false
 var direction := Vector3.ZERO
@@ -283,7 +291,29 @@ func capture_mouse() -> void:
 		get_viewport().gui_release_focus()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
+## Lifts the view toward the sky for `seconds` and lets it down again: for something that happens up there while the player cannot
+## turn the camera (in a dialogue). Moving the camera oneself ends it at once.
+func lift_view(target_pitch: float, seconds: float) -> void:
+	if not _lifted:
+		_lift_from = pitch
+		_lift_distance_from = distance_m
+	_lifted = true
+	_lift_target = clampf(target_pitch, -1.35, 1.25)
+	_lift_until_ms = Time.get_ticks_msec() + int(seconds * 1000.0)
+
+func _ease_lifted_view(delta: float) -> void:
+	if not _lifted:
+		return
+	var holding := Time.get_ticks_msec() < _lift_until_ms
+	var goal := _lift_target if holding else _lift_from
+	var distance_goal := minf(LIFT_DISTANCE_M, _lift_distance_from) if holding else _lift_distance_from
+	pitch = move_toward(pitch, goal, delta * 0.9)
+	distance_m = move_toward(distance_m, distance_goal, delta * 12.0)
+	if not holding and absf(pitch - goal) < 0.002 and absf(distance_m - distance_goal) < 0.01:
+		_lifted = false
+
 func look(relative: Vector2) -> void:
+	_lifted = false
 	yaw = wrapf(yaw - relative.x * sensitivity, -PI, PI)
 	pitch = clampf(pitch - relative.y * sensitivity * (-1.0 if invert_y else 1.0), -1.35, 1.25)
 
@@ -461,6 +491,7 @@ func _wants_walk() -> bool:
 	return active and intent().length_squared() > 0.0001 and (moving or Time.get_ticks_msec() < _motion_until)
 
 func _process(delta: float) -> void:
+	_ease_lifted_view(delta)
 	_update_glow()
 	if active and is_instance_valid(avatar):
 		if sitting and _seat_avatar():

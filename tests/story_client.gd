@@ -105,6 +105,32 @@ func _run() -> void:
 	_check(walked[1] > 8.0 and walked[1] < 12.0, "it is half way along its first walk: %s" % str(walked))
 	_check(environment._npc_walkers[0].walking and environment._npc_walkers[0].player.current_animation == "walk", "it walks")
 	_check(environment.nearest_npc(Vector3(6371000.0, 10.0, 0.0), 4.5).get("id", "") == "x:walker", "it is found where it is, not where it was put")
+	# A companion the server says follows the player walks to them and stands beside them: no jump from one place to another,
+	# and a new list of the characters does not put it somewhere new.
+	var companion := {"id": "x:companion", "name_key": "k.hello", "character": "retro/humanFemaleA", "position": [6371000.0, 0.0, 0.0], "yaw": 0.0, "scale_m": 1.8, "follow": true}
+	environment.follow_target = Vector3(6371000.0, 12.0, 0.0)
+	environment.apply_npcs([companion])
+	_check(environment._followers.size() == 1, "a character that follows is registered")
+	var previous := Vector3(6371000.0, 0.0, 0.0)
+	var largest := 0.0
+	for step in 300:
+		environment._follow_player(0.05)
+		var at := Vector3(environment._npc_entries[0].position[0], environment._npc_entries[0].position[1], environment._npc_entries[0].position[2])
+		largest = maxf(largest, at.distance_to(previous))
+		previous = at
+		if step == 20:
+			# the list is asked for again, as the server does every few seconds: the follower keeps its place
+			var before: Vector3 = at
+			environment.apply_npcs([companion])
+			var after := Vector3(environment._npc_entries[0].position[0], environment._npc_entries[0].position[1], environment._npc_entries[0].position[2])
+			_check(after.distance_to(before) < 0.01, "a new list does not move the follower: %s" % str(after.distance_to(before)))
+	_check(largest < 0.3, "it never jumps (the largest step is %.2f m)" % largest)
+	_check(previous.distance_to(environment.follow_target) > 2.0 and previous.distance_to(environment.follow_target) < 2.6, "it stops beside the player: %.2f m" % previous.distance_to(environment.follow_target))
+	environment.follow_target = Vector3(6371000.0, 40.0, 0.0)
+	environment._follow_player(0.1)
+	_check(environment._followers[0].moving, "it walks on when the player goes on")
+	environment.apply_npcs([walker.duplicate(true)])
+	_check(environment._followers.is_empty() and environment._follow_state.is_empty(), "a character that no longer follows is forgotten")
 	var stood := walker.duplicate(true)
 	stood.wander = [[now_ms - 60000.0, 6371000.0, 20.0, 0.0], [now_ms + 60000.0, 6371000.0, 20.0, 0.0]]
 	environment.apply_npcs([stood])

@@ -12,10 +12,12 @@ extends Node3D
 signal flight_started(ship_id: String, flyover: bool)
 
 const SPEED_OF_SOUND_M_S := 343.0
+const MEDIA_PREFIX := "/story/media/"
 ## A flight told by a character: the ship crosses the player's view from side to side, level, this far ahead of the
-## character and this high above them, so that it is seen whole and seen to be huge.
-const FLYOVER_AHEAD_M := 350.0
-const FLYOVER_ALTITUDE_M := 110.0
+## character and this high above them (about 48 degrees up), so that houses in the street do not hide it and it is seen whole
+## and seen to be huge.
+const FLYOVER_AHEAD_M := 150.0
+const FLYOVER_ALTITUDE_M := 170.0
 const FLYOVER_SPEED_M_S := 180.0
 const FLYOVER_HALF_LENGTH_M := 1800.0
 const POLL_SECONDS := 600.0
@@ -110,9 +112,11 @@ func flyover(ship_id: String, player_metres: Vector3, seed: int = 0) -> void:
 func media_ready(url: String, resource: Resource) -> void:
 	if not resource is PackedScene or not url.ends_with(".glb"):
 		return
-	_scenes[url] = resource
+	# The story client names a medium by its whole path, `/story/media/<disk>/<file>`; the ships name theirs from the disk on.
+	var model := url.trim_prefix(MEDIA_PREFIX)
+	_scenes[model] = resource
 	for flight: Dictionary in _active:
-		if flight.node == null and _ships.get(flight.ship, {}).get("model") == url:
+		if flight.node == null and str(_ships.get(flight.ship, {}).get("model")) == model:
 			_attach(flight)
 
 # --- flights --------------------------------------------------------------------------------------------------

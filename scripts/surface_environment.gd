@@ -59,6 +59,8 @@ const WATER_MAP_PIXELS := 256
 const WATER_MAP_EXTENT_M := 420.0
 const WATER_MAP_EXTENT_MAX_M := 3500.0
 ## Water on the minimap: the same colour the map legend shows.
+## The largest side of a footprint the minimap draws as a building (the wall of Uruk, 2.5 km across, is none).
+const MAP_MAX_FOOTPRINT_M := 150.0
 const WATER_MAP_COLOR := Color(0.18, 0.45, 0.65, 0.92)
 ## Built / tilled ground from a datadisk clear mask (streets, houses, fields).
 const SETTLEMENT_MAP_COLOR := Color(0.55, 0.52, 0.42, 0.75)
@@ -134,6 +136,8 @@ var _structure_footprints: Dictionary = {}
 ## Keys: texture (ImageTexture), centre (Vector3, world metres), tangent, forward (Vector3),
 ## metres_per_pixel (float).
 var water_map: Dictionary = {}
+## The picture of a landscape patch's place that the minimap draws (houses, streets, canals, walls), placed like `water_map`.
+var patch_map: Dictionary = {}
 ## Turns a translation key into text (set by the game once the story is loaded).
 var npc_text := Callable()
 ## Asks the story client for a media file (a character model); answered through `media_ready`.
@@ -142,6 +146,15 @@ var _npc_entries: Array = []
 ## Characters of the story that walk along the waypoints the server sent: {"id", "index" (of _npc_entries and the
 ## children of `npcs`), "route", "walking", "player" (the animation player of its model, or null)}.
 var _npc_walkers: Array[Dictionary] = []
+## Characters that walk after the player (an escorted companion), and where each is: the client walks them, the server only
+## says where they start; their places are kept across the lists, which would otherwise put them somewhere new every time.
+var _followers: Array[Dictionary] = []
+var _follow_state: Dictionary = {}
+## Where the player stands (metres from the planet's centre), set by the owner each frame.
+var follow_target := Vector3.ZERO
+const FOLLOW_STOP_M := 2.4
+const FOLLOW_SNAP_M := 80.0
+const FOLLOW_MAX_SPEED_M_S := 5.0
 ## Characters the player talks to: id -> {"released_at": 0 while the conversation is on, otherwise when it ended (msec), "home": the
 ## orientation before it}. They stand still and face the player; afterwards they go on to where they were going (see `hold_npc`).
 var _held_npcs: Dictionary = {}
@@ -300,6 +313,7 @@ func _process(delta: float) -> void:
 	_swim()
 	_wander(delta)
 	_walk_npcs(delta)
+	_follow_player(delta)
 	_face_held(delta)
 	_animals_elapsed += delta
 	if _animals_elapsed >= ANIMAL_REFRESH_S:
@@ -880,6 +894,7 @@ func _clear_region(clear_objects: bool = true, keep_detail: bool = false) -> voi
 		_rivers_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_material.set_shader_parameter("detail_direction", Vector3.ZERO)
 	water_map = {}
+	patch_map = {}
 	water_changed.emit()
 
 func show_region(direction: Vector3) -> void:
@@ -1465,11 +1480,18 @@ func apply_npcs(data: Variant) -> bool:
 		npcs.remove_child(pair[1])
 	_npc_entries.clear()
 	_npc_walkers.clear()
+	_followers.clear()
 	var accepted_list: bool = data is Array and data.size() <= MAX_NPCS
 	var result := _apply_npcs_listed(data if accepted_list else [], old)
 	for pair: Array in old.values():
 		if is_instance_valid(pair[1]):
 			pair[1].queue_free()
+	for id: String in _follow_state.keys():
+		var following := false
+		for follower: Dictionary in _followers:
+			following = following or follower.id == id
+		if not following:
+			_follow_state.erase(id)
 	npcs_changed.emit()
 	return accepted_list and result
 
@@ -1521,6 +1543,7 @@ func _apply_npcs_listed(data: Array, old: Dictionary) -> bool:
 		_attach_health_bar(placement, entry, head)
 		npcs.add_child(placement)
 		_npc_entries.append(entry.duplicate(true))
+		_register_follower(entry, _npc_entries.size() - 1, placement, _npc_player(model))
 		if entry.has("wander"):
 			var route := _parse_route(entry.wander)
 			if not route.is_empty():
@@ -1536,6 +1559,58 @@ func _apply_npcs_listed(data: Array, old: Dictionary) -> bool:
 		if entry.get("model") != null and fetch_media.is_valid() and preload("res://scripts/story_client.gd").valid_media_url(entry.model) and entry.model.ends_with(".glb"):
 			fetch_media.call(entry.model)
 	return true
+
+## A character the server says follows the player keeps the place it has walked to, unless the list puts it far from there
+## (a new journey, or the player jumped far): then it starts where the list says.
+func _register_follower(entry: Dictionary, index: int, placement: Node3D, player: AnimationPlayer) -> void:
+	if entry.get("follow") != true:
+		return
+	var listed := Vector3(entry.position[0], entry.position[1], entry.position[2])
+	var held: Vector3 = _follow_state.get(entry.id, listed)
+	if held.distance_to(listed) > FOLLOW_SNAP_M:
+		held = listed
+	_follow_state[entry.id] = held
+	_npc_entries[index].position = [held.x, held.y, held.z]
+	placement.position = _npc_render_position([held.x, held.y, held.z])
+	_followers.append({"id": entry.id, "index": index, "player": player, "moving": false, "running": false})
+
+## Walks the followers to the player and lets them stand beside them: at a pace that grows with the distance, turned the way
+## they go (to the player when they stand), with the walking clip while they move and the idle one when they have arrived.
+func _follow_player(delta: float) -> void:
+	if _followers.is_empty() or follow_target == Vector3.ZERO:
+		return
+	for follower: Dictionary in _followers:
+		var index: int = follower.index
+		if index >= npcs.get_child_count() or index >= _npc_entries.size() or _held_npcs.has(follower.id):
+			continue
+		var node := npcs.get_child(index) as Node3D
+		var position: Vector3 = _follow_state.get(follower.id, follow_target)
+		var up := position.normalized()
+		var to := follow_target - position
+		to -= up * to.dot(up)
+		var distance := to.length()
+		if distance > FOLLOW_SNAP_M:
+			position = follow_target
+			distance = 0.0
+		var speed := 0.0
+		if distance > FOLLOW_STOP_M:
+			speed = clampf((distance - FOLLOW_STOP_M) * 0.9 + 1.2, 1.2, FOLLOW_MAX_SPEED_M_S)
+			var step := minf(speed * delta, distance - FOLLOW_STOP_M)
+			# Along the ground at the player's height: they walk the same ground within a few metres.
+			position = (position + to / distance * step).normalized() * follow_target.length()
+		_follow_state[follower.id] = position
+		node.position = _npc_render_position([position.x, position.y, position.z])
+		_npc_entries[index].position = [position.x, position.y, position.z]
+		if distance > 0.05:
+			# Models face +Z, and a basis that looks at a point has -Z pointing there.
+			var facing := Basis.looking_at(-(to / distance), position.normalized()).get_rotation_quaternion()
+			node.quaternion = node.quaternion.slerp(facing, minf(1.0, delta * (6.0 if speed > 0.0 else 3.0)))
+		var moving := speed > 0.0
+		var running := speed > 1.55
+		if moving != follower.moving or running != follower.running:
+			follower.moving = moving
+			follower.running = running
+			_play_npc(follower.player, speed)
 
 ## Two lists name the same character when nothing that shapes its model or its name changed.
 func _same_npc(before: Dictionary, after: Dictionary) -> bool:
@@ -1563,6 +1638,7 @@ func _keep_npc(placement: Node3D, entry: Dictionary, point: Vector3) -> bool:
 	var head := (label.position.y / 1.08) if label != null else 1.7
 	if entry.get("health") != null or placement.get_node_or_null("HealthBar") != null:
 		_attach_health_bar(placement, entry, head)
+	_register_follower(entry, held, placement, _npc_player(model))
 	if entry.has("wander"):
 		var route := _parse_route(entry.wander)
 		if not route.is_empty():
@@ -1731,7 +1807,7 @@ func _same_patches(patches: Array) -> bool:
 	for index in patches.size():
 		var fresh: Dictionary = patches[index]
 		var held: Dictionary = _terrain_patches[index]
-		for key in ["place", "anchor", "anchor_height_m", "extent", "offset", "feather", "heightmap_url", "water_url", "clear_url"]:
+		for key in ["place", "anchor", "anchor_height_m", "extent", "offset", "feather", "heightmap_url", "water_url", "clear_url", "map_url"]:
 			if fresh.get(key) != held.get(key):
 				return false
 	return true
@@ -1769,6 +1845,8 @@ func apply_terrains(data: Variant) -> bool:
 			return false
 		if entry.get("clear") != null and (not entry.clear is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.clear) or not entry.clear.ends_with(".png")):
 			return false
+		if entry.get("map") != null and (not entry.map is String or not preload("res://scripts/story_client.gd").valid_media_url(entry.map) or not entry.map.ends_with(".png")):
+			return false
 		var anchor := Vector3(entry.position[0], entry.position[1], entry.position[2]) / 1000.0
 		patches.append({
 			"place": entry.place,
@@ -1782,6 +1860,8 @@ func apply_terrains(data: Variant) -> bool:
 			"heightmap_url": entry.heightmap,
 			"water_url": entry.get("water", ""),
 			"clear_url": entry.get("clear", ""),
+			"map_url": entry.get("map", ""),
+			"map_image": null,
 			"grid": null,
 			"water_grid": null,
 			"clear_image": null,
@@ -1800,6 +1880,8 @@ func apply_terrains(data: Variant) -> bool:
 			patch.grid = old.grid
 			patch.water_grid = old.water_grid
 			patch.clear_image = old.get("clear_image")
+			if old.get("map_url", "") == patch.map_url:
+				patch.map_image = old.get("map_image")
 			patch.width = old.width
 			patch.height = old.height
 	_terrain_patches = patches
@@ -1813,6 +1895,8 @@ func apply_terrains(data: Variant) -> bool:
 			_terrain_fetch(patch.water_url)
 		if patch.clear_url != "" and patch.clear_image == null:
 			_terrain_fetch(patch.clear_url)
+		if patch.map_url != "" and patch.map_image == null:
+			_terrain_fetch(patch.map_url)
 	_update_patch_water()
 	if rebuild:
 		_build_detail()
@@ -1839,6 +1923,19 @@ func _terrain_received(result: int, code: int, _headers: PackedStringArray, body
 		(_terrain_requests[url] as HTTPRequest).queue_free()
 		_terrain_requests.erase(url)
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	var map_received := false
+	for patch: Dictionary in _terrain_patches:
+		if url == String(patch.get("map_url", "")):
+			var picture := Image.new()
+			if picture.load_png_from_buffer(body) != OK or picture.get_width() < 16 or picture.get_height() < 16 or picture.get_width() * picture.get_height() > 4 << 20:
+				return
+			patch.map_image = picture
+			map_received = true
+	if map_received:
+		# The coarse picture of the minimap leaves the ground of such a patch to the map: baked again without it.
+		_publish_patch_map()
+		_build_detail()
 		return
 	var clear_only := false
 	for patch: Dictionary in _terrain_patches:
@@ -1894,6 +1991,37 @@ func _terrain_apply(url: String, grid: Array) -> void:
 			patch.grid = grid[2]
 	_update_patch_water()
 	_build_detail()
+
+## Hands the minimap the map picture of the first landscape patch that has one, placed in the world: the picture's columns run
+## east and its rows south in the patch's frame, so the bake frame of the minimap (tangent east, forward north) is its own.
+func _publish_patch_map() -> void:
+	patch_map = {}
+	for patch: Dictionary in _terrain_patches:
+		var picture: Variant = patch.get("map_image")
+		if not picture is Image:
+			continue
+		var image: Image = picture
+		if not patch.has("map_texture"):
+			patch["map_texture"] = ImageTexture.create_from_image(image)
+		var anchor := Vector3(patch.anchor[0], patch.anchor[1], patch.anchor[2]) * 1000.0
+		var east := Vector3(patch.axes[0][0], patch.axes[0][1], patch.axes[0][2])
+		var south := Vector3(patch.axes[1][0], patch.axes[1][1], patch.axes[1][2])
+		patch_map = {
+			"texture": patch.map_texture,
+			"centre": anchor + east * float(patch.offset[0]) + south * float(patch.offset[1]),
+			"tangent": east,
+			"forward": -south,
+			"metres_per_pixel": float(patch.extent[0]) / float(image.get_width()),
+		}
+		break
+	water_changed.emit()
+
+## Whether a landscape patch with a map picture covers a direction: the minimap's coarse picture leaves that ground to the map.
+func _patch_map_covers(direction: Array) -> bool:
+	for patch: Dictionary in _terrain_patches:
+		if patch.get("map_image") is Image and not _terrain_local(patch, direction).is_empty():
+			return true
+	return false
 
 ## A minimal 16-bit greyscale PNG decoder (no interlace): Godot's own loader keeps only a half
 ## float per pixel and would flatten the decimetre step the patch is built of. One row is the
@@ -2261,6 +2389,9 @@ func map_props() -> Array[Dictionary]:
 		var size := _prop_footprint_m(entry)
 		if size == Vector2.ZERO:
 			continue
+		# A wall, a precinct or a whole district is no building: its rectangle of kilometres would cover the map.
+		if size.x > MAP_MAX_FOOTPRINT_M or size.y > MAP_MAX_FOOTPRINT_M:
+			continue
 		result.append({
 			"kind": kind,
 			"position": Vector3(float(entry.position[0]), float(entry.position[1]), float(entry.position[2])),
@@ -2458,6 +2589,8 @@ func _bake_water_image(unit: Vector3, tangent: Vector3, forward: Vector3, extent
 			var vertical := (pixels * 0.5 - (float(row) + 0.5)) * step
 			var direction: Vector3 = (unit * RADIUS + tangent * horizontal / 1000.0 + forward * vertical / 1000.0).normalized()
 			var dir := [direction.x, direction.y, direction.z]
+			if _patch_map_covers(dir):
+				continue
 			if _terrain_cleared(dir):
 				image.set_pixel(column, row - first_row, SETTLEMENT_MAP_COLOR)
 			if _minimap_water_at(dir):

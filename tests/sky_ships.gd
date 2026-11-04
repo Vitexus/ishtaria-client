@@ -112,5 +112,17 @@ func _run() -> void:
 		_check(peak > 15000 and peak < 30000, "audible and not clipping: %d" % peak)
 	_check(SKY.make_hum().data != SKY.make_roar().data, "two different sounds")
 
+	# A model that arrives (the story client names it by its whole path) is attached to the flight waiting for it.
+	var ships := SKY.new()
+	root.add_child(ships)
+	ships.sound_enabled = false
+	ships._ships = {"disc": {"id": "disc", "model": "g/media/models/disc.glb", "scale": 10.0}}
+	var flight := {"ship": "disc", "node": null, "player": null, "start": Time.get_unix_time_from_system(), "duration": 60.0}
+	ships._active.append(flight)
+	var scene := PackedScene.new()
+	scene.pack(Node3D.new())
+	ships.media_ready("/story/media/g/media/models/disc.glb", scene)
+	_check(flight.node != null, "the model that arrives is attached to its flight")
+	ships._active.clear()
 	print("sky ships: %d checks, %d failures" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
