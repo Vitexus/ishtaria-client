@@ -143,6 +143,7 @@ func _run() -> void:
 	_check(not client.is_server_version_compatible("0.0.9"), "Lower version is incompatible")
 	_check(not client.is_server_version_compatible(""), "Empty version is incompatible")
 
+	TranslationServer.set_locale("en")
 	var missing_version := JSON.stringify({"server_name": "alpha.example.org", "ruleset": "core-rules@1.0"}).to_utf8_buffer()
 	client._connection_enabled = true
 	client._on_world_received(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), missing_version, client._connection_generation)
@@ -155,8 +156,6 @@ func _run() -> void:
 	TranslationServer.set_locale("cs")
 	client._update_translations()
 	_check("Server není dostupný (verze serveru 0.0.9 není kompatibilní (minimum 0.1.0))" in client._status.text, "Incompatible server version error translates to Czech")
-	TranslationServer.set_locale("en")
-	client._update_translations()
 	if DisplayServer.get_name() != "headless":
 		client._creator.hide()
 		for dimensions in [Vector2i(1600, 900), Vector2i(640, 480), Vector2i(360, 640)]:

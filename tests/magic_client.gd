@@ -73,6 +73,7 @@ func _init() -> void:
 	if row != null:
 		row.find_child("Cast", true, false).pressed.emit()
 		_check(cast == ["firebolt"], "the cast button sends the spell")
+	panel.cancel_pending()  # the server answered the cast: the panel unlocks
 	var learn_button: Node = panel.inventory_list.find_child("Learn", true, false)
 	_check(learn_button != null and panel.inventory_list.find_children("Learn", "Button", true, false).size() == 1, "only the scroll has a read button")
 	if learn_button != null:

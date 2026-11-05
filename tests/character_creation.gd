@@ -125,7 +125,7 @@ func _test_disk_model() -> void:
 
 func _world_ready(client: Node) -> void:
 	client._connection_enabled = true
-	client._on_world_received(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), JSON.stringify({"server_name": "ishtaria.example.org", "ruleset": "core-rules@1.0", "seed": 42}).to_utf8_buffer(), client._connection_generation)
+	client._on_world_received(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), JSON.stringify({"server_name": "ishtaria.example.org", "ruleset": "core-rules@1.0", "seed": 42, "server_version": "0.5.0"}).to_utf8_buffer(), client._connection_generation)
 	client._reconnect.stop()
 
 func _drag_preview(creator: Node, delta: Vector2) -> void:

@@ -1,7 +1,7 @@
 extends SceneTree
 
 const COVER := preload("res://scripts/disk_cover.gd")
-const DISK_COVER_FILE := "res://../ishtaria-datadisk-endland/media/cover/untitled_artwork-1e124.jpg"
+const DISK_COVER_FILE := "res://../ishtaria-datadisk-endland/media/cover/cover.jpg"
 
 var _failures := 0
 
@@ -14,11 +14,11 @@ func _check(condition: bool, description: String) -> void:
 		push_error(description)
 
 func _run() -> void:
-	_check(COVER.valid_cover_url("/story/media/endland/media/cover/untitled_artwork-1e124.jpg"), "a disk cover path is accepted")
+	_check(COVER.valid_cover_url("/story/media/endland/media/cover/cover.jpg"), "a disk cover path is accepted")
 	for bad: Variant in ["http://evil/x.jpg", "/story/media/../x.jpg", "/story/media/a//b.jpg", "/story/media/a/b.jpg?x=1", "/story/media/a/b.ogg", "/world/heightmap.png", 5, null]:
 		_check(not COVER.valid_cover_url(bad), "rejected: %s" % str(bad))
 	var announced := [
-		{"id": "endland", "version": "0.5.0", "name": "The End Land", "cover": "/story/media/endland/media/cover/untitled_artwork-1e124.jpg"},
+		{"id": "endland", "version": "0.5.0", "name": "The End Land", "cover": "/story/media/endland/media/cover/cover.jpg"},
 		{"id": "plain", "version": "1.0.0", "name": "No cover", "cover": null},
 		{"id": "bad", "version": "1.0.0", "name": "Bad", "cover": "/etc/passwd"},
 		"junk",

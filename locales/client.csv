@@ -97,7 +97,6 @@ Invalid player profile,Invalid player profile,Neplatný hráčský profil
 Could not save player preference,Could not save player preference,Volbu hráče nelze uložit
 Inventory,Inventory,Inventář
 Graves,Graves,Hroby
-Close,Close,Zavřít
 Back,Back,Zpět
 Next,Next,Další
 Eat,Eat,Sníst
@@ -465,7 +464,7 @@ The cow has no milk now,The cow has no milk now,Kráva teď nemá mléko
 Equip a weapon,Equip a weapon,Vezměte do ruky zbraň
 %s whispers: %s,%s whispers: %s,%s šeptá: %s
 You whisper to %s: %s,You whisper to %s: %s,Šeptáš hráči %s: %s
-"Say something (/w name text whispers to a friend)","Say something (/w name text whispers to a friend)","Řekni něco (/w jméno text pošeptá příteli)"
+Say something (/w name text whispers to a friend),Say something (/w name text whispers to a friend),Řekni něco (/w jméno text pošeptá příteli)
 Message not sent,Message not sent,Zpráva nebyla odeslána
 You are talking too fast,You are talking too fast,Mluvíš příliš rychle
 You can only whisper to friends,You can only whisper to friends,Šeptat můžeš jen přátelům
@@ -627,7 +626,8 @@ Open this page in your web browser?,Open this page in your web browser?,Otevří
 Open in browser,Open in browser,Otevřít v prohlížeči
 Active quest,Active quest,Aktivní úkol
 You are drowning: get to the shore!,You are drowning: get to the shore!,Topíš se: doplav ke břehu!
-You are swimming: it tires you, mind your stamina,You are swimming: it tires you, mind your stamina,Plaveš: unavuje tě to, hlídej si výdrž
+"You are swimming: it tires you, mind your stamina","You are swimming: it tires you, mind your stamina","Plaveš: unavuje tě to, hlídej si výdrž"
+The road carries you onward,The road carries you onward,Cesta tě nese dál
 Left hand,Left hand,Levá ruka
 Right hand,Right hand,Pravá ruka
 Worn — repair at a blacksmith,Worn — repair at a blacksmith,Opotřebené — opravte u kováře
@@ -635,14 +635,6 @@ Repair,Repair,Opravit
 Nothing needs repair.,Nothing needs repair.,Nic nepotřebuje opravu.
 Nothing to repair,Nothing to repair,Není co opravovat
 Already in good repair,Already in good repair,Už je v pořádku
-Drop,Drop,Zahodit
-Drop on the ground,Drop on the ground,Zahodit na zem
-Unequip it first,Unequip it first,Nejdřív sundejte z ruky
-Nothing to drop,Nothing to drop,Není co zahodit
-Nothing to pick up,Nothing to pick up,Není co sebrat
-Drop one piece at a time,Drop one piece at a time,Zahazujte po jednom kuse
-Trade,Trade,Obchodovat
-Nothing left to buy,Nothing left to buy,Už není co koupit
 Drop,Drop,Zahodit
 Drop on the ground,Drop on the ground,Zahodit na zem
 Unequip it first,Unequip it first,Nejdřív sundejte z ruky
