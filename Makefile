@@ -11,7 +11,7 @@ ifneq ($(strip $(SERVER_URL)),)
 export ISHTARIA_SERVER_URL := $(SERVER_URL)
 endif
 
-.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls build build-arm64 build-windows build-macos build-web serve-web build-all help
+.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls test-photo build build-arm64 build-windows build-macos build-web serve-web build-all help
 
 run:
 	"$(GODOT)" --path "$(CURDIR)" $(GODOT_ARGS)
@@ -84,6 +84,9 @@ test-disk-cover:
 
 test-about:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/about_card.gd
+
+test-photo:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/photo_mode.gd
 
 test-quest-indicator:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/quest_indicator.gd
@@ -172,6 +175,7 @@ help:
 		'make test-environment  Test terrain mapping and scenery placement' \
 		'make test-day-night  Test solar clock, seasons and lighting' \
 		'make test-controls  Test keyboard remapping and mouse camera' \
+		'make test-photo     Test photo mode: view, sliders, pictures' \
 		'make build  Export the Linux release executable' \
 		'make build-arm64  Export the Linux arm64 release executable' \
 		'make build-windows  Export the Windows x86-64 executable (unsigned)' \

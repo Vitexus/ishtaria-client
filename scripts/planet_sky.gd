@@ -100,7 +100,7 @@ func apply_atmosphere(data: Variant) -> bool:
 		sun.light_color = _color(settings.sun_color)
 		sun.light_energy = settings.sun_energy
 	if not _solar.is_empty():
-		_update_solar(_solar.unix_seconds + (Time.get_ticks_msec() - _sync_ticks) / 1000.0)
+		_update_solar(_solar_now())
 	return true
 
 func apply_solar(data: Variant) -> bool:
@@ -274,11 +274,22 @@ func set_observer(direction: Vector3) -> void:
 	_observer = direction.normalized() if direction != Vector3.ZERO else Vector3.UP
 	material.set_shader_parameter("local_up", _observer)
 	if not _solar.is_empty():
-		_update_solar(_solar.unix_seconds + (Time.get_ticks_msec() - _sync_ticks) / 1000.0)
+		_update_solar(_solar_now())
 
 func _process(_delta: float) -> void:
 	if not _solar.is_empty():
-		_update_solar(_solar.unix_seconds + (Time.get_ticks_msec() - _sync_ticks) / 1000.0)
+		_update_solar(_solar_now())
+
+## Seconds added to the world's solar clock for the local view only. Photo mode moves the sun with
+## it to compose a shot; the clock itself belongs to the server (`worlds.solar_offset_seconds`,
+## which only the Day and Night scrolls turn, for everybody at once), so this never leaves the
+## client and is dropped when photo mode closes.
+var preview_offset_seconds := 0.0
+
+## The moment the sky is drawn for: the server's clock, carried forward by the local one, plus any
+## local preview offset.
+func _solar_now() -> float:
+	return _solar.unix_seconds + (Time.get_ticks_msec() - _sync_ticks) / 1000.0 + preview_offset_seconds
 
 func _update_solar(seconds: float) -> void:
 	sun_direction = solar_direction(seconds)

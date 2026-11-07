@@ -696,3 +696,11 @@ Age,Age,Věk
 %s days,%s days,%s dní
 No achievement earned yet,No achievement earned yet,Zatím nezískán žádný úspěch
 All achievements,All achievements,Všechny úspěchy
+Photo mode,Photo mode,Fotografický režim
+Screenshot,Screenshot,Snímek obrazovky
+Time of day,Time of day,Denní doba
+Field of view,Field of view,Zorný úhel
+Show character,Show character,Zobrazit postavu
+"Walking keys move the camera, the right mouse button looks around, jump and Control rise and sink, run flies faster. The screenshot key takes the picture, Escape leaves.","Walking keys move the camera, the right mouse button looks around, jump and Control rise and sink, run flies faster. The screenshot key takes the picture, Escape leaves.","Kamerou pohybují klávesy chůze, rozhlíží se držené pravé tlačítko myši, skok a Control stoupají a klesají, běh zrychluje. Klávesa snímku pořídí fotografii, Escape režim opustí."
+Picture saved to %s,Picture saved to %s,Snímek uložen do %s
+The picture could not be saved,The picture could not be saved,Snímek se nepodařilo uložit

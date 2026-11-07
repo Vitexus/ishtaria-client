@@ -124,6 +124,8 @@ var _death_dialog: AcceptDialog
 ## Soft death during a story quest: dialog confirms revive, not a new character.
 var _quest_soft_death := false
 var _quest_log: CanvasLayer
+## Photo mode: the interface steps aside and the camera comes off the shoulder.
+var _photo: CanvasLayer
 var _quest_indicator: CanvasLayer
 var _tablet: CanvasLayer
 var _quest_compass: CanvasLayer
@@ -529,6 +531,12 @@ func _ready() -> void:
 	_quest_log = preload("res://scripts/quest_panel.gd").new()
 	_quest_log.story = _story
 	add_child(_quest_log)
+	_photo = preload("res://scripts/photo_mode.gd").new()
+	_photo.camera = _camera
+	_photo.controls = _controls
+	_photo.environment = _environment
+	_photo.sky = _sky
+	add_child(_photo)
 	_quest_indicator = preload("res://scripts/quest_indicator.gd").new()
 	_quest_indicator.story = _story
 	_quest_indicator.controls = _controls
@@ -2519,6 +2527,23 @@ func _set_render_origin(origin: Vector3) -> void:
 		node.position = -origin
 	_environment.set_render_origin(_controls._anchor_metres if origin != Vector3.ZERO else [])
 
+## Saves a picture and says where it went. In photo mode the bar steps aside for the frame; outside
+## it the whole interface does, so a shared picture is of the world and not of the HUD.
+func _save_photo() -> void:
+	# `await` has to sit on the call itself: inside a conditional expression GDScript refuses the
+	# coroutine ("Trying to call an async function without await"), abandons this function, and the
+	# picture is saved by the orphaned call with nothing left to say where it went.
+	var path := ""
+	if _photo.active:
+		path = await _photo.shoot()
+	else:
+		path = await _photo.shoot_plain(self)
+	var message := tr("The picture could not be saved") if path.is_empty() else tr("Picture saved to %s") % path
+	if _photo.active:
+		_photo.notice(message)
+	else:
+		_toast.show_toast(message, 4.0)
+
 func _game_ui_open() -> bool:
 	return _chat.is_typing() or _connection_panel.visible or _trade_panel.visible or _creator.visible or _survival.visible or _crafting.visible or _control_settings.visible or _portals.visible or _friends.visible or _escape_menu.visible or _achievements_panel.visible or _character_panel.visible or _dialogue.visible or _quest_log.visible or (_tablet != null and _tablet.visible)
 
@@ -2804,6 +2829,10 @@ func _open_settings_from_menu() -> void:
 
 ## ESC closes the panel in front, or opens the menu; pressing it again returns to the game.
 func _escape_pressed() -> void:
+	if _photo.active:
+		_photo.close()
+		_controls.capture_mouse()
+		return
 	if _chat.is_typing():
 		_chat.close_input()
 		return
@@ -2839,6 +2868,18 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		if not event.echo:
 			_escape_pressed()
+		get_viewport().set_input_as_handled()
+	elif _controls.matches_action(event, _controls.PHOTO_MODE) and _controls.active and not _game_ui_open() and _environment.objects_loaded:
+		if event.pressed and not event.echo:
+			if _photo.active:
+				_photo.close()
+				_controls.capture_mouse()
+			else:
+				_photo.open(self)
+		get_viewport().set_input_as_handled()
+	elif _controls.matches_action(event, _controls.SCREENSHOT) and _controls.active:
+		if event.pressed and not event.echo:
+			_save_photo()
 		get_viewport().set_input_as_handled()
 	elif _controls.matches_action(event, _controls.INVENTORY) and _controls.active and not _game_ui_open():
 		if event.pressed and not event.echo:
@@ -2952,7 +2993,8 @@ func _process(delta: float) -> void:
 	if _controls.active:
 		if _game_ui_open() or not _environment.objects_loaded:
 			_controls.release_mouse()
-		_controls.update_camera(_environment, _hud.panel)
+		if not _photo.active:
+			_controls.update_camera(_environment, _hud.panel)
 		_sky.set_altitude(((_camera.position + _controls.origin).length() - PLANET_RADIUS) * 1000.0, true)
 		_sky.set_observer(_controls.direction)
 		_update_area_music(delta)
@@ -2966,11 +3008,18 @@ func _process(delta: float) -> void:
 			_update_prompt()
 			# Other players and walking NPCs move; keep their minimap dots in place.
 			_refresh_minimap_entities()
-		_move_elapsed += delta
-		if _move_elapsed >= 0.1:
+		# Photo mode takes the controls away from the character, so it must stop reporting moves:
+		# the server counts a character that has not confirmed a move for a while as not holding
+		# the controls and leaves it out of ambushes (combat.rs, CONTROL_SECONDS). Without this the
+		# player could lose the character for good while composing a picture, with nothing to answer with.
+		if _photo.active:
 			_move_elapsed = 0.0
-			if _session.move(_controls.jump_direction if _controls.jump_pending else _controls.intent(), _controls.jump_pending, _controls.jump_running if _controls.jump_pending else _controls.running()):
-				_controls.jump_pending = false
+		else:
+			_move_elapsed += delta
+			if _move_elapsed >= 0.1:
+				_move_elapsed = 0.0
+				if _session.move(_controls.jump_direction if _controls.jump_pending else _controls.intent(), _controls.jump_pending, _controls.jump_running if _controls.jump_pending else _controls.running()):
+					_controls.jump_pending = false
 		return
 	_area_music.set_target({}, 0.0)
 	if _surface_direction == Vector3.ZERO:
