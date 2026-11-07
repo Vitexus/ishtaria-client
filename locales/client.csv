@@ -138,7 +138,7 @@ Friends: %s,Friends: %s,Přátelé: %s
 New character,New character,Nová postava
 Age: %s days,Age: %s days,Věk: %s dní
 Born: %s,Born: %s,Narození: %s
-Optional password,Optional password,Nepovinné heslo
+At least 8 characters,At least 8 characters,Nejméně 8 znaků
 Change server,Change server,Změnit server
 Connect to a server first,Connect to a server first,Nejdříve se připojte k serveru
 Player position unavailable,Player position unavailable,Poloha hráče není dostupná

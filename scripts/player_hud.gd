@@ -309,6 +309,9 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_TRANSLATION_CHANGED and is_instance_valid(grid):
 		_update_labels()
 
+## Last font colour handed to each reserve label, so an unchanged one is not set again.
+var _tints := {}
+
 func _process(delta: float) -> void:
 	_frame.visible = panel.visible
 	_clock_elapsed += delta
@@ -320,7 +323,12 @@ func _process(delta: float) -> void:
 	for key in meters:
 		var low: bool = not _player.is_empty() and _player.stats.has(key) and meters[key].value <= LOW_RESERVE
 		meters[key].self_modulate = Color(1.0 + 0.6 * pulse, 1.0, 1.0) if low else Color.WHITE
-		_values[key].add_theme_color_override("font_color", UiTheme.CARNELIAN.lerp(UiTheme.SAND, 1.0 - pulse) if low else UiTheme.SAND)
+		# Overriding a theme colour invalidates the label's theme cache and queues a redraw, so it is
+		# set only when it actually differs: a full reserve held the same colour sixty times a second.
+		var tint: Color = UiTheme.CARNELIAN.lerp(UiTheme.SAND, 1.0 - pulse) if low else UiTheme.SAND
+		if _tints.get(key) != tint:
+			_tints[key] = tint
+			_values[key].add_theme_color_override("font_color", tint)
 	for slot: String in _hands:
 		var entry: Dictionary = _hands[slot]
 		if entry.broken and entry.icon.texture != null:

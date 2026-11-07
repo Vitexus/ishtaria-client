@@ -306,7 +306,7 @@ func _test_creation() -> void:
 	client._session.submit("PlayerOne", "short", profile.character, true)
 	_check(not client._session.busy and client._creator.feedback.text == "Neplatné heslo", "Invalid password is rejected before sending")
 	client._session.submit("PlayerOne", "", profile.character, true)
-	_check(client._session.busy, "Empty password is allowed through client validation")
+	_check(not client._session.busy and client._creator.feedback.text == "Neplatné heslo", "Empty password is rejected before sending")
 	client._session.configure("http://127.0.0.1:17400")
 	var old_generation: int = client._session._generation
 	client._session.configure("http://localhost:17400")
@@ -447,7 +447,7 @@ func _test_creation() -> void:
 	_check(client._player_profile.is_empty() and client._hud.gold_label.text == "Zlato -", "Restart does not fabricate an authenticated player")
 	_world_ready(client)
 	_check(client._creator.visible and client._creator.mode.current_tab == 1 and client._creator.password_input.text.is_empty(), "Returning player is prompted to sign in after server verification")
-	_check(client._creator.password_input.has_focus() and client._creator.password_input.placeholder_text == "Nepovinné heslo", "Returning player focuses the optional password without stored credentials")
+	_check(client._creator.password_input.has_focus() and client._creator.password_input.placeholder_text == "Nejméně 8 znaků", "Returning player focuses the required password without stored credentials")
 	if DisplayServer.get_name() != "headless":
 		for dimensions in [Vector2i(1600, 900), Vector2i(640, 480), Vector2i(360, 640)]:
 			root.size = dimensions

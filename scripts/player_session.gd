@@ -85,7 +85,10 @@ func submit(nickname: String, password: String, character: String, create: bool)
 	if pattern.search(nickname) == null:
 		failed.emit("Invalid nickname")
 		return
-	if not password.is_empty() and (password.to_utf8_buffer().size() < 8 or password.to_utf8_buffer().size() > 128):
+	# Every account needs a password: an empty one used to skip this check on both sides, and
+	# because usernames are public anyone could sign in as such a character and destroy it
+	# for good. Mirrors `validate` of the server's players.rs.
+	if password.to_utf8_buffer().size() < 8 or password.to_utf8_buffer().size() > 128:
 		failed.emit("Invalid password")
 		return
 	if not CATALOG.is_valid(character):

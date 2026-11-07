@@ -36,6 +36,17 @@ const MEMORIALS := preload("res://scripts/survival_panel.gd")
 const CHARACTERS := preload("res://scripts/character_catalog.gd")
 const FACE := preload("res://scripts/character_face.gd")
 const MAX_NPCS := 64
+## How far a character's name is drawn (metres). Names are for the people around you; beyond this
+## the crowd is scenery, and drawing every name of the region turns a market into a wall of text.
+const NAME_VIEW_M := 35.0
+## At most this many names at once, the nearest first. A market holds dozens of characters inside
+## `NAME_VIEW_M`, and their names overlap long before the distance runs out. Perspective is left to
+## size them: shrinking with distance is what keeps the ones behind legible, which is why a
+## `fixed_size` label (one size for all) was tried here and makes the pile worse, not better.
+const NAME_SHOWN_MAX := 6
+## How often that is reconsidered. A walking pace does not need it every frame, and this file
+## already does plenty per frame.
+const NAME_REFRESH_S := 0.25
 const MAX_PROPS := 3000
 ## Kenney kits whose models the server's generated places are built from.
 ## Models with a light: where the lamp hangs (model units, scaled like the model).
@@ -214,6 +225,7 @@ var _portal_entries: Array = []
 var _portal_request: HTTPRequest
 var _memorial_request: HTTPRequest
 var _memorial_elapsed := 0.0
+var _name_elapsed := 0.0
 
 func _exit_tree() -> void:
 	_stop_detail_work()
@@ -321,11 +333,39 @@ func _process(delta: float) -> void:
 		_animals_elapsed = 0.0
 		_request_animals()
 	_flicker_lamps(delta)
+	_name_elapsed += delta
+	if _name_elapsed >= NAME_REFRESH_S:
+		_name_elapsed = 0.0
+		_show_near_names()
 	_memorial_elapsed += delta
 	if _memorial_elapsed >= 5.0:
 		_memorial_elapsed = 0.0
 		_request_memorials()
 		refresh_portals()
+
+## Draws a character's name only while the player is near enough to care who it is. Distances are
+## taken in global space, where the scene is in kilometres.
+func _show_near_names() -> void:
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var eye := camera.global_position
+	var reach := NAME_VIEW_M / 1000.0
+	var near: Array[Array] = []
+	for index in npcs.get_child_count():
+		var placement := npcs.get_child(index) as Node3D
+		if placement == null:
+			continue
+		var label := placement.get_node_or_null("Name") as Label3D
+		if label == null:
+			continue
+		var distance := placement.global_position.distance_to(eye)
+		label.visible = false
+		if distance <= reach:
+			near.append([distance, label])
+	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for entry: Array in near.slice(0, NAME_SHOWN_MAX):
+		(entry[1] as Label3D).visible = true
 
 func load_catalog(path: String) -> bool:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
@@ -1192,19 +1232,20 @@ func _finish_detail(result: Dictionary) -> void:
 	material.set_shader_parameter("texture_anchor", Vector3(fposmod(float(job.anchor[0]), 1024.0), fposmod(float(job.anchor[1]), 1024.0), fposmod(float(job.anchor[2]), 1024.0)))
 	local_land.material_override = material
 	detail.add_child(local_land)
-	var local_water := MeshInstance3D.new()
-	# Wet cells only when a pond/river is present; an empty index list is invalid for ArrayMesh,
-	# so a dry disk falls back to the land triangles (every fragment is discarded by the shader).
+	# Wet cells only when a pond or a river is present. A dry disk used to build the water surface
+	# out of the land triangles instead, because an empty index list is invalid for an ArrayMesh:
+	# a mesh of up to 37 000 vertices, raised on the main thread and then rasterised every frame
+	# for the shader to discard every one of its fragments. Dry ground simply has no water now.
 	var water_tris: PackedInt32Array = result.get("water_indices", PackedInt32Array())
-	if water_tris.is_empty():
-		water_tris = result.indices
-	local_water.mesh = _build_detail_mesh(result.water, result.normals, result.water_uv2, water_tris)
-	var water_detail := ShaderMaterial.new()
-	water_detail.shader = preload("res://scripts/local_water.gdshader")
-	var anchor: Array = job.anchor
-	water_detail.set_shader_parameter("wave_phase", Vector2(fposmod((anchor[0] + anchor[1] * 0.7 + anchor[2] * 0.3) * 0.65, TAU), fposmod((anchor[0] * 0.2 + anchor[1] * 0.5 + anchor[2]) * 0.7, TAU)))
-	local_water.material_override = water_detail
-	detail.add_child(local_water)
+	if not water_tris.is_empty():
+		var local_water := MeshInstance3D.new()
+		local_water.mesh = _build_detail_mesh(result.water, result.normals, result.water_uv2, water_tris)
+		var water_detail := ShaderMaterial.new()
+		water_detail.shader = preload("res://scripts/local_water.gdshader")
+		var anchor: Array = job.anchor
+		water_detail.set_shader_parameter("wave_phase", Vector2(fposmod((anchor[0] + anchor[1] * 0.7 + anchor[2] * 0.3) * 0.65, TAU), fposmod((anchor[0] * 0.2 + anchor[1] * 0.5 + anchor[2]) * 0.7, TAU)))
+		local_water.material_override = water_detail
+		detail.add_child(local_water)
 	var discard_radius: float = float(job.radius) * 1.05 / RADIUS
 	land_material.set_shader_parameter("detail_direction", unit)
 	land_material.set_shader_parameter("detail_discard", discard_radius)

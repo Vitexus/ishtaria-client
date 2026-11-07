@@ -130,7 +130,9 @@ func _apply_size() -> void:
 	_border.position = Vector2(-4, -4)
 	_border.size = size + Vector2(8, 8)
 	_legend.visible = _big_mode
-	_legend.position = Vector2(12.0, 12.0)
+	# Along the top right. The active quest sits at the top left (`quest_indicator.gd`), and the
+	# legend used to be laid straight over it.
+	_legend.position = Vector2(maxf(size.x - _legend.get_combined_minimum_size().x - 12.0, 12.0), 12.0)
 	_update_scale_bar()
 
 
@@ -1027,7 +1029,9 @@ class PropOverlay extends Node2D:
 			var prop_position: Vector3 = prop.position
 			var relative := prop_position - position
 			var prop_size: Vector2 = prop.size
-			if relative.length() > VIEW_RADIUS_M + prop_size.length() * 0.5:
+			# Squared on both sides: this runs for every prop of the region, every frame.
+			var limit := VIEW_RADIUS_M + prop_size.length() * 0.5
+			if relative.length_squared() > limit * limit:
 				continue
 			var up := prop_position.normalized()
 			var rotation := Quaternion(Vector3.UP, up) * Quaternion(Vector3.UP, float(prop.get("yaw", 0.0)))

@@ -86,5 +86,36 @@ func _run() -> void:
 	_check(is_equal_approx(minimap._water_sprite.rotation, PI * 0.5), "The bake's tangent axis decides the turn")
 	minimap.set_water_map({})
 	_check(not minimap._water_sprite.visible, "Without a water picture none is drawn")
+	# The big map is meant to be read, so it has to cover what is behind it. Painted over a known
+	# colour, almost none of that colour may survive. A native run also keeps the picture.
+	if DisplayServer.get_name() != "headless":
+		var behind := CanvasLayer.new()
+		behind.layer = 0
+		var ground := ColorRect.new()
+		ground.color = Color(1.0, 0.0, 1.0)
+		ground.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		behind.add_child(ground)
+		get_root().add_child(behind)
+		minimap.set_process(true)
+		minimap.toggle_visibility()
+		await process_frame
+		await process_frame
+		await RenderingServer.frame_post_draw
+		var shot := get_root().get_texture().get_image()
+		var seen := 0
+		for y in range(0, shot.get_height(), 4):
+			for x in range(0, shot.get_width(), 4):
+				var pixel := shot.get_pixel(x, y)
+				if pixel.r > 0.8 and pixel.g < 0.2 and pixel.b > 0.8:
+					seen += 1
+		var sampled := (shot.get_height() / 4) * (shot.get_width() / 4)
+		_check(float(seen) / float(sampled) < 0.05,
+			"The big map covers the view behind it (%d of %d samples showed through)" % [seen, sampled])
+		_check(minimap._legend.get_global_rect().position.x > float(shot.get_width()) * 0.5,
+			"The legend keeps clear of the active quest at the top left")
+		shot.save_png("/tmp/ishtaria-minimap-big.png")
+		minimap.toggle_visibility()
+		minimap.set_process(false)
+		behind.queue_free()
 	print("minimap checks: %d, failures: %d" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)

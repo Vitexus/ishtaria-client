@@ -194,14 +194,31 @@ void fragment() {
 		vec3 slope_normal = normalize(cross(dFdx(VERTEX), dFdy(VERTEX)));
 		NORMAL = dot(slope_normal, NORMAL) < 0.0 ? -slope_normal : slope_normal;
 		if (!is_detail && !water_pass) {
-			for (int index = 0; index < min(patch_count, 4); index++) {
+			// GLSL ES 3.0 (the web build's GL Compatibility renderer) only allows a literal index into
+			// a sampler array. A loop bounded by the `patch_count` uniform made the whole scene shader
+			// fail to compile in the browser, so nothing of the planet was drawn: keep the bound
+			// constant and read each mask by its own index.
+			for (int index = 0; index < 4; index++) {
+				if (index >= patch_count) {
+					break;
+				}
 				vec4 rect = patch_rect[index];
 				vec2 local = vec2(dot(direction, patch_axis_x[index]), dot(direction, patch_axis_z[index])) * planet_radius * 1000.0 - rect.xy;
 				vec2 uv = local / rect.zw + vec2(0.5);
 				if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
 					continue;
 				}
-				if (texture(patch_water[index], uv).r > 0.5) {
+				float wet = 0.0;
+				if (index == 0) {
+					wet = texture(patch_water[0], uv).r;
+				} else if (index == 1) {
+					wet = texture(patch_water[1], uv).r;
+				} else if (index == 2) {
+					wet = texture(patch_water[2], uv).r;
+				} else {
+					wet = texture(patch_water[3], uv).r;
+				}
+				if (wet > 0.5) {
 					// The deep colour of the detail disk's water (local_water.gdshader), so the river does not change hue at the disk's edge.
 					ALBEDO = vec3(0.04, 0.19, 0.25);
 					ROUGHNESS = 0.28;

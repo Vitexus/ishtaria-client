@@ -22,12 +22,21 @@ const MAX_VOLUME := 2.0
 const ICONS := "res://assets/kenney/game-icons/"
 ## The panel is taller while it shows a knowledge card.
 const CARD_HEIGHT := 380.0
+## What the spoken line keeps for itself whatever the answers need. The panel used to be a fixed
+## 300 px with the line squeezed to 48, so a reply with five answers was cut off mid-sentence behind
+## a scrollbar while the buttons took the rest: the player had to scroll to read what was said
+## before choosing what to say back.
+const SPEECH_MIN_HEIGHT := 96.0
+## Past this the line scrolls rather than pushing the answers off the screen.
+const SPEECH_MAX_HEIGHT := 220.0
 
 var panel: PanelContainer
 var portrait: TextureRect
 var name_label: Label
 var speech: Label
 var choices_box: VBoxContainer
+var speech_scroll: ScrollContainer
+var choices_scroll: ScrollContainer
 var music_enabled := true
 ## Spoken lines follow the same sound setting as the music.
 var voice_enabled := true
@@ -93,18 +102,27 @@ func _ready() -> void:
 	speech.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	speech.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# A long text scrolls instead of making the panel taller than the window.
-	var speech_scroll := ScrollContainer.new()
+	speech_scroll = ScrollContainer.new()
 	speech_scroll.name = "SpeechScroll"
 	speech_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	speech_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	speech_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	speech_scroll.custom_minimum_size = Vector2(0.0, 48.0)
+	speech_scroll.custom_minimum_size = Vector2(0.0, SPEECH_MIN_HEIGHT)
 	speech_scroll.add_child(speech)
 	column.add_child(speech_scroll)
+	# The answers scroll too. Five long ones do not fit a 640x480 window however the line is sized,
+	# and a panel that cannot shrink below its content simply hangs off the bottom of the screen.
+	choices_scroll = ScrollContainer.new()
+	choices_scroll.name = "ChoicesScroll"
+	choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	choices_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	choices_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	choices_box = VBoxContainer.new()
 	choices_box.name = "Choices"
+	choices_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	choices_box.add_theme_constant_override("separation", 4)
-	column.add_child(choices_box)
+	choices_scroll.add_child(choices_box)
+	column.add_child(choices_scroll)
 	_music = _new_music_channel()
 	_voice = AudioStreamPlayer.new()
 	_voice.name = "Voice"
@@ -121,7 +139,24 @@ func _ready() -> void:
 func _resize() -> void:
 	var screen := get_viewport().get_visible_rect().size
 	var width := minf(760.0, screen.x - 24.0)
-	var height := minf(CARD_HEIGHT if _card_mode else 300.0, screen.y - 24.0)
+	var limit := screen.y - 24.0
+	# A ScrollContainer reports a small minimum whatever it holds, so the wrapped line's height has
+	# to be handed to it or the panel clips the text. A PanelContainer also refuses to shrink below
+	# its content, so the line may only claim what the answers and the frame leave of the window:
+	# measure them with the line at zero first, then give it the lesser of what it wants and what
+	# is free. Past `SPEECH_MAX_HEIGHT`, or on a short window, it scrolls as before.
+	if speech_scroll != null and speech != null:
+		speech_scroll.custom_minimum_size.y = 0.0
+		choices_scroll.custom_minimum_size.y = 0.0
+		var chrome := panel.get_combined_minimum_size().y
+		var free := maxf(limit - chrome, 0.0)
+		var line := minf(minf(speech.get_combined_minimum_size().y, SPEECH_MAX_HEIGHT), free)
+		speech_scroll.custom_minimum_size.y = line
+		choices_scroll.custom_minimum_size.y = minf(
+			choices_box.get_combined_minimum_size().y, maxf(free - line, 0.0))
+	# Grow with the answers rather than squeezing the line; never past the window.
+	var base := CARD_HEIGHT if _card_mode else 300.0
+	var height := minf(maxf(base, panel.get_combined_minimum_size().y), limit)
 	panel.size = Vector2(width, height)
 	# Above the HUD bar when the screen is tall enough for both.
 	var margin := 176.0 if screen.y >= 760.0 else 16.0
@@ -192,6 +227,8 @@ func _fill_node(reply: Dictionary) -> void:
 	for button in choices_box.get_children():
 		if button is Button:
 			button.theme_type_variation = &"ChoiceButton"
+	# The answers changed: the panel may need a different height.
+	_resize()
 
 ## The card could not be fetched: the button works again.
 func about_failed() -> void:
@@ -268,6 +305,8 @@ func _show_card(card: Dictionary, alone: bool) -> void:
 	link.pressed.connect(_confirm_link)
 	buttons.add_child(link)
 	back.grab_focus()
+	# The answers changed: the panel may need a different height.
+	_resize()
 
 ## Back from the card to what the character said last.
 func _leave_card() -> void:

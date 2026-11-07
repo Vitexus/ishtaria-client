@@ -15,7 +15,9 @@ func _check(condition: bool, message: String) -> void:
 		push_error(message)
 
 ## The worker-thread disk: identical to the synchronous one, slid (not jumped) while it is computed,
-## and a build that was asked for and superseded never reaches the scene.
+## and a build that was asked for and superseded never reaches the scene. Whether a water mesh comes
+## with the land one depends on whether the disk holds any water, so it is not counted here:
+## `_test_pond` checks a disk that does, and dry ground raises none at all.
 func _test_async_detail(surface: Node3D) -> void:
 	surface.show_region(Vector3.FORWARD)
 	var expected: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
@@ -27,7 +29,7 @@ func _test_async_detail(surface: Node3D) -> void:
 		if not surface._detail_pending:
 			break
 		await process_frame
-	_check(not surface._detail_pending and surface.detail.get_child_count() == 2, "The asynchronous build arrives as one land and one water mesh")
+	_check(not surface._detail_pending and surface.detail.get_child_count() >= 1, "The asynchronous build arrives with a land mesh")
 	var arrived: PackedVector3Array = surface.detail.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	_check(arrived == expected, "The asynchronous disk has exactly the vertices of the synchronous one")
 	var moved: Array = surface._origin_metres.duplicate()
@@ -39,7 +41,7 @@ func _test_async_detail(surface: Node3D) -> void:
 		if not surface._detail_pending:
 			break
 		await process_frame
-	_check(not surface._detail_pending and surface.detail.position == Vector3.ZERO and surface.detail.get_child_count() == 2, "A superseded build is dropped and the disk is back at its own origin")
+	_check(not surface._detail_pending and surface.detail.position == Vector3.ZERO and surface.detail.get_child_count() >= 1, "A superseded build is dropped and the disk is back at its own origin")
 	surface.async_detail = false
 	surface.show_region(Vector3.FORWARD)
 

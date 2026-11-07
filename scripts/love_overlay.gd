@@ -94,35 +94,53 @@ func _find_enkidu_entry() -> Dictionary:
 				return entry
 	return {}
 
+## The discs follow the render origin, so their positions are set every frame; the nodes themselves
+## are only rebuilt when the server sends a different set of zones (it is polled every 1.2 s). This
+## used to free and raise every disc each frame, with a fresh `CylinderMesh` and
+## `StandardMaterial3D` per disc: a new material every frame is a new uniform set every frame.
 func _rebuild_zones() -> void:
 	if not is_instance_valid(_zones_root):
 		return
-	for child in _zones_root.get_children():
-		child.queue_free()
 	if _love == null or not _love.is_active() or _environment == null:
+		for child in _zones_root.get_children():
+			child.queue_free()
+		_zone_count = 0
+		_zone_radius_m = -1.0
 		return
 	var radius_m: float = _love.zone_radius_m()
-	for zone: Variant in _love.zones():
-		if not zone is Dictionary:
-			continue
-		var disc := _make_disc(radius_m)
-		disc.position = _environment._render_position(zone.position)
+	var zones: Array = _love.zones().filter(func(zone: Variant) -> bool: return zone is Dictionary)
+	if zones.size() != _zone_count or not is_equal_approx(radius_m, _zone_radius_m):
+		for child in _zones_root.get_children():
+			_zones_root.remove_child(child)
+			child.queue_free()
+		for _zone: Variant in zones:
+			_zones_root.add_child(_make_disc(radius_m))
+		_zone_count = zones.size()
+		_zone_radius_m = radius_m
+	for index in mini(zones.size(), _zones_root.get_child_count()):
+		var disc := _zones_root.get_child(index) as Node3D
+		disc.position = _environment._render_position(zones[index].position)
 		disc.position.y += 0.00015
-		_zones_root.add_child(disc)
+
+## One mesh and one material for all the discs of a round; they differ only in where they stand.
+var _disc_mesh: CylinderMesh
+var _zone_count := 0
+var _zone_radius_m := -1.0
 
 func _make_disc(radius_m: float) -> MeshInstance3D:
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius_m * 0.001
-	mesh.bottom_radius = radius_m * 0.001
-	mesh.height = 0.00005
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.35, 0.55, 0.35)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mesh.material = mat
+	if _disc_mesh == null or not is_equal_approx(_disc_mesh.top_radius, radius_m * 0.001):
+		_disc_mesh = CylinderMesh.new()
+		_disc_mesh.top_radius = radius_m * 0.001
+		_disc_mesh.bottom_radius = radius_m * 0.001
+		_disc_mesh.height = 0.00005
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(1.0, 0.35, 0.55, 0.35)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_disc_mesh.material = mat
 	var node := MeshInstance3D.new()
-	node.mesh = mesh
+	node.mesh = _disc_mesh
 	return node
 
 func _spawn_heart_flight(land: Vector3, _ttl: float) -> void:

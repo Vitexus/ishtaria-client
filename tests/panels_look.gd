@@ -27,7 +27,7 @@ func _profile() -> Dictionary:
 
 func _story() -> Node:
 	var story: Node = STORY.new()
-	story._strings = {"cs": {"endland:kragg.greet": "Vítej v hostinci, poutníku. Co tě sem přivádí za tak pozdní hodiny?", "endland:npc.kragg": "Kragg", "endland:kragg.ask_gossip": "Co je nového ve městě?", "endland:kragg.leave": "Na shledanou.", "q.title": "Hrobníkova práce", "q.have_key": "Máš klíč od hřbitova. Odnes ho Kraggovi do hostince."}}
+	story._strings = {"cs": {"endland:kragg.greet": "Vítej v hostinci, poutníku. Co tě sem přivádí za tak pozdní hodiny?", "endland:npc.kragg": "Kragg", "endland:kragg.ask_gossip": "Co je nového ve městě?", "endland:kragg.leave": "Na shledanou.", "q.title": "Hrobníkova práce", "q.have_key": "Máš klíč od hřbitova. Odnes ho Kraggovi do hostince.", "endland:elder.greet": "Posaď se, dítě, mé nohy jsou starší než hradby Uruku. \"Když bohové byli lidmi,\" tak začíná ten starý příběh, a já ho znám tak, jak mi ho vyprávěl můj otec. Ptej se, dokud mi slouží paměť, protože po mně už nebude koho se zeptat.", "endland:elder.a": "Jak byli stvořeni lidé?", "endland:elder.b": "Proč umíráme a proč jsou některé ženy bezdětné?", "endland:elder.c": "Vyprávěj mi o potopě.", "endland:elder.d": "Kde bych našel jeden z těch příběhů psaný na hlíně?", "endland:elder.e": "Pokoj tobě, starý otče."}}
 	story._strings["en"] = story._strings.cs
 	return story
 
@@ -110,8 +110,17 @@ func _run() -> void:
 			dialogue.show_reply({"npc_id": "endland:kragg", "name_key": "endland:npc.kragg", "seq": 3, "open": true, "player": {},
 				"node": {"node": "greet", "text_key": "endland:kragg.greet", "choices": [{"index": 0, "text_key": "endland:kragg.ask_gossip"}, {"index": 2, "text_key": "endland:kragg.leave"}]}})
 			return dialogue.panel,
+		# A long line with five answers: the panel must still show what was said. It used to be a
+		# fixed 300 px with the speech squeezed to 48, so the line was cut off behind a scrollbar.
+		"dialogue_long": func() -> Control:
+			dialogue.show_reply({"npc_id": "endland:elder", "name_key": "endland:npc.kragg", "seq": 4, "open": true, "player": {},
+				"node": {"node": "greet", "text_key": "endland:elder.greet", "choices": [
+					{"index": 0, "text_key": "endland:elder.a"}, {"index": 1, "text_key": "endland:elder.b"},
+					{"index": 2, "text_key": "endland:elder.c"}, {"index": 3, "text_key": "endland:elder.d"},
+					{"index": 4, "text_key": "endland:elder.e"}]}})
+			return dialogue.panel,
 	}
-	var layers := {"crafting": crafting, "crafting_pending": crafting, "shop": trade, "exchange": trade, "friends": friends, "quests": quests, "portals": portals, "character": character, "dialogue": dialogue}
+	var layers := {"crafting": crafting, "crafting_pending": crafting, "shop": trade, "exchange": trade, "friends": friends, "quests": quests, "portals": portals, "character": character, "dialogue": dialogue, "dialogue_long": dialogue}
 	for name: String in shows:
 		for dimensions in [Vector2i(1600, 900), Vector2i(640, 480)]:
 			root.size = dimensions

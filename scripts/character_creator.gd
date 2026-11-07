@@ -138,7 +138,7 @@ func _ready() -> void:
 	password_input = LineEdit.new()
 	password_input.secret = true
 	password_input.max_length = 128
-	password_input.placeholder_text = tr("Optional password")
+	password_input.placeholder_text = tr("At least 8 characters")
 	password_input.custom_minimum_size.y = 36
 	password_column.add_child(password_input)
 	_appearance = VBoxContainer.new()
@@ -340,7 +340,7 @@ func _update_labels() -> void:
 	rotation_slider.tooltip_text = tr("Rotation")
 	nickname_input.tooltip_text = tr("Nickname")
 	password_input.tooltip_text = tr("Password")
-	password_input.placeholder_text = tr("Optional password")
+	password_input.placeholder_text = tr("At least 8 characters")
 	var selected := characters.selected
 	_fill_characters()
 	characters.select(maxi(selected, 0))
