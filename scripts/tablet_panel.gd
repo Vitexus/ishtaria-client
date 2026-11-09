@@ -22,13 +22,15 @@ const FLIP_SEC := 0.85
 const SLIDE_M := 0.17
 const SLIDE_SEC := 0.7
 ## Usable writing area on one face (metres), inset from the rounded rim.
-const FACE_W_M := 0.074
-const FACE_H_M := 0.048
+const FACE_W_M := 0.082
+const FACE_H_M := 0.055
 const FACE_Z_M := 0.0082
-const LABEL_PIXEL_SIZE := 0.00013
-const CUNEIFORM_FONT_SIZE := 48
+## Small script, as a scribe packs it close to the rim: about 70 % of the former glyph size, drawn from a
+## larger raster so the wedges stay sharp.
+const LABEL_PIXEL_SIZE := 0.00007
+const CUNEIFORM_FONT_SIZE := 64
 ## Pixels added between rows (negative: the cuneiform font's line height leaves far more room than a scribe).
-const LINE_SPACING := -26.0
+const LINE_SPACING := -36.0
 ## Fresh, still wet clay (the reference is a photo of cuneiform pressed into fresh clay): darker and
 ## greyer than fired terracotta, with a damp sheen.
 const WET_CLAY_TINT := Color(0.50, 0.55, 0.64)
@@ -36,10 +38,14 @@ const WET_CLAY_ROUGHNESS := 0.45
 ## The layers of an impressed sign: name, colour, offset (metres) on the front face. The key light comes
 ## from the upper left, so the wall of a wedge under it falls into shadow and the far, lower right wall
 ## catches the light. The reverse is turned about the vertical axis, so its offsets mirror in x.
+## The stylus is a narrow three-sided pyramid: a wedge is a deep head sloping up to a thin tail, with one face
+## toward the light and two away. So: a faint rim catch-light on the lit edge, a soft wide shadow and a hard
+## narrow one on the far side, and the dark wet floor of the impression on top.
 const IMPRESSION_LAYERS := [
-	["LitWall", Color(0.86, 0.74, 0.58, 0.55), Vector3(0.00022, -0.00022, 0.00002)],
-	["ShadowWall", Color(0.10, 0.07, 0.05, 0.85), Vector3(-0.00018, 0.00018, 0.00004)],
-	["Floor", Color(0.30, 0.22, 0.15, 0.95), Vector3(0.0, 0.0, 0.00006)],
+	["SoftShadow", Color(0.07, 0.05, 0.04, 0.32), Vector3(-0.00024, 0.00024, 0.00001)],
+	["LitWall", Color(0.90, 0.80, 0.64, 0.60), Vector3(0.00015, -0.00015, 0.00002)],
+	["ShadowWall", Color(0.09, 0.06, 0.04, 0.88), Vector3(-0.00011, 0.00011, 0.00004)],
+	["Floor", Color(0.27, 0.19, 0.13, 0.96), Vector3(0.0, 0.0, 0.00006)],
 ]
 const CUNEIFORM_PATHS := [
 	"/usr/share/fonts/truetype/noto/NotoSansCuneiform-Regular.ttf",

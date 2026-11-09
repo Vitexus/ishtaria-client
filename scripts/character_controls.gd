@@ -90,6 +90,16 @@ var _walk_speed := 1.0
 ## clip, and a datadisk's own model is measured when it is put on (see `_bind_animation`).
 var _walk_pace := WALK_CLIP_PACE
 var _position_target := Vector3.ZERO
+## Scene units (km) per second the acknowledged position is moving at, low-passed over the acknowledgements. The avatar is carried
+## along it between acknowledgements and only corrected towards them, so it glides instead of stepping at the network rate.
+var _target_velocity := Vector3.ZERO
+## An error larger than this (km) is a teleport (boarding, portal, respawn), not lag: the avatar goes straight there.
+const SNAP_ERROR_KM := 0.004
+## How quickly (1/s) the avatar closes the remaining distance to the acknowledged position.
+const CORRECTION_RATE := 4.0
+const SETTLE_RATE := 18.0
+## How far (km) the carried avatar may run ahead of the last acknowledged position.
+const MAX_LEAD_KM := 0.0008
 var _ground_surface: Node
 var airborne := false
 var on_object := false
@@ -375,6 +385,11 @@ func apply_position(data: Variant, is_moving: bool) -> bool:
 	_position_target = Vector3((float(data.x) - _anchor_metres[0]) / 1000.0, (float(data.y) - _anchor_metres[1]) / 1000.0, (float(data.z) - _anchor_metres[2]) / 1000.0) if origin != Vector3.ZERO else point
 	var now := Time.get_ticks_msec()
 	var travelled := _position_target.distance_to(previous) * 1000.0
+	var ack_seconds := maxf((now - _last_position_ms) / 1000.0, 0.04)
+	if is_moving and travelled > 0.0001:
+		_target_velocity = _target_velocity.lerp((_position_target - previous) / ack_seconds, 0.35)
+	else:
+		_target_velocity = Vector3.ZERO
 	# Keep walking through brief zero-travel acks so the clip finishes its cycle (otherwise it
 	# restarts every few frames and looks like jerks of a few centimetres).
 	if is_moving:
@@ -505,7 +520,21 @@ func _process(delta: float) -> void:
 		if sitting and _seat_avatar():
 			_play_animation(false)
 			return
-		avatar.position = avatar.position.lerp(_position_target, 1.0 - exp(-18.0 * delta))
+		var error := _position_target - avatar.position
+		if error.length() > SNAP_ERROR_KM:
+			avatar.position = _position_target
+			_target_velocity = Vector3.ZERO
+		else:
+			# Feed-forward along the measured velocity plus a gentle pull to the acknowledged position; the old chase of the latest
+			# acknowledgement alone moved the avatar in a sawtooth (variation 0.6 of the mean step per frame at 10 acknowledgements a second).
+			var carry := _target_velocity
+			# Let go of the key and the carry stops at once; a wall or a refusal shows as the avatar running ahead of the
+			# acknowledged position, and past MAX_LEAD_KM it waits for the server instead of pushing on.
+			if intent().length_squared() < 0.0001 or (-error).dot(carry.normalized()) > MAX_LEAD_KM:
+				carry = Vector3.ZERO
+			# Gentle correction while gliding, the old firm one (settles in about 0.15 s) when standing, stopped or refused.
+			var rate := CORRECTION_RATE if carry != Vector3.ZERO else SETTLE_RATE
+			avatar.position += carry * minf(delta, 0.1) + error * (1.0 - exp(-rate * delta))
 		_ground_avatar(_ground_surface)
 	_play_animation(_wants_walk())
 
@@ -631,6 +660,7 @@ func snap_to(metres: Array) -> void:
 	var point := Vector3(metres[0], metres[1], metres[2]) / 1000.0
 	direction = point.normalized()
 	_position_target = Vector3((float(metres[0]) - _anchor_metres[0]) / 1000.0, (float(metres[1]) - _anchor_metres[1]) / 1000.0, (float(metres[2]) - _anchor_metres[2]) / 1000.0) if origin != Vector3.ZERO else point
+	_target_velocity = Vector3.ZERO
 	if is_instance_valid(avatar):
 		avatar.position = _position_target
 

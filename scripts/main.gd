@@ -14,7 +14,11 @@ const UiKit := preload("res://scripts/ui/ui_kit.gd")
 const PendingActions := preload("res://scripts/ui/pending_actions.gd")
 const GroundLayers := preload("res://scripts/ground_layers.gd")
 const MIN_SERVER_VERSION := "0.1.0"
-const APPROACH_SECONDS := 14.0
+const APPROACH_SECONDS := 22.0
+## The descent is slowed between the overview altitude and `APPROACH_LINGER_END_KM`: the camera spends `APPROACH_LINGER_SHARE` of the
+## flight there, low enough to see a city and its surroundings, before the last descent to the ground.
+const APPROACH_LINGER_END_KM := 2.0
+const APPROACH_LINGER_SHARE := 0.4
 ## Stamina at or below which a character in deep water drowns (mirrors the server's `DROWNING_STAMINA`).
 const DROWNING_STAMINA := 20.0
 ## The pitch (radians above the horizon) and the time the camera looks up for a ship of the gods that flies over (an Easter egg).
@@ -22,7 +26,7 @@ const SKY_VIEW_PITCH := 0.8
 const SKY_VIEW_SECONDS := 22.0
 ## The first part of the approach (the fall from orbit) and the altitude it ends at; from there the descent is slow,
 ## looking straight down, so that the plan of a city (streets, walls) can be seen before the landing.
-const APPROACH_FALL_SHARE := 0.4
+const APPROACH_FALL_SHARE := 0.25
 const APPROACH_OVERVIEW_KM := 4.0
 const SURFACE_ALTITUDE_M := 120.0
 ## Slightly below the server reach, so a request made at the edge is not refused.
@@ -131,6 +135,13 @@ var _tablet: CanvasLayer
 var _quest_compass: CanvasLayer
 var _minimap: CanvasLayer
 var _story_markers: Array = []
+## The settlements around the player for the map (`GET /world/settlements`, within 20 km), where they were asked for, and the request.
+const SETTLEMENT_REFRESH_M := 5000.0
+const SETTLEMENT_MAX := 32
+var _settlements: Array = []
+var _settlements_at := Vector3.ZERO
+var _settlements_request: HTTPRequest
+var _settlement_poll := 0.0
 var _quest_stages: Dictionary = {}
 var _quests_baseline := false
 ## Quest with an excerpt waiting until the landing settle finishes (auto-start at the water-hole).
@@ -1313,6 +1324,8 @@ func _disconnect_server() -> void:
 	_hud.clear_player()
 	_connection_generation += 1
 	_connection_enabled = false
+	_settlements = []
+	_settlements_at = Vector3.ZERO
 	_reconnect.stop()
 	if is_instance_valid(_request):
 		_request.cancel_request()
@@ -1549,14 +1562,29 @@ func _on_environment_received(result: int, code: int, _headers: PackedStringArra
 
 ## The rivers a datadisk tells (the Euphrates, the Tigris and their network): a few hundred kilobytes, fetched once per world
 ## and carved and drawn like the server's. A world without a datadisk has none and asks for nothing.
+## What the rivers on screen were fetched for: the connection, the world's own hash and its datadisks. /world is asked again every five
+## seconds and the rivers are some 800 KB of JSON that is parsed and checked on the main thread; doing it each time was a freeze of up to
+## 150 ms every five seconds. They are fetched again only when this changes, or when the last attempt failed.
+var _rivers_key := ""
+
 func _request_rivers(world: Dictionary) -> void:
+	if not world.get("datadisks") is Array or world.datadisks.is_empty():
+		if is_instance_valid(_rivers_request):
+			_rivers_request.cancel_request()
+			_rivers_request.queue_free()
+		_rivers_request = null
+		if _rivers_key != "none":
+			_rivers_key = "none"
+			_environment.set_disk_rivers([])
+		return
+	var key := "%d|%s|%d" % [_connection_generation, str(world.get("sha256", "")), str(world.datadisks).hash()]
+	if key == _rivers_key:
+		return
 	if is_instance_valid(_rivers_request):
 		_rivers_request.cancel_request()
 		_rivers_request.queue_free()
 	_rivers_request = null
-	if not world.get("datadisks") is Array or world.datadisks.is_empty():
-		_environment.set_disk_rivers([])
-		return
+	_rivers_key = key
 	_rivers_request = HTTPRequest.new()
 	_rivers_request.timeout = 30.0
 	_rivers_request.max_redirects = 0
@@ -1566,6 +1594,7 @@ func _request_rivers(world: Dictionary) -> void:
 	if _rivers_request.request(_server_url + "/world/rivers") != OK:
 		_rivers_request.queue_free()
 		_rivers_request = null
+		_rivers_key = ""
 
 func _on_rivers_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, generation: int) -> void:
 	if generation != _connection_generation or not _connection_enabled:
@@ -1574,6 +1603,7 @@ func _on_rivers_received(result: int, code: int, _headers: PackedStringArray, bo
 		_rivers_request.queue_free()
 	_rivers_request = null
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		_rivers_key = ""
 		return
 	_environment.set_disk_rivers(JSON.parse_string(body.get_string_from_utf8()))
 
@@ -1599,6 +1629,7 @@ func _start_approach(position: Variant) -> bool:
 	_loading.begin()
 	_settle_elapsed = -1.0
 	_landing_prologue = true
+	_environment.prepare_landing([position.x, position.y, position.z])
 	_environment.show_region(_surface_direction)
 	if not _player_profile.is_empty():
 		_controls.start(_player_profile.character, Vector3(position.x / 1000.0, position.y / 1000.0, position.z / 1000.0), position)
@@ -1897,6 +1928,54 @@ func _on_story_markers_changed(markers: Array) -> void:
 	_story_markers = markers
 	_refresh_minimap_entities()
 
+## Whether the answer of `/world/settlements` is a list of settlements the map can draw.
+static func valid_settlements(data: Variant) -> bool:
+	if not data is Array or data.size() > SETTLEMENT_MAX:
+		return false
+	for entry: Variant in data:
+		if not entry is Dictionary or not entry.get("id") is String or not entry.get("name_key") is String:
+			return false
+		if not entry.get("position") is Array or entry.position.size() != 3:
+			return false
+		for axis: Variant in entry.position:
+			if not (axis is float or axis is int) or not is_finite(float(axis)) or absf(float(axis)) > 1e12:
+				return false
+	return true
+
+## Asks the server for the settlements around the player, again once they have walked far enough from where it was last asked.
+func _poll_settlements(delta: float) -> void:
+	_settlement_poll += delta
+	if _settlement_poll < 2.0 or _player_metres == Vector3.ZERO or is_instance_valid(_settlements_request):
+		return
+	_settlement_poll = 0.0
+	if _settlements_at != Vector3.ZERO and _settlements_at.distance_to(_player_metres) < SETTLEMENT_REFRESH_M:
+		return
+	_settlements_request = HTTPRequest.new()
+	_settlements_request.timeout = 60.0
+	_settlements_request.max_redirects = 0
+	_settlements_request.body_size_limit = 64 * 1024
+	_settlements_request.request_completed.connect(_on_settlements.bind(_connection_generation, _player_metres))
+	add_child(_settlements_request)
+	var query := "?x=%s&y=%s&z=%s" % [str(_player_metres.x), str(_player_metres.y), str(_player_metres.z)]
+	if _settlements_request.request(_server_url + "/world/settlements" + query) != OK:
+		_settlements_request.queue_free()
+		_settlements_request = null
+
+func _on_settlements(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, generation: int, at: Vector3) -> void:
+	if is_instance_valid(_settlements_request):
+		_settlements_request.queue_free()
+	_settlements_request = null
+	if generation != _connection_generation or not _connection_enabled:
+		return
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		return
+	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if not valid_settlements(data):
+		return
+	_settlements_at = at
+	_settlements = data
+	_refresh_minimap_entities()
+
 func _refresh_minimap_entities() -> void:
 	_update_minimap_entities(_story_markers)
 
@@ -1998,6 +2077,22 @@ func _update_minimap_entities(markers: Array) -> void:
 					"is_quest": is_quest_marker
 				})
 	
+	# The settlements around, unless a quest marker already names the place.
+	var named: Dictionary = {}
+	for entity: Dictionary in entities:
+		named[entity.id] = true
+	for settlement: Dictionary in _settlements:
+		if named.has(settlement.id):
+			continue
+		var at: Array = settlement.position
+		entities.append({
+			"id": settlement.id,
+			"name": _story.text(settlement.name_key) if _story != null else settlement.name_key,
+			"kind": "place",
+			"position": Vector3(float(at[0]), float(at[1]), float(at[2])),
+			"is_quest": false
+		})
+
 	if _minimap != null:
 		_minimap.set_entities(entities)
 
@@ -2998,6 +3093,7 @@ func _process(delta: float) -> void:
 		_sky.set_altitude(((_camera.position + _controls.origin).length() - PLANET_RADIUS) * 1000.0, true)
 		_sky.set_observer(_controls.direction)
 		_update_area_music(delta)
+		_poll_settlements(delta)
 		if _player_metres != Vector3.ZERO:
 			_quest_compass.update_view(_player_metres, _controls.direction, _controls.heading())
 			_minimap.set_player_position(_player_metres)
@@ -3017,9 +3113,12 @@ func _process(delta: float) -> void:
 		else:
 			_move_elapsed += delta
 			if _move_elapsed >= 0.1:
-				_move_elapsed = 0.0
+				# Keep the remainder of the tick, and retry next frame when the last request is still in flight, so the
+				# rate stays 10 a second; zeroing here made a busy tick cost a whole further 0.1 s (acks every 120 ms).
+				_move_elapsed = minf(_move_elapsed, 0.2)
 				if _session.move(_controls.jump_direction if _controls.jump_pending else _controls.intent(), _controls.jump_pending, _controls.jump_running if _controls.jump_pending else _controls.running()):
 					_controls.jump_pending = false
+					_move_elapsed -= 0.1
 		return
 	_area_music.set_target({}, 0.0)
 	if _surface_direction == Vector3.ZERO:
@@ -3039,7 +3138,9 @@ func _process(delta: float) -> void:
 	_show_loading_progress()
 	var time_share := _approach_elapsed / APPROACH_SECONDS
 	var fall := smoothstep(0.0, 1.0, minf(time_share / APPROACH_FALL_SHARE, 1.0))
-	var descent := smoothstep(0.0, 1.0, clampf((time_share - APPROACH_FALL_SHARE) / (1.0 - APPROACH_FALL_SHARE), 0.0, 1.0))
+	var linger_end := APPROACH_FALL_SHARE + APPROACH_LINGER_SHARE
+	var linger := smoothstep(0.0, 1.0, clampf((time_share - APPROACH_FALL_SHARE) / APPROACH_LINGER_SHARE, 0.0, 1.0))
+	var descent := smoothstep(0.0, 1.0, clampf((time_share - linger_end) / (1.0 - linger_end), 0.0, 1.0))
 	var rotation := Quaternion.IDENTITY.slerp(_approach_rotation, fall)
 	var surface_height := maxf(_environment.elevation(_surface_direction), 0.0)
 	if not _environment.environment.is_empty():
@@ -3048,7 +3149,9 @@ func _process(delta: float) -> void:
 	var start_altitude := maxf(_approach_start.length() - PLANET_RADIUS - surface_height, APPROACH_OVERVIEW_KM)
 	var altitude := lerpf(start_altitude, APPROACH_OVERVIEW_KM, fall)
 	if time_share > APPROACH_FALL_SHARE:
-		altitude = lerpf(APPROACH_OVERVIEW_KM, SURFACE_ALTITUDE_M / 1000.0, descent)
+		altitude = lerpf(APPROACH_OVERVIEW_KM, APPROACH_LINGER_END_KM, linger)
+	if time_share > linger_end:
+		altitude = lerpf(APPROACH_LINGER_END_KM, SURFACE_ALTITUDE_M / 1000.0, descent)
 	var distance := PLANET_RADIUS + surface_height + altitude
 	var direction := _surface_direction if _approach_elapsed == APPROACH_SECONDS else rotation * _approach_start.normalized()
 	_camera.position = direction * distance

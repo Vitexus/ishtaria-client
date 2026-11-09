@@ -181,6 +181,13 @@ var objects_loaded := false
 ## Soft ambient one-shots while an NPC stands (not gated by the server).
 const COMMON_GESTURES := ["Point", "Sad", "Happy", "Salute"]
 var _origin_metres: Array = []
+## Where the player will stand (metres from the planet's centre) while the planet is still drawn from space and the render
+## origin is not yet there: the first detail disk is built around it, not around the centre of the planet. A disk whose
+## vertices are 6371 km from its own origin has float precision of about half a metre and, shown close up, was black polygons
+## and noise until a second disk (14 s later) replaced it. Cleared when the render origin is set (`set_render_origin`).
+var _landing_anchor: Array = []
+## The anchor of the disk being computed.
+var _building_anchor: Array = []
 var _models: Dictionary = {}
 var _objects_request: HTTPRequest
 ## Drop/pickup asked for a refresh while a region fetch was already in flight.
@@ -451,6 +458,9 @@ func clear_world() -> void:
 	target = Vector3.ZERO
 	server_url = ""
 	_origin_metres.clear()
+	_landing_anchor = []
+	_building_anchor = []
+	_detail_anchor = []
 	placements.clear()
 	_clear_placed()
 	_clear_loot()
@@ -967,6 +977,29 @@ func _compute_detail_segments(radius_km: float) -> int:
 	var segments := int(round(float(DETAIL_SEGMENTS) * radius_km / DETAIL_RADIUS / 8.0) * 8.0)
 	return clampi(segments, DETAIL_SEGMENTS, DETAIL_SEGMENTS_MAX)
 
+## The point a detail disk is built around: the render origin, or the landing point until the origin is set there.
+func _disk_anchor() -> Array:
+	if _origin_metres.size() == 3:
+		return _origin_metres.duplicate()
+	if _landing_anchor.size() == 3:
+		return _landing_anchor.duplicate()
+	return [0.0, 0.0, 0.0]
+
+## Announces where the player will land, before the disk of the landing is built. The disk is drawn in the frame of the
+## present render origin by offsetting its node (`_place_detail_nodes`) and needs no second build once the origin moves there.
+func prepare_landing(coordinates_metres: Array) -> void:
+	_landing_anchor = coordinates_metres.duplicate() if coordinates_metres.size() == 3 else []
+
+## Puts the detail disk and its grass where their anchor lies relative to the render origin: nowhere to move when they
+## are the same, the whole way (km) while the planet is still seen from space.
+func _place_detail_nodes() -> void:
+	var offset := Vector3.ZERO
+	if _detail_anchor.size() == 3:
+		var now: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
+		offset = _position_from(now, _detail_anchor)
+	detail.position = offset
+	grass.position = offset
+
 ## Rebuilds the local detail disk. With `async_detail` the vertices are computed on a worker thread and
 ## swapped in when ready (the old disk stays, shifted to the new render origin, meanwhile); otherwise the
 ## mesh is ready when this returns, which is what the headless tests rely on.
@@ -996,7 +1029,7 @@ func _build_detail() -> void:
 		"radius": _detail_radius,
 		"segments": _detail_segments,
 		"feather": maxf(DETAIL_EDGE_FEATHER, _detail_radius * 0.06),
-		"anchor": (_origin_metres.duplicate() if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]),
+		"anchor": _disk_anchor(),
 		"map_extent": _map_extent_m(),
 	}
 	if not async_detail:
@@ -1004,6 +1037,7 @@ func _build_detail() -> void:
 		_finish_detail(_compute_detail(job))
 		return
 	_detail_pending = true
+	_building_anchor = job.anchor
 	_detail_rows = 0
 	_detail_rows_total = int(job.segments) + 1
 	_detail_mutex.lock()
@@ -1214,10 +1248,9 @@ func _finish_detail(result: Dictionary) -> void:
 	for child in detail.get_children():
 		detail.remove_child(child)
 		child.queue_free()
-	detail.position = Vector3.ZERO
-	grass.position = Vector3.ZERO
-	grass_cover.apply(grass, result.grass)
 	_detail_anchor = job.anchor
+	_place_detail_nodes()
+	grass_cover.apply(grass, result.grass)
 	var unit: Vector3 = job.unit
 	var mesh := _build_detail_mesh(result.land, result.normals, result.uv2, result.indices, result.get("lush", PackedColorArray()))
 	_detail_vertices = result.land
@@ -3072,12 +3105,14 @@ func set_render_origin(coordinates_metres: Array) -> void:
 		placed.get_child(index).position = _render_position(_placed_entries[index].position)
 	for index in _lamp_positions.size():
 		lamps.get_child(index).position = _render_position(_lamp_positions[index])
-	_build_detail()
-	# Until the rebuilt disk arrives the old one is slid into the new origin's frame instead of jumping.
-	if _detail_pending and _detail_anchor.size() == 3:
-		var now: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
-		grass.position = Vector3((float(_detail_anchor[0]) - float(now[0])) / 1000.0, (float(_detail_anchor[1]) - float(now[1])) / 1000.0, (float(_detail_anchor[2]) - float(now[2])) / 1000.0)
-		detail.position = Vector3((float(_detail_anchor[0]) - float(now[0])) / 1000.0, (float(_detail_anchor[1]) - float(now[1])) / 1000.0, (float(_detail_anchor[2]) - float(now[2])) / 1000.0)
+	_landing_anchor = []
+	# The disk of the landing was already built around this point: nothing to rebuild, only to place.
+	var anchor: Array = _origin_metres if _origin_metres.size() == 3 else [0.0, 0.0, 0.0]
+	var covered := (_building_anchor == anchor) if _detail_pending else (_detail_anchor == anchor)
+	if not covered:
+		_build_detail()
+	# Until a rebuilt disk arrives the old one is slid into the new origin's frame instead of jumping.
+	_place_detail_nodes()
 
 ## Where a point (metres from the planet's centre) is in the scene, relative to the render origin.
 func render_position(metres: Array) -> Vector3:
