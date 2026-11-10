@@ -1,3 +1,13 @@
+ishtaria-client (0.6.0) unstable; urgency=medium
+
+  * Answers the player has already heard are greyed out in the dialogue
+    window (still selectable).
+  * Canals of a datadisk cross plain landscape patches; world sounds
+    (footsteps, axe, pickaxe, coins); stone tool icons; the 0 A.D.
+    wooden palisade is converted.
+
+ -- Vítězslav Dvořák <cybervitexus@gmail.com>  Tue, 10 Nov 2026 12:38:13 +0100
+
 ishtaria-client (0.5.1) unstable; urgency=medium
 
   * The packages and standalone builds connect to the Ishtaria world
