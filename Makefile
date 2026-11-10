@@ -6,12 +6,16 @@ GODOT ?= godot4
 RELEASE_SERVER ?= https://ishtaria.vitexsoftware.com/api
 GODOT_ARGS ?=
 SERVER_URL ?=
+## Screenshot tests need a real renderer. XVFB=1 runs them inside xvfb-run (a virtual display, for a machine or CI
+## without a screen); the default uses the current DISPLAY.
+XVFB ?=
+SHOT_RUNNER := $(if $(strip $(XVFB)),xvfb-run -a -s "-screen 0 1600x900x24",)
 
 ifneq ($(strip $(SERVER_URL)),)
 export ISHTARIA_SERVER_URL := $(SERVER_URL)
 endif
 
-.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls test-photo build build-arm64 build-windows build-macos build-web serve-web build-all help
+.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls test-photo test-uruk-aerial test-uruk-look build build-arm64 build-windows build-macos build-web serve-web build-all help
 
 run:
 	"$(GODOT)" --path "$(CURDIR)" $(GODOT_ARGS)
@@ -78,6 +82,14 @@ test-world-view:
 
 test-story-live:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/story_live.gd
+
+## Uruk screenshots (a Gilgamesh world, the player moved to the city by SQL): ISHTARIA_TEST_SERVER is required, DATABASE_URL or
+## ISHTARIA_AERIAL_DB names the world's database, ISHTARIA_SHOT_DIR the output directory (default /tmp).
+test-uruk-aerial:
+	$(SHOT_RUNNER) "$(GODOT)" --path "$(CURDIR)" --resolution 1600x900 --script res://tests/uruk_aerial.gd
+
+test-uruk-look:
+	$(SHOT_RUNNER) "$(GODOT)" --path "$(CURDIR)" --resolution 1600x900 --script res://tests/uruk_ground_look.gd
 
 test-disk-cover:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/disk_cover.gd
@@ -176,6 +188,7 @@ help:
 		'make test-day-night  Test solar clock, seasons and lighting' \
 		'make test-controls  Test keyboard remapping and mouse camera' \
 		'make test-photo     Test photo mode: view, sliders, pictures' \
+		'make test-uruk-aerial test-uruk-look  Uruk screenshots against a Gilgamesh world (XVFB=1 for a virtual display)' \
 		'make build  Export the Linux release executable' \
 		'make build-arm64  Export the Linux arm64 release executable' \
 		'make build-windows  Export the Windows x86-64 executable (unsigned)' \

@@ -217,14 +217,19 @@ func _force_local_noon(client: Node) -> void:
 			best_dot = elevation
 			best = seconds
 	var direction: Vector3 = sky.solar_direction(best)
-	var solar := {
-		"version": 1,
-		"unix_seconds": best,
-		"direction": [direction.x, direction.y, direction.z],
-		"sidereal_day_seconds": 86164.0905,
-		"angular_radius_degrees": 0.26779660030765046,
-	}
-	sky.apply_solar(solar)
+	# Start from the world's own solar document (tilt, precession, moon fields) and move only the instant.
+	var solar: Dictionary = sky._solar.duplicate(true)
+	if solar.is_empty():
+		push_error("the sky has no solar document yet")
+		return
+	var moon: Dictionary = sky.lunar_state(best)
+	solar["unix_seconds"] = best
+	solar["direction"] = [direction.x, direction.y, direction.z]
+	solar["moon_direction"] = [moon.direction.x, moon.direction.y, moon.direction.z]
+	solar["moon_angular_radius_degrees"] = moon.angular_radius_degrees
+	solar["moon_illumination"] = moon.illumination
+	if not sky.apply_solar(solar):
+		push_error("the sky refused the pinned noon")
 	client._environment.set_night(0.0)
 	var clock: Dictionary = sky.clock_state()
 	print("local noon: elev=%.1f° local_seconds=%.0f day=%s" % [

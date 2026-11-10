@@ -141,6 +141,8 @@ const RPG_ALIASES := {"gold": "coin"}
 const ICONS := {
 	"axe": {"model": "tool-axe"},
 	"pickaxe": {"model": "tool-pickaxe"},
+	"stone_axe": {"model": "tool-axe", "tint": Color("9b9ca0")},
+	"stone_pickaxe": {"model": "tool-pickaxe", "tint": Color("9b9ca0")},
 	"stone": {"model": "resource-stone", "tint": Color("9b9ca0")},
 	"stone_block": {"model": "resource-stone-large", "tint": Color("b4b5b9")},
 	"iron_ore": {"model": "rock-c", "tint": Color("8a6f66")},

@@ -153,6 +153,15 @@ static func build() -> Theme:
 	theme.set_font("font", "ChoiceButton", ThemeDB.fallback_font)
 	theme.set_font_size("font_size", "ChoiceButton", 16)
 	theme.set_constant("outline_size", "ChoiceButton", 0)
+	# An answer the player has already heard: the same button, greyed out (it can still be chosen).
+	_variation(theme, "SeenChoiceButton", "ChoiceButton")
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
+		theme.set_color(state, "SeenChoiceButton", Color(SAND_MUTED, 0.55) if state != "font_hover_color" else Color(SAND_MUTED, 0.8))
+	for state in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		var seen := (theme.get_stylebox(state, "ChoiceButton") as StyleBoxFlat).duplicate() as StyleBoxFlat
+		seen.bg_color = Color(seen.bg_color, seen.bg_color.a * 0.6)
+		seen.border_color = Color(0.45, 0.42, 0.38, 0.55) if state != "focus" else seen.border_color
+		theme.set_stylebox(state, "SeenChoiceButton", seen)
 	for kind in ["OptionButton", "MenuButton", "CheckBox", "CheckButton", "LinkButton"]:
 		if kind in ["OptionButton", "MenuButton"]:
 			theme.set_font("font", kind, label_font)

@@ -316,8 +316,10 @@ func _ready() -> void:
 	_sky.set_light_shafts(settings.get_value("display", "light_shafts", false) == true)
 	var saved_sound: Variant = settings.get_value("audio", "interface_sounds", true)
 	_audio.enabled = saved_sound if saved_sound is bool else true
+	_environment.creature_sounds = _audio.enabled
 	add_child(_audio)
 	UiKit.audio = _audio
+	_controls.footstep.connect(func() -> void: _audio.play("step"))
 	_hud = preload("res://scripts/player_hud.gd").new()
 	_hud.sky = _sky
 	_hud.sound_enabled = _audio.enabled
@@ -442,6 +444,7 @@ func _ready() -> void:
 	_trading.exchange_changed.connect(_trade_panel.show_exchange)
 	_trading.exchange_ended.connect(_on_exchange_ended)
 	_trading.changed.connect(_session.refresh)
+	_trading.changed.connect(func() -> void: _audio.play("coins"))
 	_trade_panel.pending.in_flight = _trading.is_busy
 	_trading.busy_changed.connect(_trade_panel.pending.set_busy)
 	_trading.failed.connect(_on_trading_failed)
@@ -876,6 +879,7 @@ func _sync_flag() -> void:
 
 func _on_sound_toggled(enabled: bool) -> void:
 	_audio.set_enabled(enabled)
+	_environment.creature_sounds = enabled
 	_area_music.enabled = enabled
 	_dialogue.set_music_enabled(enabled)
 	_dialogue.set_voice_enabled(enabled)
@@ -2112,7 +2116,7 @@ func _harvest_nearby() -> void:
 		_session.drink()
 		return
 	# Pickaxe in hand mines a rock; otherwise a rock is for sitting.
-	if target.harvest.kind == "rock" and not _hand_is_pickaxe():
+	if target.harvest.kind == "rock" and not _hand_is_pickaxe() and not _mines_by_hand(target):
 		_session.sit(target.id)
 		return
 	_session.harvest(target.id)
@@ -2122,7 +2126,21 @@ func _find_seat() -> Dictionary:
 	return _environment.rock_seat(_player_metres, HARVEST_REACH_M)
 
 func _hand_is_pickaxe() -> bool:
-	return str(_player_profile.get("equipment", {}).get("hand", "")) == "pickaxe"
+	return str(_player_profile.get("equipment", {}).get("hand", "")) in ["pickaxe", "stone_pickaxe"]
+
+const WORKING_TOOLS := ["axe", "pickaxe", "stone_axe", "stone_pickaxe"]
+
+## A character with nothing in hand and no axe or pickaxe in the pack (both broke) works a small
+## rock with bare hands, slowly, to get the first stones for a stone tool. Otherwise E sits.
+func _mines_by_hand(target: Dictionary) -> bool:
+	if not target.harvest.get("bare", false):
+		return false
+	if str(_player_profile.get("equipment", {}).get("hand", "")) != "":
+		return false
+	for item: Variant in _player_profile.get("inventory", {}).get("items", []):
+		if item is Dictionary and item.get("item_id") in WORKING_TOOLS:
+			return false
+	return true
 
 ## The player's own ripe crop within reach, or an empty dictionary.
 func _ripe_crop_nearby() -> Dictionary:
@@ -2428,6 +2446,8 @@ func _update_prompt() -> void:
 				text = tr("E: Fell tree")
 			elif target.harvest.kind == "logs":
 				text = tr("E: Take logs")
+			elif target.harvest.kind == "rock" and _mines_by_hand(target):
+				text = tr("E: Mine by hand")
 			elif target.harvest.kind == "rock" and not _hand_is_pickaxe():
 				text = tr("E: Sit")
 			else:
@@ -2441,6 +2461,33 @@ func _update_prompt() -> void:
 func _on_milked(_reply: Dictionary) -> void:
 	_toast.show_toast(tr("You drink fresh milk"))
 	_audio.play("confirmation")
+
+## 1.0 at the edge of water, falling to 0.0 at WATER_HEARD_M: the nearest water found on rings around the avatar.
+const WATER_HEARD_M := 30.0
+var _water_sound_clock := 0.0
+
+func _water_nearness() -> float:
+	var here: Array = _controls.avatar_metres()
+	if here.size() != 3 or not _environment.has_method("water_surface_km"):
+		return 0.0
+	var up := Vector3(here[0], here[1], here[2]).normalized()
+	var east := up.cross(Vector3.UP if absf(up.dot(Vector3.UP)) < 0.95 else Vector3.FORWARD).normalized()
+	var north := east.cross(up).normalized()
+	for ring in [0.0, 5.0, 12.0, 20.0, WATER_HEARD_M]:
+		for step in (1 if ring == 0.0 else 8):
+			var angle := TAU * step / 8.0
+			var point := [here[0] + (east.x * cos(angle) + north.x * sin(angle)) * ring, here[1] + (east.y * cos(angle) + north.y * sin(angle)) * ring, here[2] + (east.z * cos(angle) + north.z * sin(angle)) * ring]
+			if is_finite(_environment.water_surface_km(point)):
+				return 1.0 - ring / (WATER_HEARD_M + 6.0)
+	return 0.0
+
+## The sound of one swing: axes chop, pickaxes mine, bare hands and anything else only click.
+func _tool_sound(tool_id: String) -> String:
+	if tool_id.ends_with("pickaxe"):
+		return "mine"
+	if tool_id.ends_with("axe"):
+		return "chop"
+	return "click"
 
 func _on_harvested(reply: Dictionary) -> void:
 	var counter: Variant = reply.get("counter")
@@ -2469,7 +2516,7 @@ func _on_harvested(reply: Dictionary) -> void:
 	else:
 		_toast.show_toast(tr("Hit %s / %s") % [int(reply.hits), int(reply.hits_required)] + _xp_text(reply) + wear_note, 1.2)
 		if not broke:
-			_audio.play("click")
+			_audio.play(_tool_sound(str(reply.get("tool", ""))))
 
 ## A blow against a story NPC: red health bar, lasting hostility, optional counter-blow.
 func _on_npc_struck(reply: Dictionary) -> void:
@@ -2579,6 +2626,9 @@ func _on_vehicle_moved(position: Array) -> void:
 
 func _on_swimming_changed(swimming: bool) -> void:
 	_controls.set_swimming(swimming)
+	_audio.set_swimming(swimming)
+	if swimming and not _swimming:
+		_audio.play("splash")
 	if swimming != _swimming:
 		_swimming = swimming
 		_update_prompt()
@@ -2669,8 +2719,7 @@ func _on_goods_loaded(goods: Dictionary) -> void:
 func _on_exchange_ended(done: bool) -> void:
 	_trade_panel.end_exchange(done)
 	if done:
-		_toast.show_toast(tr("Trade completed"))
-		_audio.play("confirmation")
+		_toast.show_toast(tr("Trade completed"))  # the coins already sounded when the trading client reported the change
 	else:
 		_toast.show_toast(tr("Trade ended"))
 
@@ -3068,6 +3117,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_controls.zoom(event.factor)
 
 func _process(delta: float) -> void:
+	_audio.update_wind(delta, _controls.active)
+	_water_sound_clock -= delta
+	if _water_sound_clock <= 0.0:
+		_water_sound_clock = 0.5
+		_audio.set_water_nearness(_water_nearness() if _controls.active and not _swimming else 0.0)
 	_environment.follow_target = _player_metres
 	_environment.set_night(1.0 - _sky.daylight)
 	if not _vehicle_id.is_empty() and _controls.active:

@@ -202,6 +202,8 @@ func _fill_node(reply: Dictionary) -> void:
 		button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		# An answer the player has already heard is greyed out, but can still be chosen.
+		button.set_meta("seen", choice.get("seen", false) == true)
 		choices_box.add_child(button)
 		pending.register(button, "Choose:%d" % int(choice.index), _choose.bind(int(choice.index)))
 	if reply.get("about") == true:
@@ -226,7 +228,7 @@ func _fill_node(reply: Dictionary) -> void:
 		choices_box.add_child(leave)
 	for button in choices_box.get_children():
 		if button is Button:
-			button.theme_type_variation = &"ChoiceButton"
+			button.theme_type_variation = &"SeenChoiceButton" if button.get_meta("seen", false) else &"ChoiceButton"
 	# The answers changed: the panel may need a different height.
 	_resize()
 

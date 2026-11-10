@@ -76,6 +76,12 @@ PARTS: dict[str, tuple[str, str, bool]] = {
     "pers_chariot_b": ("structural/pers_chariot_b.dae.cached.pmd", "structural/pers_chariot_b.png.cached.dds", True),
     "pers_chariot_e": ("structural/pers_chariot_e.dae.cached.pmd", "structural/pers_chariot_e.png.cached.dds", True),
     "pers_ice_house_b": ("structural/pers_ice_house_02.dae.cached.pmd", "structural/pers_struct.png.cached.dds", True),
+    # Wooden palisade (the walls of a village): pieces of different length, a gate and a tower. The props are Y-up (not Z-up like the buildings).
+    "palisade_long": ("props/palisade_rocks_long.dae.cached.pmd", "props/palisade_main.png.cached.dds", False),
+    "palisade_medium": ("props/palisade_rocks_medium.dae.cached.pmd", "props/palisade_main.png.cached.dds", False),
+    "palisade_short": ("props/palisade_rocks_short.dae.cached.pmd", "props/palisade_main.png.cached.dds", False),
+    "palisade_gate": ("props/palisade_rocks_gate.dae.cached.pmd", "props/palisade_main.png.cached.dds", False),
+    "palisade_tower": ("props/palisade_rocks_tower.dae.cached.pmd", "props/palisade_main.png.cached.dds", False),
 }
 
 

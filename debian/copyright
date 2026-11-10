@@ -18,6 +18,9 @@ Files: assets/kenney/characters/*
 	assets/kenney/game-icons/*
 	assets/kenney/graveyard-kit/*
 	assets/kenney/interface-sounds/*
+	assets/kenney/impact-sounds/*
+	assets/cc0-sounds/*
+	assets/kenney/rpg-audio/*
 	assets/kenney/mini-forest/*
 	assets/kenney/nature-kit/*
 	assets/kenney/platformer-kit/*

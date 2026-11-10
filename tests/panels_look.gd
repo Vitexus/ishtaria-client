@@ -115,7 +115,7 @@ func _run() -> void:
 		"dialogue_long": func() -> Control:
 			dialogue.show_reply({"npc_id": "endland:elder", "name_key": "endland:npc.kragg", "seq": 4, "open": true, "player": {},
 				"node": {"node": "greet", "text_key": "endland:elder.greet", "choices": [
-					{"index": 0, "text_key": "endland:elder.a"}, {"index": 1, "text_key": "endland:elder.b"},
+					{"index": 0, "text_key": "endland:elder.a", "seen": true}, {"index": 1, "text_key": "endland:elder.b"},
 					{"index": 2, "text_key": "endland:elder.c"}, {"index": 3, "text_key": "endland:elder.d"},
 					{"index": 4, "text_key": "endland:elder.e"}]}})
 			return dialogue.panel,

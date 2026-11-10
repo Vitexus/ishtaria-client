@@ -98,6 +98,17 @@ var _swimmers: Array[Dictionary] = []
 ## Land animals walking along the waypoints the server sent: {"id", "node", "placement", "player", "route", "walking"}
 ## with the route as [unix milliseconds, x, y, z] in metres.
 var _walkers: Array[Dictionary] = []
+## Animals that have a voice (CC0 recordings in assets/cc0-sounds/animals/): model id -> sounds. One of the animals
+## within CALL_RANGE_KM calls now and then, positioned at the animal (scene units are kilometres).
+const CREATURE_CALLS := {
+	"animal.duck": ["duck_1", "duck_2", "duck_3", "duck_4", "duck_5"],
+	"animal.goose": ["goose_1", "goose_2", "goose_3", "goose_4"],
+	"animal.falcon": ["falcon_1", "falcon_2"],
+}
+const CALL_RANGE_KM := 0.12
+var creature_sounds := true
+var _voiced: Array[Dictionary] = []
+var _call_wait := 4.0
 ## Faster than this (m/s) an animal is running, not walking (a struck herbivore fleeing).
 const ANIMAL_RUN_M_S := 3.0
 ## Server clock minus the local clock, in milliseconds.
@@ -332,6 +343,7 @@ func _process(delta: float) -> void:
 	fill_structures()
 	_swim()
 	_wander(delta)
+	_creature_calls(delta)
 	_walk_npcs(delta)
 	_follow_player(delta)
 	_face_held(delta)
@@ -577,7 +589,11 @@ func elevation64(direction: Array) -> float:
 	# A coarse river's channel is carved where no landscape patch replaces the ground (the server's `height`).
 	if (not _river_segments.is_empty() or not _disk_segments.is_empty()) and not _terrain_covers(unit):
 		return (metres - _river_carve_m(unit)) / 1000.0
-	return (metres + _terrain_offset_m(unit, metres)) / 1000.0
+	var patched := metres + _terrain_offset_m(unit, metres)
+	# A canal of the datadisk crosses a plain patch (the server's `patch_lets_rivers_through`).
+	if not _disk_segments.is_empty() and _terrain_lets_rivers_through(unit):
+		patched -= _disk_river_carve_m(unit)
+	return patched / 1000.0
 
 func environment_index(direction: Vector3) -> int:
 	var mapped := coordinates(direction)
@@ -828,10 +844,26 @@ func _terrain_covers(direction: Array) -> bool:
 			return true
 	return false
 
-## The surface of a coarse river's water in metres, or NAN where no channel is carved (under a patch too).
+## Whether a datadisk's canal runs through the patch here: the first patch covering the direction has no clearing mask
+## (no streets, houses or fields of its own), as the server's `patch_lets_rivers_through`.
+func _terrain_lets_rivers_through(direction: Array) -> bool:
+	for patch: Dictionary in _terrain_patches:
+		if not _terrain_local(patch, direction).is_empty():
+			return String(patch.get("clear_url", "")) == ""
+	return false
+
+## The surface of a coarse river's water in metres, or NAN where no channel is carved (under a patch too, except a
+## datadisk's canal across a plain patch).
 func _river_level_m(direction: Array) -> float:
-	if (_river_segments.is_empty() and _disk_segments.is_empty()) or _terrain_covers(direction):
+	if _river_segments.is_empty() and _disk_segments.is_empty():
 		return NAN
+	if _terrain_covers(direction):
+		if _disk_segments.is_empty() or not _terrain_lets_rivers_through(direction):
+			return NAN
+		var carve := _disk_river_carve_m(direction)
+		if carve <= RIVER_LEVEL_M:
+			return NAN
+		return (elevation64(direction) * 1000.0 + carve) - RIVER_LEVEL_M
 	if _river_carve_m(direction) <= RIVER_LEVEL_M:
 		return NAN
 	return elevation64_base(direction) * 1000.0 - RIVER_LEVEL_M
@@ -909,6 +941,7 @@ func _clear_objects(reuse: bool = false) -> void:
 	placements.clear()
 	_swimmers.clear()
 	_walkers.clear()
+	_voiced.clear()
 	objects_loaded = false
 	_memorial_entries.clear()
 	if not reuse:
@@ -2588,6 +2621,10 @@ func _detail_water_km(direction: Array, point: Vector3, height: float) -> float:
 	var index := environment_index(point)
 	var biome := int(environment.biomes[index])
 	if _terrain_dry(direction):
+		# A canal across a plain patch: its water, unless the dry ground of the patch lies above it.
+		var canal := _river_level_m(direction) / 1000.0
+		if is_finite(canal) and canal > height:
+			return canal
 		return 0.0 if biome == 0 else NAN
 	# A coarse river runs in its carved channel; where it meets a lake or the sea the higher surface counts.
 	var river := _river_level_m(direction) / 1000.0
@@ -2621,6 +2658,9 @@ func _minimap_water_at(direction: Array) -> bool:
 	var biome := int(environment.biomes[index])
 	# The rest of a landscape patch is dry land, below sea level too, except over the coarse sea.
 	if _terrain_dry(direction):
+		var canal := _river_level_m(_unit64(direction)) / 1000.0
+		if is_finite(canal) and canal > height:
+			return true
 		return biome == 0 and 0.001 > height
 	var river := _river_level_m(_unit64(direction)) / 1000.0
 	if is_finite(river) and river > height:
@@ -3208,6 +3248,40 @@ func _route_sample(route: Array, time_ms: float) -> Array:
 	var last: Array = route[route.size() - 1]
 	return [Vector3(last[1], last[2], last[3]), Vector3.ZERO]
 
+## Every few seconds one animal within hearing calls, as a one-shot 3D sound under it (it frees itself).
+func _creature_calls(delta: float) -> void:
+	if _voiced.is_empty() or not creature_sounds:
+		return
+	_call_wait -= delta
+	if _call_wait > 0.0:
+		return
+	_call_wait = randf_range(3.0, 9.0)
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var near: Array[Dictionary] = []
+	var kept: Array[Dictionary] = []
+	for voiced in _voiced:
+		if is_instance_valid(voiced.node):
+			kept.append(voiced)
+			if voiced.node.global_position.distance_to(camera.global_position) <= CALL_RANGE_KM:
+				near.append(voiced)
+	_voiced = kept
+	if near.is_empty():
+		return
+	var chosen: Dictionary = near[randi() % near.size()]
+	var names: Array = CREATURE_CALLS[chosen.model]
+	var player := AudioStreamPlayer3D.new()
+	player.stream = load("res://assets/cc0-sounds/animals/%s.ogg" % names[randi() % names.size()])
+	player.unit_size = 0.01
+	player.max_distance = CALL_RANGE_KM
+	player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	player.volume_db = -4.0
+	player.pitch_scale = randf_range(0.9, 1.1)
+	player.finished.connect(player.queue_free)
+	chosen.node.add_child(player)
+	player.play()
+
 ## Walks the land animals along their routes: they turn towards where they go and play the
 ## walking clip while they move and the idle one while they stand.
 func _wander(delta: float) -> void:
@@ -3571,7 +3645,7 @@ func _swim() -> void:
 ## What an object can be harvested for, or an empty dictionary for scenery.
 func _harvest_info(data: Variant) -> Dictionary:
 	if data is Dictionary and data.get("kind") in ["tree", "rock", "logs"] and data.get("tool") is String and (data.get("hits") is int or data.get("hits") is float):
-		return {"kind": data.kind, "tool": data.tool, "hits": int(data.hits)}
+		return {"kind": data.kind, "tool": data.tool, "hits": int(data.hits), "bare": data.get("bare") == true}
 	return {}
 
 ## The nearest harvestable object within reach of a server position in metres.
@@ -3752,6 +3826,8 @@ func _place_object(entry: Dictionary) -> void:
 	else:
 		placement.add_child(model)
 	objects.add_child(placement)
+	if CREATURE_CALLS.has(str(selected.id)):
+		_voiced.append({"node": placement, "model": str(selected.id)})
 	var record := {"id":entry.id,"model":selected.id,"position":point,"coordinates":entry.position.duplicate(),"scale":placement.scale,"rotation":placement.quaternion,"biome":BIOMES[int(entry.biome)],"collision_radius_m":entry.collision_radius_m,"harvest":_harvest_info(entry.get("harvest"))}
 	placements.append(record)
 	if entry.has("wander"):

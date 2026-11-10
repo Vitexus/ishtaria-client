@@ -74,6 +74,11 @@ var _lift_distance_from := 0.0
 ## Close to the character the orbit of the camera is not squeezed against the ground, so the view really points up.
 const LIFT_DISTANCE_M := 1.8
 var active := false
+## Emitted about once per stride of acknowledged ground walking (not in the air or in water); the main scene plays a step.
+signal footstep
+const STRIDE_WALK_M := 1.5
+const STRIDE_RUN_M := 2.4
+var _stride_metres := 0.0
 var moving := false
 var direction := Vector3.ZERO
 var sequence := -1
@@ -386,6 +391,11 @@ func apply_position(data: Variant, is_moving: bool) -> bool:
 	var now := Time.get_ticks_msec()
 	var travelled := _position_target.distance_to(previous) * 1000.0
 	var ack_seconds := maxf((now - _last_position_ms) / 1000.0, 0.04)
+	if is_moving and travelled > 0.0001 and not airborne and not swimming:
+		_stride_metres += travelled
+		if _stride_metres >= (STRIDE_RUN_M if running() else STRIDE_WALK_M):
+			_stride_metres = 0.0
+			footstep.emit()
 	if is_moving and travelled > 0.0001:
 		_target_velocity = _target_velocity.lerp((_position_target - previous) / ack_seconds, 0.35)
 	else:
