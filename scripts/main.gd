@@ -575,6 +575,10 @@ func _ready() -> void:
 	_environment.npcs_changed.connect(_refresh_minimap_entities)
 	_story.strings_changed.connect(_refresh_minimap_entities)
 	_minimap = preload("res://scripts/minimap.gd").new()
+	var map_settings := ConfigFile.new()
+	map_settings.load(_settings_path)
+	_minimap.show_coordinates = map_settings.get_value("display", "map_coordinates", false) == true
+	_control_settings.minimap = _minimap
 	_minimap.set_environment(_environment)
 	_environment.props_changed.connect(_refresh_minimap_props)
 	_environment.water_changed.connect(_refresh_minimap_water)
@@ -2979,6 +2983,10 @@ func _escape_pressed() -> void:
 		return
 	if _chat.is_typing():
 		_chat.close_input()
+		return
+	# The big map is left with ESC, like a panel; the menu opens on the next press.
+	if _minimap != null and _minimap.is_big_mode() and not _escape_menu.visible and not _control_settings.visible and not _game_ui_open():
+		_minimap.toggle_visibility()
 		return
 	_controls.release_mouse()
 	if _control_settings.visible:

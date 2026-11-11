@@ -89,6 +89,9 @@ var _north_marker: Sprite2D
 var _border: NinePatchRect
 var _scale_bar: ColorRect
 var _scale_label: Label
+var _coords_label: Label
+## Geographic coordinates under the map (a client preference, off by default).
+var show_coordinates := false
 var _goal_overlay: GoalOverlay
 
 # Entity markers: Dictionary of entity_id -> {marker: Sprite2D, label: Sprite2D, position: Vector3, kind: String, name: String}
@@ -144,6 +147,9 @@ func _update_scale_bar() -> void:
 	_scale_bar.position = Vector2(18, size.y - 12)
 	_scale_label.text = "50 m"
 	_scale_label.position = Vector2(18, size.y - 32)
+	# Under the frame of the small map; in the big one, along the bottom edge.
+	_coords_label.position = Vector2(0, size.y + 6) if not _big_mode else Vector2(12, size.y - 56)
+	_coords_label.size = Vector2(size.x, 18) if not _big_mode else Vector2(320, 18)
 
 
 func _ready() -> void:
@@ -243,6 +249,16 @@ func _ready() -> void:
 	_scale_label.position = Vector2(0, 2)
 	_minimap_panel.add_child(_scale_label)
 	
+	# Geographic coordinates of the player, for screenshots taken while debugging.
+	_coords_label = Label.new()
+	_coords_label.name = "CoordinatesLabel"
+	_coords_label.self_modulate = SCALE_INDICATOR_COLOR
+	_coords_label.add_theme_font_size_override("font_size", 12)
+	_coords_label.add_theme_color_override("font_outline_color", UiTheme.CLAY_DARK)
+	_coords_label.add_theme_constant_override("outline_size", 4)
+	_coords_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_minimap_panel.add_child(_coords_label)
+
 	# Add border
 	_border = NinePatchRect.new()
 	_border.name = "Border"
@@ -442,8 +458,21 @@ static func _to_map(offset: Vector3, basis: Dictionary) -> Vector2:
 	return Vector2(offset.dot(basis.right), -offset.dot(basis.forward))
 
 
+func set_show_coordinates(enabled: bool) -> void:
+	show_coordinates = enabled
+	_coords_label.visible = enabled
+
+
 func _update_minimap() -> void:
 	var size := _get_size()
+	_coords_label.visible = show_coordinates
+	if show_coordinates and player_position.length() > 0.0:
+		var unit := player_position.normalized()
+		var latitude := rad_to_deg(asin(clampf(unit.y, -1.0, 1.0)))
+		var longitude := rad_to_deg(atan2(-unit.z, unit.x))
+		_coords_label.text = "%.5f° %s, %.5f° %s" % [absf(latitude), "N" if latitude >= 0.0 else "S", absf(longitude), "E" if longitude >= 0.0 else "W"]
+	else:
+		_coords_label.text = ""
 	var centre := size / 2.0
 	var scale_px := _pixels_per_metre()
 	var basis := _tangent_basis()

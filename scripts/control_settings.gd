@@ -16,8 +16,11 @@ var tablet: Node
 var recapture := true
 ## The sky whose volumetric light shafts the check box switches.
 var sky: Node
+## The minimap whose coordinate line the check box switches.
+var minimap: Node
 var _fullscreen: CheckBox
 var _light_shafts: CheckBox
+var _map_coordinates: CheckBox
 var _buttons: Array[Button] = []
 var _waiting := -1
 var _feedback: Label
@@ -88,6 +91,15 @@ func _ready() -> void:
 		_feedback.text = "" if save_light_shafts(enabled) else tr("Could not save controls")
 	)
 	display.add_child(_light_shafts)
+	_map_coordinates = CheckBox.new()
+	_map_coordinates.name = "MapCoordinates"
+	_map_coordinates.text = tr("Coordinates under the minimap")
+	_map_coordinates.toggled.connect(func(enabled: bool) -> void:
+		if is_instance_valid(minimap):
+			minimap.set_show_coordinates(enabled)
+		_feedback.text = "" if save_map_coordinates(enabled) else tr("Could not save controls")
+	)
+	display.add_child(_map_coordinates)
 
 	var sound := _page("Sound")
 	_music_volume = _volume_slider(sound, "Music volume", "music_volume")
@@ -249,6 +261,7 @@ func open() -> void:
 	_feedback.text = ""
 	_fullscreen.set_pressed_no_signal(is_fullscreen())
 	_light_shafts.set_pressed_no_signal(is_instance_valid(sky) and sky.light_shafts)
+	_map_coordinates.set_pressed_no_signal(is_instance_valid(minimap) and minimap.show_coordinates)
 	_refresh()
 	popup(Rect2i(Vector2i.ZERO, get_tree().root.size))
 	_fit()
@@ -272,6 +285,12 @@ func save_light_shafts(enabled: bool) -> bool:
 	var config := ConfigFile.new()
 	config.load(controls.settings_path)
 	config.set_value("display", "light_shafts", enabled)
+	return config.save(controls.settings_path) == OK
+
+func save_map_coordinates(enabled: bool) -> bool:
+	var config := ConfigFile.new()
+	config.load(controls.settings_path)
+	config.set_value("display", "map_coordinates", enabled)
 	return config.save(controls.settings_path) == OK
 
 func _begin_binding(index: int) -> void:
