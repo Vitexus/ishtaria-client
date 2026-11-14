@@ -78,6 +78,9 @@ var _history: Node
 var _history_list: ItemList
 var _history_test_button: Button
 var _history_forget_button: Button
+var _packs: Node
+## A connection was asked for while the art was still downloading: its `save_address` flag, or null when none waits.
+var _connect_waiting: Variant = null
 var _status_key := "Disconnected"
 var _status_args: Array = []
 var _status_reason_key := ""
@@ -229,12 +232,14 @@ func _ready() -> void:
 	GroundLayers.load_textures(_terrain_material)
 	GroundLayers.apply(_terrain_material, GroundLayers.table_for("", null))
 	_terrain_material.set_shader_parameter("tex_rock_normal", load("res://assets/terrain/gray_rocks/gray_rocks_nor_gl_1k.jpg"))
-	# 0 A.D. Persia albedos (CC BY-SA) blended into dry sand/soil and rock — see assets/zeroad/terrain/.
-	_terrain_material.set_shader_parameter("tex_sand_persia", load("res://assets/zeroad/terrain/desert_dirt_persia_1.png"))
-	_terrain_material.set_shader_parameter("tex_soil_persia", load("res://assets/zeroad/terrain/persia_dirt_plants_01.png"))
-	_terrain_material.set_shader_parameter("tex_rock_persia", load("res://assets/zeroad/terrain/desert_cliff_persia_1.png"))
+	# The browser build downloads the 0 A.D. art after the first screen (asset_packs.gd); until then the planet has no Persia blend.
 	_terrain_material.set_shader_parameter("persia_blend", 0.35)
-	_terrain_material.set_shader_parameter("use_persia_textures", true)
+	_terrain_material.set_shader_parameter("use_persia_textures", false)
+	_packs = preload("res://scripts/asset_packs.gd").new()
+	_packs.name = "AssetPacks"
+	add_child(_packs)
+	_packs.progress.connect(_on_packs_progress)
+	_packs.finished.connect(_on_packs_finished)
 	_terrain_material.set_shader_parameter("use_textures", true)
 	add_child(planet)
 	var ocean := MeshInstance3D.new()
@@ -257,6 +262,7 @@ func _ready() -> void:
 	_environment.water_material = _water_material
 	add_child(_environment)
 	_environment.objects_failed.connect(_on_player_failed)
+	_packs.start()
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-35, 40, 0)
@@ -1213,6 +1219,32 @@ static func _normalize_server_url(address: String) -> String:
 func _on_server_submitted(_text: String) -> void:
 	_connect_server()
 
+## The 0 A.D. art is on its way (browser build): a waiting connection shows how far it is.
+func _on_packs_progress(fraction: float) -> void:
+	if _connect_waiting != null:
+		_set_status("Downloading game data: %d %%", [int(fraction * 100.0)])
+
+## The art is mounted: the terrain gets its Persia ground, the scenery catalogue is read and a waiting connection goes on.
+func _on_packs_finished(ok: bool) -> void:
+	if not ok:
+		if _connect_waiting != null:
+			_set_status("Game data could not be downloaded")
+		return
+	_apply_persia_textures()
+	if _environment.catalog.is_empty():
+		_environment.load_catalog("res://assets/world_objects.json")
+	if _connect_waiting != null:
+		var save_address: bool = _connect_waiting
+		_connect_waiting = null
+		_connect_server(save_address)
+
+## 0 A.D. Persia albedos (CC BY-SA) blended into dry sand/soil and rock, see assets/zeroad/terrain/.
+func _apply_persia_textures() -> void:
+	_terrain_material.set_shader_parameter("tex_sand_persia", load("res://assets/zeroad/terrain/desert_dirt_persia_1.png"))
+	_terrain_material.set_shader_parameter("tex_soil_persia", load("res://assets/zeroad/terrain/persia_dirt_plants_01.png"))
+	_terrain_material.set_shader_parameter("tex_rock_persia", load("res://assets/zeroad/terrain/desert_cliff_persia_1.png"))
+	_terrain_material.set_shader_parameter("use_persia_textures", true)
+
 func _connect_server(save_address := true) -> void:
 	if save_address:
 		_audio.play("click")
@@ -1221,6 +1253,16 @@ func _connect_server(save_address := true) -> void:
 		_set_feedback("Invalid server address")
 		return
 	_set_feedback("")
+	if not _packs.is_ready():
+		# The browser build is still downloading the 0 A.D. art: connect when it is mounted (the world needs it at once).
+		_connect_waiting = save_address
+		if _packs.has_failed():
+			_set_status("Game data could not be downloaded")
+			_packs.retry()
+		else:
+			_set_status("Downloading game data: %d %%", [int(_packs.fraction() * 100.0)])
+		return
+	_connect_waiting = null
 	_disconnect_server()
 	_server_url = url
 	_session.configure(url)

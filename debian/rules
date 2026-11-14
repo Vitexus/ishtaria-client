@@ -31,6 +31,7 @@ ifneq ($(WEB_TEMPLATE),)
 	mkdir -p build/web
 	ln -sf $(WEB_TEMPLATE) $(XDG_DATA_HOME)/godot/export_templates/4.5.stable/$(WEB_TEMPLATE_NAME)
 	$(GODOT) --headless --export-release Web build/web/index.html
+	GODOT=$(GODOT) tools/web-packs.sh
 else
 	@echo "No Godot web export template ($(WEB_TEMPLATE_NAME)) found: ishtaria-client-web is not built."
 endif
@@ -53,7 +54,7 @@ ifneq ($(WEB_TEMPLATE),)
 	# Load before the engine so window.ISHTARIA_SERVER_URL is set when main.gd runs.
 	sed -i 's|</head>|<script src="ishtaria-config.js"></script>\n\t</head>|' \
 		debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/index.html
-	cd debian/ishtaria-client-web/usr/share/ishtaria-client-web/html && ls index.html index.js index.wasm index.pck ishtaria-config.js
+	cd debian/ishtaria-client-web/usr/share/ishtaria-client-web/html && ls index.html index.js index.wasm index.pck zeroad.pck asset-packs.json ishtaria-config.js
 	grep -q 'ishtaria-config.js' debian/ishtaria-client-web/usr/share/ishtaria-client-web/html/index.html
 	# Site-local default (conffile); Apache/nginx Alias this over html/ishtaria-config.js.
 	install -D -m 0644 debian/client-web-config.js \

@@ -305,7 +305,9 @@ func _stop_detail_work() -> void:
 	_detail_tasks.clear()
 
 func _ready() -> void:
-	load_catalog("res://assets/world_objects.json")
+	# The browser build mounts the 0 A.D. pack a little later (asset_packs.gd); `load_catalog` is then called by main.gd.
+	if ResourceLoader.exists(preload("res://scripts/asset_packs.gd").SENTINEL):
+		load_catalog("res://assets/world_objects.json")
 	detail = Node3D.new()
 	add_child(detail)
 	detail.top_level = true

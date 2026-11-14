@@ -15,7 +15,7 @@ ifneq ($(strip $(SERVER_URL)),)
 export ISHTARIA_SERVER_URL := $(SERVER_URL)
 endif
 
-.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-controls test-photo test-uruk-aerial test-uruk-look build build-arm64 build-windows build-macos build-web serve-web build-all help
+.PHONY: run editor test-face test-connection test-history test-gathering test-fauna test-portals test-menu test-achievements test-panels test-walk test-social test-trading test-placed test-pending test-magic test-minimap test-story test-cuneiform test-life-ordinal test-tablet test-about test-quest-indicator test-disk-cover test-story-live test-world-view test-characters test-environment test-day-night test-sky-ships test-loading-bar test-asset-packs test-controls test-photo test-uruk-aerial test-uruk-look build build-arm64 build-windows build-macos build-web serve-web build-all help
 
 run:
 	"$(GODOT)" --path "$(CURDIR)" $(GODOT_ARGS)
@@ -130,6 +130,9 @@ test-character-panel:
 test-loading-bar:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/loading_bar.gd
 
+test-asset-packs:
+	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/asset_packs.gd
+
 test-day-night:
 	"$(GODOT)" --headless --path "$(CURDIR)" --max-fps 60 --script res://tests/day_night.gd
 
@@ -170,6 +173,7 @@ build-macos:
 build-web:
 	mkdir -p "$(CURDIR)/build/web"
 	"$(GODOT)" --headless --path "$(CURDIR)" --export-release Web "$(CURDIR)/build/web/index.html"
+	GODOT="$(GODOT)" "$(CURDIR)/tools/web-packs.sh"
 
 ## Serves build/web on http://127.0.0.1:8060/ for a test (the game server's address goes in ?server=).
 serve-web: build-web

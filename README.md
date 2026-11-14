@@ -96,8 +96,15 @@ itself sends no CORS headers). A page served over https can only reach servers o
 Debian package `ishtaria-client-web` carries the files (`/usr/share/ishtaria-client-web/html`,
 built when `debian/rules` finds the template), and the portal `ishtaria-web` publishes them as
 `/play/`. The look of the terrain differs a little from the desktop build (Compatibility instead of
-Forward+), and the data is large (about the size of the desktop client), so the first load takes a
-while.
+Forward+).
+
+The data is large, so the browser build is loaded in stages. The page starts from a small `index.pck` (code, interface,
+characters); the 0 A.D. art (`zeroad.pck`, about half of the data) is downloaded in the background by
+`scripts/asset_packs.gd` while the player types the server address or signs in, kept in the browser's storage under a
+name with its SHA-256 (the next visit downloads nothing, a new build replaces it) and mounted at run time. A connection asked for
+earlier waits for it and shows the progress in the connection window. `tools/web-packs.sh` (run by `make build-web` and
+`debian/rules`) builds `zeroad.pck` with the preset "Web zeroad" and writes `asset-packs.json`; both must be served next to
+`index.html`. `make test-asset-packs` checks the manifest rules. Desktop builds carry all art in one package and fetch nothing.
 
 These builds are **not code-signed or notarized**, and they are not tested by the
 project: Windows SmartScreen and macOS Gatekeeper will warn (on macOS, right-click →
